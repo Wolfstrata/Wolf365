@@ -243,15 +243,15 @@ async function fetchJsonList(
   // Diagnostic (no customer PII): record how many records we parsed and the
   // JSON envelope keys, so an empty result can be distinguished from a parser
   // miss in the admin Debug Logs.
-  const topKeys = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? Object.keys(parsed as Record<string, unknown>)
-    : Array.isArray(parsed) ? ["<root array>"] : [];
-  const dataKeys =
-    parsed && typeof parsed === "object" && "data" in (parsed as object) &&
-    (parsed as Record<string, unknown>).data &&
-    typeof (parsed as Record<string, unknown>).data === "object"
-      ? Object.keys((parsed as Record<string, Record<string, unknown>>).data)
+  const isObj = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === "object" && !Array.isArray(v);
+  const topKeys = Array.isArray(parsed)
+    ? ["<root array>"]
+    : isObj(parsed)
+      ? Object.keys(parsed)
       : [];
+  const dataKeys =
+    isObj(parsed) && isObj(parsed.data) ? Object.keys(parsed.data) : [];
   await writeDebugLog({
     type: "TD_SYNNEX_STELLR",
     connectorId: ctx.connectorId,
