@@ -20,15 +20,21 @@ export default async function SignInPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-muted px-4">
-      <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Wolf365</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Microsoft 365 billing reconciliation for MSPs
-          </p>
-        </div>
+    <main className="flex min-h-screen flex-col items-center justify-center gap-10 bg-muted px-4 py-12">
+      {/* Large brand hero — takes up most of the screen */}
+      <div className="flex flex-col items-center text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/Wolf365 Logo.png"
+          alt="Wolf365"
+          className="h-auto w-full max-w-2xl object-contain"
+        />
+        <p className="mt-4 text-base text-muted-foreground">
+          Microsoft 365 billing reconciliation for MSPs
+        </p>
+      </div>
 
+      <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-sm">
         {sso ? (
           <form action={doSignIn}>
             <button
