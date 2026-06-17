@@ -2,7 +2,7 @@ import type { Connector, ConnectorType, Prisma } from "@prisma/client";
 import { ConnectorHealth, SyncStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson } from "@/lib/crypto";
-import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
+import { getEnvConfig, getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { safeErrorMessage } from "@/lib/redact";
 import { getConnectorDefinition } from "@/connectors/registry";
 import type {
@@ -25,8 +25,9 @@ export async function buildContext(
   const stored: Record<string, unknown> = connector.secretsEnc
     ? decryptJson(connector.secretsEnc)
     : {};
-  const config = (connector.config as Record<string, unknown>) ?? {};
-  // Resolve the secrets for the active environment (Sandbox/Production).
+  // Flatten the active environment's config (base URL, paths, ...) and resolve
+  // that environment's secrets.
+  const config = getEnvConfig((connector.config as Record<string, unknown>) ?? {});
   const secrets = getEnvSecrets(stored, config);
 
   return {

@@ -42,7 +42,7 @@ export default async function AppLayout({
           <img
             src="/Wolf365 Logo.png"
             alt="Wolf365 logo"
-            className="h-auto w-full object-contain"
+            className="h-auto w-3/4 object-contain"
           />
         </div>
 

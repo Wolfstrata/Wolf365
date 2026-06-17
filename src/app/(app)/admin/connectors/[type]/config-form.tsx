@@ -26,15 +26,15 @@ function ResultBanner({ result }: { result: ActionResult | null }) {
     <p
       className={cn(
         "rounded-md px-3 py-2 text-sm",
-        result.ok
-          ? "bg-success/10 text-success"
-          : "bg-danger/10 text-danger",
+        result.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger",
       )}
     >
       {result.message}
     </p>
   );
 }
+
+const str = (v: unknown): string => (v == null ? "" : String(v));
 
 export function ConnectorConfigForm({
   view,
@@ -49,62 +49,85 @@ export function ConnectorConfigForm({
   const [testState, test, testing] = useActionState(testAction, null);
   const [syncState, sync, syncing] = useActionState(syncAction, null);
 
-  const hasEnvironment = view.configFields.some((f) => f.key === "environment");
-  const savedEnv = (view.configValues.environment as string) ?? "";
-  // Track the selected environment so the banner updates as the user changes it.
-  const [selectedEnv, setSelectedEnv] = useState(savedEnv);
-  const envChanged = hasEnvironment && selectedEnv !== savedEnv;
+  const envField = view.configFields.find((f) => f.key === "environment");
+  const otherFields = view.configFields.filter((f) => f.key !== "environment");
+
+  // Active environment toggle. Switching it repopulates the (non-secret) fields
+  // from that environment's saved config and updates the secret-status labels.
+  const [env, setEnv] = useState(view.activeEnv);
+
+  // Controlled values for non-secret config fields, seeded from the active env.
+  const seed = (e: string): Record<string, string> => {
+    const cfg = view.envScoped ? (view.envConfig[e] ?? {}) : view.configValues;
+    const out: Record<string, string> = {};
+    for (const f of otherFields) out[f.key] = str(cfg[f.key]);
+    return out;
+  };
+  const [values, setValues] = useState<Record<string, string>>(seed(view.activeEnv));
+
+  const secretsSetForEnv = view.envScoped
+    ? (view.envSecretsSet[env] ?? {})
+    : view.secretsSet;
+
+  function switchEnv(next: string) {
+    setEnv(next);
+    setValues(seed(next)); // autopopulate this environment's saved fields
+  }
+
+  function setField(key: string, v: string) {
+    setValues((prev) => ({ ...prev, [key]: v }));
+  }
 
   return (
     <div className="space-y-6">
-      {/* Configuration form */}
       <form action={save} className="space-y-5 rounded-lg border bg-card p-6">
         <input type="hidden" name="type" value={view.type} />
 
-        {hasEnvironment && (
-          <div className="rounded-md border bg-muted/50 p-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Editing environment:</span>
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                  selectedEnv === "production"
-                    ? "bg-danger/15 text-danger"
-                    : selectedEnv === "sandbox"
-                      ? "bg-warning/15 text-warning"
-                      : "bg-muted text-muted-foreground",
-                )}
-              >
-                {selectedEnv ? selectedEnv.toUpperCase() : "NOT SELECTED"}
-              </span>
+        {/* Environment toggle */}
+        {envField && (
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Environment</label>
+            <input type="hidden" name="config.environment" value={env} />
+            <div className="inline-flex rounded-md border p-0.5">
+              {envField.options?.map((o) => {
+                const active = env === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={!canConfigure}
+                    onClick={() => switchEnv(o.value)}
+                    className={cn(
+                      "rounded px-4 py-1.5 text-sm font-medium capitalize transition",
+                      active
+                        ? o.value === "production"
+                          ? "bg-danger text-white"
+                          : "bg-warning text-white"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {o.value}
+                  </button>
+                );
+              })}
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              Sandbox and Production each keep their <strong>own</strong>{" "}
-              credentials and connection. Switching the environment shows that
-              environment&apos;s saved credentials — you don&apos;t lose the other.
+              Each environment keeps its own settings and credentials. Switching
+              the toggle loads that environment&apos;s saved values automatically.
+              {envField.helpText ? ` ${envField.helpText}` : ""}
             </p>
-            {envChanged && (
-              <p className="mt-1.5 text-xs text-warning">
-                You changed the environment to{" "}
-                <strong>{selectedEnv || "—"}</strong>. Click{" "}
-                <strong>Save configuration</strong> to load/edit its credentials.
-              </p>
-            )}
           </div>
         )}
 
-        {view.configFields.map((f) => (
+        {/* Non-secret config fields (controlled, so the toggle can repopulate) */}
+        {otherFields.map((f) => (
           <Field key={f.key} label={f.label} required={f.required} help={f.helpText}>
             {f.type === "select" ? (
               <select
                 name={`config.${f.key}`}
-                defaultValue={(view.configValues[f.key] as string) ?? ""}
+                value={values[f.key] ?? ""}
                 disabled={!canConfigure}
-                onChange={
-                  f.key === "environment"
-                    ? (e) => setSelectedEnv(e.target.value)
-                    : undefined
-                }
+                onChange={(e) => setField(f.key, e.target.value)}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
               >
                 <option value="">Select…</option>
@@ -117,35 +140,35 @@ export function ConnectorConfigForm({
             ) : f.type === "textarea" ? (
               <textarea
                 name={`config.${f.key}`}
-                defaultValue={(view.configValues[f.key] as string) ?? ""}
+                value={values[f.key] ?? ""}
                 disabled={!canConfigure}
                 placeholder={f.placeholder}
                 rows={3}
+                onChange={(e) => setField(f.key, e.target.value)}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
               />
             ) : (
               <input
                 type="text"
                 name={`config.${f.key}`}
-                defaultValue={(view.configValues[f.key] as string) ?? ""}
+                value={values[f.key] ?? ""}
                 disabled={!canConfigure}
                 placeholder={f.placeholder}
+                onChange={(e) => setField(f.key, e.target.value)}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
               />
             )}
           </Field>
         ))}
 
+        {/* Secret fields — write-only; show saved status for the active env */}
         {view.secretFields.map((f) => {
-          const stored = view.secretsSet[f.key];
-          const envSuffix =
-            hasEnvironment && savedEnv ? ` for ${savedEnv.toUpperCase()}` : "";
+          const stored = secretsSetForEnv[f.key];
+          const envSuffix = view.envScoped ? ` for ${env.toUpperCase()}` : "";
           return (
             <Field
-              key={f.key}
-              label={
-                stored ? `${f.label} — saved ✓${envSuffix}` : f.label
-              }
+              key={`${env}-${f.key}`}
+              label={stored ? `${f.label} — saved ✓${envSuffix}` : f.label}
               required={f.required && !stored}
               help={f.helpText}
             >
@@ -182,7 +205,8 @@ export function ConnectorConfigForm({
       <div className="rounded-lg border bg-card p-6">
         <h3 className="text-sm font-semibold">Operations</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Test Connection and Sync Now perform real calls against the live API.
+          Test Connection and Sync Now perform real calls against the live API
+          for the saved environment.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {canConfigure && (
@@ -212,11 +236,7 @@ export function ConnectorConfigForm({
           {canConfigure && (
             <form action={toggleAction}>
               <input type="hidden" name="type" value={view.type} />
-              <input
-                type="hidden"
-                name="enabled"
-                value={(!view.enabled).toString()}
-              />
+              <input type="hidden" name="enabled" value={(!view.enabled).toString()} />
               <button
                 type="submit"
                 className="rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent"

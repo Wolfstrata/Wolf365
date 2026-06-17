@@ -30,6 +30,42 @@ function activeEnv(config: Bag): string {
   return String(config.environment);
 }
 
+// --- Per-environment NON-SECRET config (base URL, token URL, paths, region) --
+//
+// Stored shape for env-scoped connectors:
+//   { environment: "sandbox", __env: { sandbox: {...}, production: {...} } }
+// The `environment` selector stays at the top level; everything else is keyed
+// by environment so each environment remembers its own settings.
+
+/** Effective flat config for the active environment ({ environment, ...fields }). */
+export function getEnvConfig(stored: Bag): Bag {
+  if (!isEnvScoped(stored)) return stored;
+  const env = activeEnv(stored);
+  const map = stored[ENV_KEY];
+  if (map && typeof map === "object") {
+    const fields = ((map as Record<string, Bag>)[env] as Bag) ?? {};
+    return { environment: env, ...fields };
+  }
+  // Legacy flat config: all fields (except environment) belong to this env.
+  const { [ENV_KEY]: _omit, environment: _e, ...rest } = stored;
+  return { environment: env, ...rest };
+}
+
+/** Write the active environment's non-secret config fields, preserving others. */
+export function setEnvConfig(stored: Bag, env: string, fields: Bag): Bag {
+  let map: Record<string, Bag> = {};
+  const existing = stored[ENV_KEY];
+  if (existing && typeof existing === "object") {
+    map = { ...(existing as Record<string, Bag>) };
+  } else {
+    // Migrate legacy flat config into the environment it was last used as.
+    const { [ENV_KEY]: _omit, environment: prevEnv, ...rest } = stored;
+    if (Object.keys(rest).length > 0) map[String(prevEnv ?? env)] = rest;
+  }
+  map[env] = fields;
+  return { environment: env, [ENV_KEY]: map };
+}
+
 /** Read the flat secret bag for the connector's active environment. */
 export function getEnvSecrets(stored: Bag, config: Bag): Bag {
   if (!isEnvScoped(config)) return stored;
