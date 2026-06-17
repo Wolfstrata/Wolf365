@@ -31,6 +31,16 @@ export default async function DashboardPage() {
         description="Microsoft 365 billing reconciliation workspace"
       />
       <div className="p-8">
+        {/* Brand hero */}
+        <div className="flex items-center justify-center py-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/Wolf365 Logo.png"
+            alt="Wolf365"
+            className="h-auto w-full max-w-3xl object-contain"
+          />
+        </div>
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {stats.map((s) => (
             <Card key={s.label}>
