@@ -169,16 +169,32 @@ export const tdSynnexConnector: ConnectorDefinition<
 
     // Subscriptions are optional; only sync if the path is configured.
     let subCount = 0;
-    if (ctx.config.subscriptionsPath) {
-      const subs = await fetchJsonList(
-        ctx,
-        ctx.config.subscriptionsPath,
-        "sync_subscriptions",
-      );
-      for (const raw of subs) {
-        const ok = await upsertTdSubscription(raw);
-        if (ok) subCount += 1;
-        else skipped += 1;
+    const subsPath = ctx.config.subscriptionsPath;
+    if (subsPath) {
+      const perCustomer = /\{customerNo\}|\{customerId\}/.test(subsPath);
+      if (perCustomer) {
+        // The subscriptions endpoint is per-customer (…/customers/{customerNo}
+        // /subscriptions). Loop over synced customers, substituting the id.
+        const stored = await prisma.tdSynnexCustomer.findMany();
+        for (const cust of stored) {
+          const path = subsPath.replace(
+            /\{customerNo\}|\{customerId\}/g,
+            encodeURIComponent(cust.stellrId),
+          );
+          const subs = await fetchJsonList(ctx, path, "sync_subscriptions");
+          for (const raw of subs) {
+            const ok = await upsertTdSubscription(raw, cust.id);
+            if (ok) subCount += 1;
+            else skipped += 1;
+          }
+        }
+      } else {
+        const subs = await fetchJsonList(ctx, subsPath, "sync_subscriptions");
+        for (const raw of subs) {
+          const ok = await upsertTdSubscription(raw);
+          if (ok) subCount += 1;
+          else skipped += 1;
+        }
       }
     }
 
@@ -314,14 +330,29 @@ async function upsertTdCustomer(
   return "created";
 }
 
-async function upsertTdSubscription(raw: Record<string, unknown>): Promise<boolean> {
-  const stellrSubscriptionId = pick(raw, ["id", "subscriptionId", "agreementId"]);
-  const customerStellrId = pick(raw, ["customerId", "accountId", "customer"]);
-  if (!stellrSubscriptionId || !customerStellrId) return false;
+async function upsertTdSubscription(
+  raw: Record<string, unknown>,
+  /** Known internal customer id when called per-customer (templated path). */
+  customerInternalId?: string,
+): Promise<boolean> {
+  const stellrSubscriptionId = pick(raw, [
+    "id",
+    "subscriptionId",
+    "agreementId",
+    "vendorSubscriptionId",
+  ]);
+  if (!stellrSubscriptionId) return false;
 
-  const customer = await prisma.tdSynnexCustomer.findUnique({
-    where: { stellrId: customerStellrId },
-  });
+  let customer: { id: string } | null = null;
+  if (customerInternalId) {
+    customer = { id: customerInternalId };
+  } else {
+    const customerStellrId = pick(raw, ["customerId", "accountId", "customer", "customerNo"]);
+    if (!customerStellrId) return false;
+    customer = await prisma.tdSynnexCustomer.findUnique({
+      where: { stellrId: customerStellrId },
+    });
+  }
   if (!customer) return false; // customer must be synced first
 
   const data = {
