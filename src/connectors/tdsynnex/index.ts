@@ -242,8 +242,19 @@ async function fetchJsonList(
 function extractArray(parsed: unknown): Record<string, unknown>[] {
   if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
   const obj = (parsed ?? {}) as Record<string, unknown>;
-  // Known wrapper keys first (incl. Spring-style `content`).
+
+  // TD SYNNEX Stellr paginated shape: { requestId, data: { total, records: [] } }.
+  // Handle the `data.<array>` envelope explicitly before anything else.
+  if (obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)) {
+    const inner = obj.data as Record<string, unknown>;
+    for (const key of ["records", "content", "items", "results", "list", "customers", "subscriptions"]) {
+      if (Array.isArray(inner[key])) return inner[key] as Record<string, unknown>[];
+    }
+  }
+
+  // Known top-level wrapper keys (incl. Spring-style `content`).
   for (const key of [
+    "records",
     "content",
     "items",
     "data",
@@ -305,7 +316,7 @@ function pickNumber(obj: Record<string, unknown>, keys: string[]): number | null
 async function upsertTdCustomer(
   raw: Record<string, unknown>,
 ): Promise<"created" | "updated" | "skipped"> {
-  const stellrId = pick(raw, ["id", "customerId", "accountId", "customerNumber"]);
+  const stellrId = pick(raw, ["customerNo", "customerNumber", "id", "customerId", "accountId"]);
   if (!stellrId) return "skipped";
   const name =
     pick(raw, ["name", "companyName", "customerName", "displayName"]) ??
