@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { ConnectorType } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import {
@@ -15,6 +16,24 @@ import { safeErrorMessage } from "@/lib/redact";
 export interface ActionResult {
   ok: boolean;
   message: string;
+  /** The environment the operation ran against (e.g. "sandbox"), if any. */
+  env?: string;
+}
+
+/** Read the connector's currently-saved environment, if it has one. */
+async function savedEnv(type: ConnectorType): Promise<string | undefined> {
+  const row = await prisma.connector.findUnique({
+    where: { type },
+    select: { config: true },
+  });
+  const env = (row?.config as Record<string, unknown> | null)?.environment;
+  return typeof env === "string" && env ? env : undefined;
+}
+
+/** Prefix a message with a capitalized environment label, e.g. "Sandbox: …". */
+function withEnv(message: string, env?: string): string {
+  if (!env) return message;
+  return `${env.charAt(0).toUpperCase()}${env.slice(1)}: ${message}`;
 }
 
 const CONNECTOR_TYPES: ConnectorType[] = [
@@ -73,13 +92,14 @@ export async function testConnectionAction(
   formData: FormData,
 ): Promise<ActionResult> {
   await requirePermission("connectors:configure");
+  const type = parseType(formData.get("type"));
+  const env = await savedEnv(type);
   try {
-    const type = parseType(formData.get("type"));
     const result = await runTestConnection(type);
     revalidatePath(`/admin/connectors/${type}`);
-    return { ok: result.ok, message: result.message };
+    return { ok: result.ok, message: withEnv(result.message, env), env };
   } catch (err) {
-    return { ok: false, message: safeErrorMessage(err) };
+    return { ok: false, message: withEnv(safeErrorMessage(err), env), env };
   }
 }
 
@@ -89,8 +109,9 @@ export async function syncNowAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const user = await requirePermission("connectors:sync");
+  const type = parseType(formData.get("type"));
+  const env = await savedEnv(type);
   try {
-    const type = parseType(formData.get("type"));
     const result = await runSync(type, "manual", user.id);
     await audit({
       action: "SYNC_RUN",
@@ -106,10 +127,14 @@ export async function syncNowAction(
     revalidatePath(`/admin/connectors/${type}`);
     return {
       ok: true,
-      message: `Sync complete: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped.`,
+      env,
+      message: withEnv(
+        `Sync complete: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped.`,
+        env,
+      ),
     };
   } catch (err) {
-    return { ok: false, message: safeErrorMessage(err) };
+    return { ok: false, message: withEnv(safeErrorMessage(err), env), env };
   }
 }
 

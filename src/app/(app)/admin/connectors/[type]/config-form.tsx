@@ -247,8 +247,15 @@ export function ConnectorConfigForm({
           )}
         </div>
         <div className="mt-4 space-y-2">
-          <ResultBanner result={testState} />
-          <ResultBanner result={syncState} />
+          {/* Hide a result that belongs to a different environment than the one
+              currently selected, so toggling Sandbox/Production clears stale
+              messages. */}
+          {testState && (!testState.env || testState.env === env) && (
+            <ResultBanner result={testState} />
+          )}
+          {syncState && (!syncState.env || syncState.env === env) && (
+            <ResultBanner result={syncState} />
+          )}
         </div>
       </div>
     </div>
