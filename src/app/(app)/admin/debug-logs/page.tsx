@@ -35,6 +35,7 @@ export default async function DebugLogsPage() {
                 <tr>
                   <th className="px-3 py-2 font-medium">Time</th>
                   <th className="px-3 py-2 font-medium">Connector</th>
+                  <th className="px-3 py-2 font-medium">Environment</th>
                   <th className="px-3 py-2 font-medium">Action</th>
                   <th className="px-3 py-2 font-medium">Endpoint</th>
                   <th className="px-3 py-2 font-medium">Status</th>
@@ -49,6 +50,21 @@ export default async function DebugLogsPage() {
                       {formatDateTime(l.createdAt)}
                     </td>
                     <td className="px-3 py-2">{l.type.replaceAll("_", " ")}</td>
+                    <td className="px-3 py-2">
+                      {l.environment ? (
+                        <span
+                          className={
+                            l.environment === "production"
+                              ? "font-medium text-danger"
+                              : "text-warning"
+                          }
+                        >
+                          {l.environment}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="px-3 py-2">{l.action}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                       {l.endpoint ?? "—"}

@@ -1,6 +1,6 @@
 import type { ConnectorType } from "@prisma/client";
 import { writeDebugLog } from "@/lib/debug-log";
-import { safeEndpoint } from "@/lib/redact";
+import { safeUrl } from "@/lib/redact";
 
 /**
  * Shared HTTP client for connectors.
@@ -86,7 +86,7 @@ export async function connectorFetch(
         connectorId: opts.connectorId,
         environment: opts.environment,
         action: opts.action,
-        endpoint: safeEndpoint(url),
+        endpoint: safeUrl(url),
         httpMethod: method,
         httpStatus: res.status,
         durationMs,
@@ -117,7 +117,7 @@ export async function connectorFetch(
         connectorId: opts.connectorId,
         environment: opts.environment,
         action: opts.action,
-        endpoint: safeEndpoint(url),
+        endpoint: safeUrl(url),
         httpMethod: method,
         durationMs: Date.now() - attemptStart,
         retryAttempts: attempt - 1,
@@ -130,7 +130,7 @@ export async function connectorFetch(
   }
 
   throw new ConnectorHttpError(
-    `Request to ${safeEndpoint(url)} failed after ${maxAttempts} attempt(s)`,
+    `Request to ${safeUrl(url)} failed after ${maxAttempts} attempt(s)`,
     { cause: lastError },
   );
 }

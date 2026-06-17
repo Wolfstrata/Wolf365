@@ -25,6 +25,20 @@ export function safeEndpoint(urlOrPath: string): string {
 }
 
 /**
+ * Like {@link safeEndpoint} but keeps the scheme + host so the target
+ * environment is visible in debug logs (e.g. api.ca vs api-uat.ca). The query
+ * string is still stripped. The host is not secret.
+ */
+export function safeUrl(urlOrPath: string): string {
+  try {
+    const u = new URL(urlOrPath);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return urlOrPath.split("?")[0]!.split("#")[0]!;
+  }
+}
+
+/**
  * Recursively redact sensitive keys from an arbitrary object so it is safe to
  * persist in a debug log. Returns a new object; does not mutate the input.
  */

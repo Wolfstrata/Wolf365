@@ -254,15 +254,29 @@ async function fetchJsonList(
       : [];
   const dataKeys =
     isObj(parsed) && isObj(parsed.data) ? Object.keys(parsed.data) : [];
+  const total =
+    isObj(parsed) && isObj(parsed.data) && typeof parsed.data.total === "number"
+      ? parsed.data.total
+      : undefined;
+  const env = ctx.config.environment ?? ctx.config.region ?? "unknown";
+  let host = "?";
+  try {
+    host = new URL(base).host;
+  } catch {
+    /* base not a full URL */
+  }
+  // Host makes the target environment unambiguous (api.ca vs api-uat.ca).
   await writeDebugLog({
     type: "TD_SYNNEX_STELLR",
     connectorId: ctx.connectorId,
-    environment: ctx.config.environment ?? ctx.config.region ?? null,
+    environment: env,
     action: `${action}_parsed`,
+    endpoint: host,
     httpStatus: res.status,
+    recordsRequested: total,
     recordsReturned: arr.length,
     outcome: "success",
-    error: `parsed ${arr.length} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
+    error: `env=${env}; host=${host}; parsed ${arr.length}${total != null ? `/${total}` : ""} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
   });
 
   return arr;
