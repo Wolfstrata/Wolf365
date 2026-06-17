@@ -56,6 +56,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
         if (session.user) {
           session.user.id = user.id;
           session.user.role = (user as { role?: Role }).role ?? "AUDITOR";
+          session.user.timezone =
+            (user as { timezone?: string | null }).timezone ?? null;
         }
         return session;
       },

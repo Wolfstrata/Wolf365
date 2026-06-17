@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/utils";
 
 /** Append-only audit log of security-relevant actions. */
 export default async function AuditPage() {
-  await requirePermission("audit:read");
+  const user = await requirePermission("audit:read");
   const logs = await prisma.auditLog.findMany({
     orderBy: { createdAt: "desc" },
     take: 500,
@@ -40,7 +40,7 @@ export default async function AuditPage() {
                 {logs.map((l) => (
                   <tr key={l.id} className="border-t">
                     <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
-                      {formatDateTime(l.createdAt)}
+                      {formatDateTime(l.createdAt, user.timezone)}
                     </td>
                     <td className="px-4 py-2 font-medium">
                       {l.action.replaceAll("_", " ")}

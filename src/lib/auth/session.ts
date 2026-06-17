@@ -9,6 +9,7 @@ export interface CurrentUser {
   name: string | null;
   role: Role;
   image: string | null;
+  timezone: string | null;
 }
 
 /** Return the current user, or null if not signed in. */
@@ -21,6 +22,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     name: session.user.name ?? null,
     role: session.user.role,
     image: session.user.image ?? null,
+    timezone: session.user.timezone ?? null,
   };
 }
 

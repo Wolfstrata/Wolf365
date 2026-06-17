@@ -13,6 +13,7 @@ import {
   Bug,
   ScrollText,
   ShieldCheck,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,9 +30,15 @@ const ICONS: Record<string, LucideIcon> = {
   Bug,
   ScrollText,
   ShieldCheck,
+  Settings,
 };
 
-const SECTION_ORDER = ["Workspace", "Reconciliation", "Administration"] as const;
+const SECTION_ORDER = [
+  "Workspace",
+  "Reconciliation",
+  "Administration",
+  "Account",
+] as const;
 
 /**
  * Tall vertical left navigation. Receives only the items the current user is

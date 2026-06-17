@@ -19,12 +19,31 @@ export function formatCurrency(
   );
 }
 
-/** Relative-ish timestamp formatting for "last sync" labels. */
-export function formatDateTime(value: Date | string | null | undefined): string {
+/**
+ * Timestamp formatting for "last sync"/log labels. Pass an IANA `timeZone`
+ * (e.g. "America/Toronto") to render in the user's timezone; defaults to UTC so
+ * server-rendered times are unambiguous when no preference is set.
+ */
+export function formatDateTime(
+  value: Date | string | null | undefined,
+  timeZone?: string | null,
+): string {
   if (!value) return "Never";
   const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(d);
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: timeZone || "UTC",
+      timeZoneName: "short",
+    }).format(d);
+  } catch {
+    // Invalid timezone string — fall back to UTC.
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    }).format(d);
+  }
 }

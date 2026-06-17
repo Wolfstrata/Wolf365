@@ -8,7 +8,7 @@ export interface NavItem {
   icon: string;
   permission?: Permission;
   /** Visually grouped under this section heading. */
-  section: "Workspace" | "Reconciliation" | "Administration";
+  section: "Workspace" | "Reconciliation" | "Administration" | "Account";
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -22,4 +22,5 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Debug Logs", href: "/admin/debug-logs", icon: "Bug", section: "Administration", permission: "debuglogs:read" },
   { label: "Audit Log", href: "/admin/audit", icon: "ScrollText", section: "Administration", permission: "audit:read" },
   { label: "Security & SSO", href: "/admin/security", icon: "ShieldCheck", section: "Administration", permission: "sso:configure" },
+  { label: "Settings", href: "/settings", icon: "Settings", section: "Account" },
 ];

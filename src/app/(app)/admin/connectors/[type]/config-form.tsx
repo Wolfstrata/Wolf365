@@ -64,6 +64,9 @@ export function ConnectorConfigForm({
     return out;
   };
   const [values, setValues] = useState<Record<string, string>>(seed(view.activeEnv));
+  // Operations run against the SAVED environment; hide their results when the
+  // user flips the toggle so stale messages don't linger.
+  const [opsVisible, setOpsVisible] = useState(true);
 
   const secretsSetForEnv = view.envScoped
     ? (view.envSecretsSet[env] ?? {})
@@ -72,6 +75,7 @@ export function ConnectorConfigForm({
   function switchEnv(next: string) {
     setEnv(next);
     setValues(seed(next)); // autopopulate this environment's saved fields
+    setOpsVisible(false); // clear any prior Test/Sync result
   }
 
   function setField(key: string, v: string) {
@@ -205,12 +209,25 @@ export function ConnectorConfigForm({
       <div className="rounded-lg border bg-card p-6">
         <h3 className="text-sm font-semibold">Operations</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Test Connection and Sync Now perform real calls against the live API
-          for the saved environment.
+          Test Connection and Sync Now run against the{" "}
+          <strong>saved</strong> environment
+          {view.envScoped && view.activeEnv
+            ? ` (${view.activeEnv.toUpperCase()})`
+            : ""}
+          .
         </p>
+        {view.envScoped && env !== view.activeEnv && (
+          <p className="mt-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
+            You&apos;re viewing <strong>{env.toUpperCase()}</strong> settings, but
+            operations still target the saved environment{" "}
+            <strong>{view.activeEnv.toUpperCase()}</strong>. Switch the toggle and
+            click <strong>Save configuration</strong> to operate on{" "}
+            {env.toUpperCase()}.
+          </p>
+        )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {canConfigure && (
-            <form action={test}>
+            <form action={test} onSubmit={() => setOpsVisible(true)}>
               <input type="hidden" name="type" value={view.type} />
               <button
                 type="submit"
@@ -222,7 +239,7 @@ export function ConnectorConfigForm({
             </form>
           )}
           {canSync && (
-            <form action={sync}>
+            <form action={sync} onSubmit={() => setOpsVisible(true)}>
               <input type="hidden" name="type" value={view.type} />
               <button
                 type="submit"
@@ -247,15 +264,10 @@ export function ConnectorConfigForm({
           )}
         </div>
         <div className="mt-4 space-y-2">
-          {/* Hide a result that belongs to a different environment than the one
-              currently selected, so toggling Sandbox/Production clears stale
-              messages. */}
-          {testState && (!testState.env || testState.env === env) && (
-            <ResultBanner result={testState} />
-          )}
-          {syncState && (!syncState.env || syncState.env === env) && (
-            <ResultBanner result={syncState} />
-          )}
+          {/* Results are cleared when the environment toggle changes. The
+              message itself is prefixed with the environment it ran against. */}
+          {opsVisible && <ResultBanner result={testState} />}
+          {opsVisible && <ResultBanner result={syncState} />}
         </div>
       </div>
     </div>

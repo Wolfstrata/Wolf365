@@ -40,6 +40,8 @@ model User {
   // Entra object id / group claims captured at login for traceability.
   entraOid      String?   @unique
   disabled      Boolean   @default(false)
+  // IANA timezone for displaying timestamps (e.g. "America/Toronto"). Null = UTC.
+  timezone      String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

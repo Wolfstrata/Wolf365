@@ -7,10 +7,12 @@ declare module "next-auth" {
     user: {
       id: string;
       role: Role;
+      timezone?: string | null;
     } & DefaultSession["user"];
   }
 
   interface User {
     role?: Role;
+    timezone?: string | null;
   }
 }
