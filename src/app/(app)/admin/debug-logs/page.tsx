@@ -82,7 +82,7 @@ export default async function DebugLogsPage() {
                         {l.outcome}
                       </span>
                       {l.message && (
-                        <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">
+                        <p className="mt-0.5 max-w-md whitespace-pre-wrap break-words text-xs text-muted-foreground">
                           {l.message}
                         </p>
                       )}
