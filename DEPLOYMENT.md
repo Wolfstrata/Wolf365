@@ -140,8 +140,45 @@ to QuickBooks Online**.
 
 ---
 
-## Gotchas
+## Database migrations (automated)
 
+Schema changes ship as Prisma migrations in `prisma/migrations/`. A GitHub
+Action (`.github/workflows/migrate.yml`) applies them to Neon automatically, so
+deployed code never runs against an out-of-date schema.
+
+**One-time setup** — add two repository secrets (GitHub → **Settings → Secrets
+and variables → Actions → New repository secret**):
+
+| Secret | Value |
+|---|---|
+| `DATABASE_URL` | Neon **pooled** connection string |
+| `DIRECT_URL` | Neon **direct** connection string |
+
+**How it runs:**
+- Automatically on every push to `main` that changes anything under `prisma/`.
+- Manually anytime: GitHub → **Actions → Migrate Neon Database → Run workflow**.
+
+**Manual fallback** (no CI) — from the repo folder with the Neon URLs exported:
+
+```powershell
+cd C:\Users\agsde\wolf365
+git pull
+npx prisma migrate deploy
+```
+
+Or, to apply a single change instantly, run the migration's SQL in the Neon
+**SQL Editor**, then record it so history stays consistent:
+
+```powershell
+npx prisma migrate resolve --applied <migration_folder_name>
+```
+
+> If sign-in ever shows "Server error / Configuration", it usually means a
+> migration is pending — run the Action (or `migrate deploy`) to apply it.
+
+---
+
+## Gotchas
 - **Never change `WOLF365_ENCRYPTION_KEY`** after storing connector secrets, or
   you must re-enter them.
 - Keep QBO **Sandbox vs Production** consistent: sandbox keys only work against
