@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { connectorFetch } from "@/connectors/http";
+import { writeDebugLog } from "@/lib/debug-log";
 import type {
   ConnectorContext,
   ConnectorDefinition,
@@ -236,7 +237,33 @@ async function fetchJsonList(
   if (!res.ok) {
     throw new Error(`TD SYNNEX ${action} failed (HTTP ${res.status}). Verify the resource path.`);
   }
-  return extractArray(JSON.parse(res.body));
+  const parsed = JSON.parse(res.body) as unknown;
+  const arr = extractArray(parsed);
+
+  // Diagnostic (no customer PII): record how many records we parsed and the
+  // JSON envelope keys, so an empty result can be distinguished from a parser
+  // miss in the admin Debug Logs.
+  const topKeys = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? Object.keys(parsed as Record<string, unknown>)
+    : Array.isArray(parsed) ? ["<root array>"] : [];
+  const dataKeys =
+    parsed && typeof parsed === "object" && "data" in (parsed as object) &&
+    (parsed as Record<string, unknown>).data &&
+    typeof (parsed as Record<string, unknown>).data === "object"
+      ? Object.keys((parsed as Record<string, Record<string, unknown>>).data)
+      : [];
+  await writeDebugLog({
+    type: "TD_SYNNEX_STELLR",
+    connectorId: ctx.connectorId,
+    environment: ctx.config.environment ?? ctx.config.region ?? null,
+    action: `${action}_parsed`,
+    httpStatus: res.status,
+    recordsReturned: arr.length,
+    outcome: "success",
+    error: `parsed ${arr.length} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
+  });
+
+  return arr;
 }
 
 function extractArray(parsed: unknown): Record<string, unknown>[] {
