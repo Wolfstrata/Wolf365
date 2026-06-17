@@ -2,6 +2,7 @@ import type { Connector, ConnectorType, Prisma } from "@prisma/client";
 import { ConnectorHealth, SyncStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson } from "@/lib/crypto";
+import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { safeErrorMessage } from "@/lib/redact";
 import { getConnectorDefinition } from "@/connectors/registry";
 import type {
@@ -21,10 +22,12 @@ import type {
 export async function buildContext(
   connector: Connector,
 ): Promise<ConnectorContext> {
-  const secrets: Record<string, unknown> = connector.secretsEnc
+  const stored: Record<string, unknown> = connector.secretsEnc
     ? decryptJson(connector.secretsEnc)
     : {};
   const config = (connector.config as Record<string, unknown>) ?? {};
+  // Resolve the secrets for the active environment (Sandbox/Production).
+  const secrets = getEnvSecrets(stored, config);
 
   return {
     connectorId: connector.id,
@@ -32,11 +35,13 @@ export async function buildContext(
     config,
     secrets,
     saveSecrets: async (next) => {
+      const merged = setEnvSecrets(stored, config, next);
       await prisma.connector.update({
         where: { id: connector.id },
-        data: { secretsEnc: encryptJson(next) },
+        data: { secretsEnc: encryptJson(merged) },
       });
       // Keep the in-memory context coherent for the rest of the operation.
+      Object.assign(stored, merged);
       Object.assign(secrets, next);
     },
   };

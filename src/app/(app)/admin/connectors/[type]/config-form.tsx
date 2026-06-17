@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { ConnectorView } from "@/lib/connectors/service";
 import type { ActionResult } from "@/app/(app)/admin/connectors/actions";
 import { cn } from "@/lib/utils";
@@ -49,11 +49,49 @@ export function ConnectorConfigForm({
   const [testState, test, testing] = useActionState(testAction, null);
   const [syncState, sync, syncing] = useActionState(syncAction, null);
 
+  const hasEnvironment = view.configFields.some((f) => f.key === "environment");
+  const savedEnv = (view.configValues.environment as string) ?? "";
+  // Track the selected environment so the banner updates as the user changes it.
+  const [selectedEnv, setSelectedEnv] = useState(savedEnv);
+  const envChanged = hasEnvironment && selectedEnv !== savedEnv;
+
   return (
     <div className="space-y-6">
       {/* Configuration form */}
       <form action={save} className="space-y-5 rounded-lg border bg-card p-6">
         <input type="hidden" name="type" value={view.type} />
+
+        {hasEnvironment && (
+          <div className="rounded-md border bg-muted/50 p-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Editing environment:</span>
+              <span
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                  selectedEnv === "production"
+                    ? "bg-danger/15 text-danger"
+                    : selectedEnv === "sandbox"
+                      ? "bg-warning/15 text-warning"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {selectedEnv ? selectedEnv.toUpperCase() : "NOT SELECTED"}
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Sandbox and Production each keep their <strong>own</strong>{" "}
+              credentials and connection. Switching the environment shows that
+              environment&apos;s saved credentials — you don&apos;t lose the other.
+            </p>
+            {envChanged && (
+              <p className="mt-1.5 text-xs text-warning">
+                You changed the environment to{" "}
+                <strong>{selectedEnv || "—"}</strong>. Click{" "}
+                <strong>Save configuration</strong> to load/edit its credentials.
+              </p>
+            )}
+          </div>
+        )}
 
         {view.configFields.map((f) => (
           <Field key={f.key} label={f.label} required={f.required} help={f.helpText}>
@@ -62,6 +100,11 @@ export function ConnectorConfigForm({
                 name={`config.${f.key}`}
                 defaultValue={(view.configValues[f.key] as string) ?? ""}
                 disabled={!canConfigure}
+                onChange={
+                  f.key === "environment"
+                    ? (e) => setSelectedEnv(e.target.value)
+                    : undefined
+                }
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm"
               >
                 <option value="">Select…</option>
@@ -93,27 +136,34 @@ export function ConnectorConfigForm({
           </Field>
         ))}
 
-        {view.secretFields.map((f) => (
-          <Field
-            key={f.key}
-            label={f.label}
-            required={f.required && !view.secretsSet[f.key]}
-            help={f.helpText}
-          >
-            <input
-              type="password"
-              name={`secret.${f.key}`}
-              autoComplete="new-password"
-              disabled={!canConfigure}
-              placeholder={
-                view.secretsSet[f.key]
-                  ? "•••••••• (stored — leave blank to keep)"
-                  : "Not set"
+        {view.secretFields.map((f) => {
+          const stored = view.secretsSet[f.key];
+          const envSuffix =
+            hasEnvironment && savedEnv ? ` for ${savedEnv.toUpperCase()}` : "";
+          return (
+            <Field
+              key={f.key}
+              label={
+                stored ? `${f.label} — saved ✓${envSuffix}` : f.label
               }
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono"
-            />
-          </Field>
-        ))}
+              required={f.required && !stored}
+              help={f.helpText}
+            >
+              <input
+                type="password"
+                name={`secret.${f.key}`}
+                autoComplete="new-password"
+                disabled={!canConfigure}
+                placeholder={
+                  stored
+                    ? `•••••••• saved${envSuffix} — leave blank to keep`
+                    : `Not set${envSuffix} — enter value`
+                }
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono"
+              />
+            </Field>
+          );
+        })}
 
         <ResultBanner result={saveState} />
 

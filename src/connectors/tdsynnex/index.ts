@@ -39,9 +39,11 @@ export const tdSynnexConnector: ConnectorDefinition<
       required: true,
       secret: false,
       options: [
-        { value: "sandbox", label: "Sandbox" },
-        { value: "production", label: "Production" },
+        { value: "sandbox", label: "Sandbox / UAT — testing (api-uat.*.tdsynnex.com)" },
+        { value: "production", label: "Production — live data (api.*.tdsynnex.com)" },
       ],
+      helpText:
+        "Credentials and tokens are stored SEPARATELY per environment. Use the matching Sandbox or Production client credentials from the Developer Portal.",
     },
     {
       key: "region",

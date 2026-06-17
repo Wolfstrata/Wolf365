@@ -2,6 +2,7 @@ import "server-only";
 import type { Connector, ConnectorType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson } from "@/lib/crypto";
+import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { getConnectorDefinition, listConnectorDefinitions } from "@/connectors/registry";
 import type { ConnectorDefinition } from "@/connectors/types";
 
@@ -51,9 +52,12 @@ function toView(
   def: ConnectorDefinition,
   row: Connector | undefined,
 ): ConnectorView {
-  const secrets: Record<string, unknown> = row?.secretsEnc
+  const stored: Record<string, unknown> = row?.secretsEnc
     ? decryptJson(row.secretsEnc)
     : {};
+  const config = (row?.config as Record<string, unknown>) ?? {};
+  // Report stored status for the ACTIVE environment's credentials.
+  const secrets = getEnvSecrets(stored, config);
   const secretsSet: Record<string, boolean> = {};
   for (const f of def.secretFields) {
     secretsSet[f.key] = Boolean(secrets[f.key]);
@@ -97,27 +101,31 @@ export async function saveConnectorConfig(
     if (v !== undefined) config[f.key] = v.trim();
   }
 
-  const currentSecrets: Record<string, unknown> = existing?.secretsEnc
+  const stored: Record<string, unknown> = existing?.secretsEnc
     ? decryptJson(existing.secretsEnc)
     : {};
+  // Merge submitted secrets into the ACTIVE environment's bag (using the newly
+  // submitted config so switching environment targets the right slot). Blank
+  // inputs are ignored so existing secrets aren't wiped.
+  const activeSecrets = getEnvSecrets(stored, config);
   for (const f of def.secretFields) {
     const v = secretValues[f.key];
-    // Only overwrite when a non-empty value was supplied.
     if (v !== undefined && v.trim() !== "") {
-      currentSecrets[f.key] = v.trim();
+      activeSecrets[f.key] = v.trim();
     }
   }
+  const merged = setEnvSecrets(stored, config, activeSecrets);
 
   await prisma.connector.upsert({
     where: { type },
     create: {
       type,
       config,
-      secretsEnc: encryptJson(currentSecrets),
+      secretsEnc: encryptJson(merged),
     },
     update: {
       config,
-      secretsEnc: encryptJson(currentSecrets),
+      secretsEnc: encryptJson(merged),
     },
   });
 }

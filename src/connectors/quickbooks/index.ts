@@ -64,10 +64,11 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       required: true,
       secret: false,
       options: [
-        { value: "sandbox", label: "Sandbox" },
-        { value: "production", label: "Production" },
+        { value: "sandbox", label: "Sandbox — testing (sandbox-quickbooks.api.intuit.com)" },
+        { value: "production", label: "Production — live invoices (quickbooks.api.intuit.com)" },
       ],
-      helpText: "Use Sandbox until you are ready to push real invoices.",
+      helpText:
+        "Credentials and the QuickBooks connection are stored SEPARATELY per environment. Sandbox needs your Development keys; Production needs Production keys.",
     },
   ],
   secretFields: [

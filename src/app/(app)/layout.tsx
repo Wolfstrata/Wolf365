@@ -42,7 +42,7 @@ export default async function AppLayout({
           <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo.svg"
+              src="/Wolf365 Logo.png"
               alt="Wolf365 logo"
               className="h-full w-full object-contain"
             />

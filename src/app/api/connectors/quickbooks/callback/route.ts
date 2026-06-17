@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { decryptJson, encryptJson, safeEqual } from "@/lib/crypto";
+import { getEnvSecrets, setEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
@@ -49,9 +50,11 @@ export async function GET(request: Request) {
   const connector = await prisma.connector.findUnique({
     where: { type: "QUICKBOOKS_ONLINE" },
   });
-  const secrets: QboSecrets = connector?.secretsEnc
-    ? decryptJson(connector.secretsEnc)
+  const stored: Record<string, unknown> = connector?.secretsEnc
+    ? decryptJson<Record<string, unknown>>(connector.secretsEnc)
     : {};
+  const config = (connector?.config as Record<string, unknown>) ?? {};
+  const secrets = getEnvSecrets(stored, config) as QboSecrets;
   if (!secrets.clientId || !secrets.clientSecret) {
     return redirectToConnector(origin, "missing_client");
   }
@@ -75,14 +78,15 @@ export async function GET(request: Request) {
         Date.now() + tokens.x_refresh_token_expires_in * 1000,
     };
 
+    const merged = setEnvSecrets(stored, config, next as Record<string, unknown>);
     await prisma.connector.upsert({
       where: { type: "QUICKBOOKS_ONLINE" },
       create: {
         type: "QUICKBOOKS_ONLINE",
         config: {},
-        secretsEnc: encryptJson(next),
+        secretsEnc: encryptJson(merged),
       },
-      update: { secretsEnc: encryptJson(next) },
+      update: { secretsEnc: encryptJson(merged) },
     });
 
     await audit({

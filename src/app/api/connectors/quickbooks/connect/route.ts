@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { decryptJson } from "@/lib/crypto";
+import { getEnvSecrets } from "@/lib/connectors/secrets";
 import { requirePermission } from "@/lib/auth/session";
 import {
   QBO_AUTHORIZE_URL,
@@ -25,9 +26,11 @@ export async function GET(request: Request) {
   const connector = await prisma.connector.findUnique({
     where: { type: "QUICKBOOKS_ONLINE" },
   });
-  const secrets: QboSecrets = connector?.secretsEnc
-    ? decryptJson(connector.secretsEnc)
+  const stored: Record<string, unknown> = connector?.secretsEnc
+    ? decryptJson<Record<string, unknown>>(connector.secretsEnc)
     : {};
+  const config = (connector?.config as Record<string, unknown>) ?? {};
+  const secrets = getEnvSecrets(stored, config) as QboSecrets;
   if (!secrets.clientId) {
     return NextResponse.json(
       { error: "Save the QuickBooks OAuth Client ID/Secret before connecting." },
