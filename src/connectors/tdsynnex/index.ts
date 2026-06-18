@@ -259,6 +259,10 @@ async function fetchJsonList(
       ? parsed.data.total
       : undefined;
   const env = ctx.config.environment ?? ctx.config.region ?? "unknown";
+  const requestId =
+    isObj(parsed) && typeof parsed.requestId === "string"
+      ? parsed.requestId
+      : null;
   let host = "?";
   try {
     host = new URL(base).host;
@@ -272,11 +276,12 @@ async function fetchJsonList(
     environment: env,
     action: `${action}_parsed`,
     endpoint: host,
+    correlationId: requestId,
     httpStatus: res.status,
     recordsRequested: total,
     recordsReturned: arr.length,
     outcome: "success",
-    error: `env=${env}; host=${host}; parsed ${arr.length}${total != null ? `/${total}` : ""} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
+    error: `env=${env}; host=${host}; reqId=${requestId ?? "n/a"}; parsed ${arr.length}${total != null ? `/${total}` : ""} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
   });
 
   return arr;
