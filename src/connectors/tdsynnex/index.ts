@@ -256,6 +256,23 @@ function fillPath(
 // A wrong path still surfaces the real HTTP error — we never fabricate records.
 // ---------------------------------------------------------------------------
 
+const PAGE_SIZE = 100; // Stellr max is 200; 100 is a safe default.
+const MAX_PAGES = 1000; // safety cap against pathological loops.
+
+/** Merge pageNo/pageSize into a path that may already contain a query string. */
+function withPaging(path: string, pageNo: number): string {
+  const [p, q = ""] = path.split("?");
+  const sp = new URLSearchParams(q);
+  sp.set("pageNo", String(pageNo));
+  sp.set("pageSize", String(PAGE_SIZE));
+  return `${p}?${sp.toString()}`;
+}
+
+/**
+ * Fetch ALL pages of a Stellr list endpoint. Always sends pageNo/pageSize
+ * (the API returns 0 records without them) and walks pages until the reported
+ * `total` is reached or a short page is returned. Emits one diagnostic log line.
+ */
 async function fetchJsonList(
   ctx: ConnectorContext<StellrConfig, StellrSecrets>,
   path: string,
@@ -265,63 +282,77 @@ async function fetchJsonList(
     ctx.saveSecrets(next),
   );
   const base = ctx.config.apiBaseUrl!.replace(/\/$/, "");
-  const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
-  const res = await connectorFetch(url, {
-    connectorType: "TD_SYNNEX_STELLR",
-    connectorId: ctx.connectorId,
-    environment: ctx.config.environment ?? ctx.config.region ?? null,
-    action,
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  if (!res.ok) {
-    throw new Error(`TD SYNNEX ${action} failed (HTTP ${res.status}). Verify the resource path.`);
-  }
-  const parsed = JSON.parse(res.body) as unknown;
-  const arr = extractArray(parsed);
-
-  // Diagnostic (no customer PII): record how many records we parsed and the
-  // JSON envelope keys, so an empty result can be distinguished from a parser
-  // miss in the admin Debug Logs.
-  const isObj = (v: unknown): v is Record<string, unknown> =>
-    !!v && typeof v === "object" && !Array.isArray(v);
-  const topKeys = Array.isArray(parsed)
-    ? ["<root array>"]
-    : isObj(parsed)
-      ? Object.keys(parsed)
-      : [];
-  const dataKeys =
-    isObj(parsed) && isObj(parsed.data) ? Object.keys(parsed.data) : [];
-  const total =
-    isObj(parsed) && isObj(parsed.data) && typeof parsed.data.total === "number"
-      ? parsed.data.total
-      : undefined;
   const env = ctx.config.environment ?? ctx.config.region ?? "unknown";
-  const requestId =
-    isObj(parsed) && typeof parsed.requestId === "string"
-      ? parsed.requestId
-      : null;
   let host = "?";
   try {
     host = new URL(base).host;
   } catch {
     /* base not a full URL */
   }
-  // Host makes the target environment unambiguous (api.ca vs api-uat.ca).
+
+  const isObj = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === "object" && !Array.isArray(v);
+
+  const all: Record<string, unknown>[] = [];
+  let total: number | undefined;
+  let firstRequestId: string | null = null;
+  let lastTopKeys: string[] = [];
+  let lastDataKeys: string[] = [];
+  let pages = 0;
+
+  for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo += 1) {
+    const rel = withPaging(path.startsWith("/") ? path : `/${path}`, pageNo);
+    const res = await connectorFetch(`${base}${rel}`, {
+      connectorType: "TD_SYNNEX_STELLR",
+      connectorId: ctx.connectorId,
+      environment: env,
+      action,
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `TD SYNNEX ${action} failed (HTTP ${res.status}). Verify the resource path.`,
+      );
+    }
+    const parsed = JSON.parse(res.body) as unknown;
+    const records = extractArray(parsed);
+    pages += 1;
+
+    if (isObj(parsed)) {
+      if (firstRequestId === null && typeof parsed.requestId === "string") {
+        firstRequestId = parsed.requestId;
+      }
+      lastTopKeys = Object.keys(parsed);
+      if (isObj(parsed.data)) {
+        lastDataKeys = Object.keys(parsed.data);
+        if (total === undefined && typeof parsed.data.total === "number") {
+          total = parsed.data.total;
+        }
+      }
+    }
+
+    all.push(...records);
+
+    // Stop on a short/empty page or once we've collected the reported total.
+    if (records.length < PAGE_SIZE) break;
+    if (total !== undefined && all.length >= total) break;
+  }
+
+  // Single diagnostic line summarizing the whole paged pull (no customer PII).
   await writeDebugLog({
     type: "TD_SYNNEX_STELLR",
     connectorId: ctx.connectorId,
     environment: env,
     action: `${action}_parsed`,
     endpoint: host,
-    correlationId: requestId,
-    httpStatus: res.status,
+    correlationId: firstRequestId,
     recordsRequested: total,
-    recordsReturned: arr.length,
+    recordsReturned: all.length,
     outcome: "success",
-    error: `env=${env}; host=${host}; reqId=${requestId ?? "n/a"}; parsed ${arr.length}${total != null ? `/${total}` : ""} record(s); topKeys=[${topKeys.join(",")}]; dataKeys=[${dataKeys.join(",")}]`,
+    error: `env=${env}; host=${host}; reqId=${firstRequestId ?? "n/a"}; pages=${pages}; parsed ${all.length}${total != null ? `/${total}` : ""} record(s); topKeys=[${lastTopKeys.join(",")}]; dataKeys=[${lastDataKeys.join(",")}]`,
   });
 
-  return arr;
+  return all;
 }
 
 function extractArray(parsed: unknown): Record<string, unknown>[] {
