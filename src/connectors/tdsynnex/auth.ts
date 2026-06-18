@@ -29,6 +29,8 @@ export interface StellrConfig {
   tokenUrl?: string;
   /** Optional scope if the tenant's Stellr app requires one. */
   scope?: string;
+  /** Reseller account id used to scope account-specific endpoints. */
+  accountId?: string;
   /** Documented resource paths (admin-supplied from the API reference). */
   customersPath?: string;
   subscriptionsPath?: string;

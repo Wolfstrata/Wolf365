@@ -87,14 +87,24 @@ export const tdSynnexConnector: ConnectorDefinition<
       secret: false,
     },
     {
+      key: "accountId",
+      label: "Reseller Account ID",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "1230703",
+      helpText:
+        "Your reseller account id. Used to fill {accountId} in account-scoped paths.",
+    },
+    {
       key: "customersPath",
       label: "Customers resource path (optional)",
       type: "text",
       required: false,
       secret: false,
-      placeholder: "/v1/customers",
+      placeholder: "/api/v3/accounts/{accountId}/customers",
       helpText:
-        "Documented path for listing customers. Required for customer sync.",
+        "Documented path for listing customers (use {accountId} for the account-scoped endpoint). Required for customer sync.",
     },
     {
       key: "subscriptionsPath",
@@ -159,11 +169,22 @@ export const tdSynnexConnector: ConnectorDefinition<
       );
     }
 
+    // Account-scoped endpoints require {accountId}; fail visibly if it's used
+    // but not configured.
+    if (ctx.config.customersPath.includes("{accountId}") && !ctx.config.accountId) {
+      throw new Error(
+        "Customers path uses {accountId} but Reseller Account ID is not configured.",
+      );
+    }
+
     let imported = 0;
     let updated = 0;
     let skipped = 0;
 
-    const customers = await fetchJsonList(ctx, ctx.config.customersPath, "sync_customers");
+    const customersPath = fillPath(ctx.config.customersPath, {
+      accountId: ctx.config.accountId,
+    });
+    const customers = await fetchJsonList(ctx, customersPath, "sync_customers");
     for (const raw of customers) {
       const result = await upsertTdCustomer(raw);
       if (result === "created") imported += 1;
@@ -180,10 +201,11 @@ export const tdSynnexConnector: ConnectorDefinition<
         // /subscriptions). Loop over synced customers, substituting the id.
         const stored = await prisma.tdSynnexCustomer.findMany();
         for (const cust of stored) {
-          const path = subsPath.replace(
-            /\{customerNo\}|\{customerId\}/g,
-            encodeURIComponent(cust.stellrId),
-          );
+          const path = fillPath(subsPath, {
+            accountId: ctx.config.accountId,
+            customerNo: cust.stellrId,
+            customerId: cust.stellrId,
+          });
           const subs = await fetchJsonList(ctx, path, "sync_subscriptions");
           for (const raw of subs) {
             const ok = await upsertTdSubscription(raw, cust.id);
@@ -209,6 +231,21 @@ export const tdSynnexConnector: ConnectorDefinition<
     };
   },
 };
+
+/**
+ * Substitute {token} placeholders in a resource path (e.g. {accountId},
+ * {customerNo}) with URL-encoded values. Unknown placeholders are left intact
+ * so a misconfigured path surfaces a real error rather than a silent blank.
+ */
+function fillPath(
+  path: string,
+  tokens: Record<string, string | null | undefined>,
+): string {
+  return path.replace(/\{(\w+)\}/g, (match, key: string) => {
+    const v = tokens[key];
+    return v != null && v !== "" ? encodeURIComponent(v) : match;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Response parsing + persistence.
