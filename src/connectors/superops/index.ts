@@ -347,6 +347,9 @@ async function upsertSuperOpsInvoice(
     };
   });
 
+  // Totals: prefer explicit fields; otherwise derive from the line amounts.
+  const linesTotal = lines.reduce((a, l) => a + l.amount, 0);
+  const total = pickNum(inv, ["totalAmount", "total", "grandTotal", "amount"]);
   const data = {
     clientId,
     superOpsClientName: clientName,
@@ -357,7 +360,7 @@ async function upsertSuperOpsInvoice(
     currency: pick(inv, ["currency", "currencyCode"]),
     subtotal: pickNum(inv, ["subTotalAmount", "subtotal", "subTotal"]),
     tax: pickNum(inv, ["taxAmount", "tax", "totalTax"]),
-    total: pickNum(inv, ["totalAmount", "total", "grandTotal", "amount"]),
+    total: total ?? (linesTotal > 0 ? linesTotal : null),
     raw: inv as unknown as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),
   };
