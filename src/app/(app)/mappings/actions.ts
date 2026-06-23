@@ -8,12 +8,17 @@ import {
   confirmClientMatch,
   rejectClientMatch,
   setProductMappingStatus,
+  materializeClients,
 } from "@/lib/mapping/service";
 
 export async function autoMatchClientsAction(): Promise<void> {
   const user = await requirePermission("mappings:propose");
+  // Create a Client for every synced customer (merging QBO↔TD by name), then
+  // surface any remaining fuzzy near-matches as proposals for review.
+  await materializeClients({ id: user.id, email: user.email });
   await proposeClientMatches({ id: user.id, email: user.email });
   revalidatePath("/mappings");
+  revalidatePath("/clients");
 }
 
 export async function autoMatchSkusAction(): Promise<void> {

@@ -2,6 +2,76 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { proposeMatches, type Candidate } from "@/lib/matching/similarity";
+import { normalizeName } from "@/lib/reconciliation/discrepancies";
+
+/**
+ * Materialize a Wolf365 Client for every synced source customer, so all
+ * customers are visible/billable — not just exact auto-matches.
+ *
+ * Deterministic: each TD SYNNEX customer becomes a Client (they carry the
+ * subscriptions); each QBO customer links to the TD-derived Client with the
+ * same normalized name (enabling the side-by-side view + invoice push), or
+ * becomes its own Client when there's no name match. Respects the 1:1
+ * client↔source constraints.
+ */
+export async function materializeClients(actor: {
+  id: string;
+  email: string;
+}): Promise<{ created: number; merged: number; clients: number }> {
+  const [tds, qbos] = await Promise.all([
+    prisma.tdSynnexCustomer.findMany({ where: { clientId: null } }),
+    prisma.qboCustomer.findMany({ where: { clientId: null } }),
+  ]);
+
+  let created = 0;
+  let merged = 0;
+  const tdClientByNorm = new Map<string, string>();
+
+  // 1) One Client per TD SYNNEX customer (first occurrence of a name owns it).
+  for (const td of tds) {
+    const client = await prisma.client.create({ data: { name: td.name } });
+    await prisma.tdSynnexCustomer.update({
+      where: { id: td.id },
+      data: { clientId: client.id },
+    });
+    created += 1;
+    const norm = normalizeName(td.name);
+    if (norm && !tdClientByNorm.has(norm)) tdClientByNorm.set(norm, client.id);
+  }
+
+  // 2) Link each QBO customer to the matching TD-derived Client, else create one.
+  const usedClient = new Set<string>();
+  for (const qbo of qbos) {
+    const name = qbo.companyName ?? qbo.displayName;
+    const norm = normalizeName(name);
+    const match = norm ? tdClientByNorm.get(norm) : undefined;
+    if (match && !usedClient.has(match)) {
+      await prisma.qboCustomer.update({
+        where: { id: qbo.id },
+        data: { clientId: match },
+      });
+      usedClient.add(match);
+      merged += 1;
+    } else {
+      const client = await prisma.client.create({ data: { name } });
+      await prisma.qboCustomer.update({
+        where: { id: qbo.id },
+        data: { clientId: client.id },
+      });
+      created += 1;
+    }
+  }
+
+  const clients = await prisma.client.count();
+  await audit({
+    action: "MAPPING_CHANGED",
+    actorId: actor.id,
+    actorEmail: actor.email,
+    target: "clients:materialize",
+    metadata: { created, merged, total: clients },
+  });
+  return { created, merged, clients };
+}
 
 /**
  * AI-assisted mapping service.
