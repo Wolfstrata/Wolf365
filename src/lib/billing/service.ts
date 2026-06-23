@@ -41,6 +41,7 @@ export async function generateAndSaveBillingRun(
     productName: s.productName,
     quantity: s.quantity,
     unitCost: s.unitCost != null ? Number(s.unitCost) : null,
+    customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
     currency: s.currency,
     activeStart: s.startDate,
     activeEnd: s.cancellationWindowEnds,

@@ -54,7 +54,7 @@ describe("generateBillingLines", () => {
     expect(r.exceptions[0]!.type).toBe("UNMAPPED_SKU");
   });
 
-  it("raises MISSING_PRICE when no rule resolves and no cost for markup", () => {
+  it("raises MISSING_PRICE when no rule resolves and no cost/customer price", () => {
     const r = generateBillingLines({
       ...base,
       subscriptions: [{ ...base.subscriptions[0]!, unitCost: null }],
@@ -62,6 +62,19 @@ describe("generateBillingLines", () => {
     });
     expect(r.lines).toHaveLength(0);
     expect(r.exceptions[0]!.type).toBe("MISSING_PRICE");
+  });
+
+  it("falls back to vendor customerPrice when no price rule resolves", () => {
+    const r = generateBillingLines({
+      ...base,
+      subscriptions: [
+        { ...base.subscriptions[0]!, unitCost: null, customerPrice: 29.93 },
+      ],
+      priceRules: [], // no rules at all
+    });
+    expect(r.exceptions).toHaveLength(0);
+    expect(r.lines[0]!.unitPrice).toBe(29.93);
+    expect(r.lines[0]!.subtotal).toBe(299.3); // 10 * 29.93
   });
 
   it("sums line totals across multiple subscriptions", () => {

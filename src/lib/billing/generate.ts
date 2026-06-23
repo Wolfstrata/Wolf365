@@ -23,6 +23,8 @@ export interface SubscriptionInput {
   productName: string | null;
   quantity: number;
   unitCost: number | null;
+  /** Vendor-suggested customer price; used as the unit price when no rule applies. */
+  customerPrice?: number | null;
   currency: string | null;
   /** Subscription activation within/around the period (for proration). */
   activeStart?: Date | null;
@@ -101,10 +103,16 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
       sku: sub.sku,
       baseCost: sub.unitCost,
     });
-    if (price.unitPrice == null) {
+    // Use the resolved rule price; otherwise fall back to the vendor-suggested
+    // customer price so a run produces real numbers before any rules exist.
+    let unitPrice = price.unitPrice;
+    if (unitPrice == null && sub.customerPrice != null) {
+      unitPrice = sub.customerPrice;
+    }
+    if (unitPrice == null) {
       exceptions.push({
         type: "MISSING_PRICE",
-        message: `No price rule resolves a unit price for SKU ${sub.sku}.`,
+        message: `No price rule or vendor price for SKU ${sub.sku}.`,
         sku: sub.sku,
         subscriptionId: sub.id,
       });
@@ -120,7 +128,7 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
 
     const { subtotal, total } = computeLine({
       quantity: sub.quantity,
-      unitPrice: price.unitPrice,
+      unitPrice,
       prorationFactor: proration.factor,
     });
 
@@ -135,7 +143,7 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
       description:
         sub.productName ?? mapping.qboItemName ?? `SKU ${sub.sku}`,
       quantity: sub.quantity,
-      unitPrice: price.unitPrice,
+      unitPrice,
       prorationFactor: proration.factor,
       proratedDays: proration.billedDays,
       periodDays: proration.periodDays,

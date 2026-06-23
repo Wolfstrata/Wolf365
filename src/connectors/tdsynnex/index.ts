@@ -480,15 +480,28 @@ async function upsertTdSubscription(
   }
   if (!customer) return false; // customer must be synced first
 
+  const productName = pick(raw, ["productName", "name", "description"]);
+  const billingFrequency = pick(raw, ["billingFrequency", "billingCycle"]);
   const data = {
     customerId: customer.id,
-    productSku: pick(raw, ["sku", "productSku", "partNumber"]),
-    productName: pick(raw, ["productName", "name", "description"]),
+    // TD SYNNEX SKU identifiers: prefer the Microsoft part number / offer id,
+    // fall back to the numeric TD SYNNEX skuNo.
+    productSku: pick(raw, [
+      "mfgPartNo",
+      "offerId",
+      "skuNo",
+      "sku",
+      "productSku",
+      "partNumber",
+    ]),
+    productName,
     quantity: pickNumber(raw, ["quantity", "seats", "qty"]) ?? 0,
-    unitCost: pickNumber(raw, ["unitCost", "cost", "price", "unitPrice"]),
+    // unitPrice is our reseller cost; customerPrice is the suggested sell price.
+    unitCost: pickNumber(raw, ["unitCost", "cost", "unitPrice", "price"]),
+    customerPrice: pickNumber(raw, ["customerPrice", "sellPrice", "resellerPrice"]),
     currency: pick(raw, ["currency", "currencyCode"]),
-    commitmentTerm: pick(raw, ["commitmentTerm", "term", "billingTerm"]),
-    billingFrequency: pick(raw, ["billingFrequency", "billingCycle"]),
+    commitmentTerm: deriveCommitmentTerm(productName, billingFrequency),
+    billingFrequency,
     startDate: parseDate(raw, ["startDate", "effectiveDate", "createdDate"]),
     renewalDate: parseDate(raw, ["renewalDate", "endDate", "expiryDate"]),
     cancellationWindowEnds: parseDate(raw, ["cancellationWindowEnds", "cancellationDeadline"]),
@@ -538,6 +551,22 @@ function buildAddress(
     postalCode: pick(raw, ["zipCode", "postalCode", "zip"]) ?? "",
     country: pick(raw, ["country", "countryCode"]) ?? "",
   } as Prisma.InputJsonValue;
+}
+
+/** Derive the NCE commitment term from the product name + billing frequency. */
+function deriveCommitmentTerm(
+  productName: string | null,
+  billingFrequency: string | null,
+): string | null {
+  const n = (productName ?? "").toLowerCase();
+  if (n.includes("trienn") || n.includes("3y")) return "triennial";
+  if (n.includes("annual") || /\b1y\b/.test(n) || n.includes("annual commit"))
+    return "annual";
+  if (n.includes("monthly")) return "monthly";
+  if (billingFrequency === "one_time") return "one_time";
+  if (billingFrequency === "month") return "monthly";
+  if (billingFrequency === "annual" || billingFrequency === "year") return "annual";
+  return null;
 }
 
 function parseDate(raw: Record<string, unknown>, keys: string[]): Date | null {

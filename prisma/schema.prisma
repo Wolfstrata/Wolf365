@@ -351,6 +351,8 @@ model TdSynnexSubscription {
   productName        String?
   quantity           Int     @default(0)
   unitCost           Decimal? @db.Decimal(18, 4)
+  // TD SYNNEX suggested price to bill the end customer (vs unitCost = our cost).
+  customerPrice      Decimal? @db.Decimal(18, 4)
   currency           String?
 
   // NCE commitment metadata.
