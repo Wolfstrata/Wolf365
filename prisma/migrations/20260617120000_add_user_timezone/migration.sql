@@ -1,2 +1,2 @@
--- Add per-user timezone preference for displaying timestamps.
-ALTER TABLE "User" ADD COLUMN "timezone" TEXT;
+-- Add per-user timezone preference for displaying timestamps. Idempotent.
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "timezone" TEXT;

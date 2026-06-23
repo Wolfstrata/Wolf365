@@ -1,5 +1,6 @@
--- SuperOps billing pipeline: imported invoices + lines.
-CREATE TABLE "SuperOpsInvoice" (
+-- SuperOps billing pipeline: imported invoices + lines. Idempotent so it can be
+-- safely (re)applied regardless of prior manual changes.
+CREATE TABLE IF NOT EXISTS "SuperOpsInvoice" (
     "id" TEXT NOT NULL,
     "superOpsId" TEXT NOT NULL,
     "clientId" TEXT,
@@ -23,7 +24,7 @@ CREATE TABLE "SuperOpsInvoice" (
     CONSTRAINT "SuperOpsInvoice_pkey" PRIMARY KEY ("id")
 );
 
-CREATE TABLE "SuperOpsInvoiceLine" (
+CREATE TABLE IF NOT EXISTS "SuperOpsInvoiceLine" (
     "id" TEXT NOT NULL,
     "invoiceId" TEXT NOT NULL,
     "description" TEXT NOT NULL,
@@ -35,10 +36,19 @@ CREATE TABLE "SuperOpsInvoiceLine" (
     CONSTRAINT "SuperOpsInvoiceLine_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "SuperOpsInvoice_superOpsId_key" ON "SuperOpsInvoice"("superOpsId");
-CREATE INDEX "SuperOpsInvoice_reviewStatus_idx" ON "SuperOpsInvoice"("reviewStatus");
-CREATE INDEX "SuperOpsInvoice_clientId_idx" ON "SuperOpsInvoice"("clientId");
-CREATE INDEX "SuperOpsInvoiceLine_invoiceId_idx" ON "SuperOpsInvoiceLine"("invoiceId");
+CREATE UNIQUE INDEX IF NOT EXISTS "SuperOpsInvoice_superOpsId_key" ON "SuperOpsInvoice"("superOpsId");
+CREATE INDEX IF NOT EXISTS "SuperOpsInvoice_reviewStatus_idx" ON "SuperOpsInvoice"("reviewStatus");
+CREATE INDEX IF NOT EXISTS "SuperOpsInvoice_clientId_idx" ON "SuperOpsInvoice"("clientId");
+CREATE INDEX IF NOT EXISTS "SuperOpsInvoiceLine_invoiceId_idx" ON "SuperOpsInvoiceLine"("invoiceId");
 
-ALTER TABLE "SuperOpsInvoice" ADD CONSTRAINT "SuperOpsInvoice_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "SuperOpsInvoiceLine" ADD CONSTRAINT "SuperOpsInvoiceLine_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "SuperOpsInvoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SuperOpsInvoice_clientId_fkey') THEN
+    ALTER TABLE "SuperOpsInvoice" ADD CONSTRAINT "SuperOpsInvoice_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SuperOpsInvoiceLine_invoiceId_fkey') THEN
+    ALTER TABLE "SuperOpsInvoiceLine" ADD CONSTRAINT "SuperOpsInvoiceLine_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "SuperOpsInvoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
