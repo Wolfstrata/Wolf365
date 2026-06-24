@@ -4,6 +4,7 @@ import { quickbooksConnector } from "@/connectors/quickbooks";
 import { tdSynnexConnector } from "@/connectors/tdsynnex";
 import { huduConnector } from "@/connectors/hudu";
 import { superOpsConnector } from "@/connectors/superops";
+import { salesforceConnector } from "@/connectors/salesforce";
 
 /**
  * The registry is heterogeneous: each connector keeps its own typed config and
@@ -22,6 +23,7 @@ const REGISTRY: Record<ConnectorType, AnyConnectorDefinition> = {
   QUICKBOOKS_ONLINE: quickbooksConnector,
   HUDU: huduConnector,
   SUPEROPS: superOpsConnector,
+  SALESFORCE: salesforceConnector,
 };
 
 export function getConnectorDefinition(

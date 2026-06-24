@@ -127,6 +127,7 @@ enum ConnectorType {
   QUICKBOOKS_ONLINE
   HUDU
   SUPEROPS
+  SALESFORCE
 }
 
 enum ConnectorHealth {
@@ -761,11 +762,18 @@ model CrmOpportunity {
   nextStep             String?
   description          String?
 
+  // Provenance for imported opportunities (e.g. Salesforce). Null for ones
+  // created manually in Wolf365. The (sourceSystem, externalId) pair is unique
+  // so re-imports upsert instead of duplicating.
+  sourceSystem String?
+  externalId   String?
+
   createdById String?
   createdBy   User?    @relation("OpportunityCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@unique([sourceSystem, externalId])
   @@index([line, stage])
   @@index([ownerId])
   @@index([closeDate])

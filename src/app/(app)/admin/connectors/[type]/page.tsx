@@ -27,6 +27,7 @@ const VALID_TYPES: ConnectorType[] = [
   "QUICKBOOKS_ONLINE",
   "HUDU",
   "SUPEROPS",
+  "SALESFORCE",
 ];
 
 const QBO_STATUS_MESSAGES: Record<string, { ok: boolean; text: string }> = {

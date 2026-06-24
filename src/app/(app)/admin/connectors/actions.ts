@@ -47,6 +47,7 @@ const CONNECTOR_TYPES: ConnectorType[] = [
   "QUICKBOOKS_ONLINE",
   "HUDU",
   "SUPEROPS",
+  "SALESFORCE",
 ];
 
 function parseType(value: FormDataEntryValue | null): ConnectorType {

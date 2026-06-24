@@ -1,0 +1,533 @@
+import { CrmLine, CrmStage, CrmForecastCategory, CrmOpportunityType } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import { connectorFetch } from "@/connectors/http";
+import { writeDebugLog } from "@/lib/debug-log";
+import type {
+  ConnectorContext,
+  ConnectorDefinition,
+  ConnectorSyncResult,
+  ConnectorTestResult,
+} from "@/connectors/types";
+import { CRM_LINES, defaultForecastCategory } from "@/lib/crm/constants";
+import { computeMarginPercentage } from "@/lib/crm/forecast";
+import { totalContractValue, commissionAmount } from "@/lib/crm/pricing";
+import {
+  getSalesforceAuth,
+  type SalesforceConfig,
+  type SalesforceSecrets,
+} from "@/connectors/salesforce/auth";
+
+/**
+ * Salesforce connector — import existing Opportunities into the Wolf365 CRM.
+ *
+ * Auth is OAuth 2.0 client-credentials (see ./auth.ts). The import maps the
+ * STANDARD Opportunity fields confidently; anything Salesforce-org-specific
+ * (which opportunities count as "Managed Services", whether Amount is monthly /
+ * annual / total, the API names of custom Margin & Term fields) is CONFIGURED by
+ * the admin rather than guessed — so we never invent a field that may not exist.
+ */
+export const salesforceConnector: ConnectorDefinition<
+  SalesforceConfig,
+  SalesforceSecrets
+> = {
+  type: "SALESFORCE",
+  displayName: "Salesforce",
+  description:
+    "Import existing CRM opportunities (e.g. Managed Services) from Salesforce into the sales forecast.",
+  configFields: [
+    {
+      key: "loginUrl",
+      label: "My Domain URL",
+      type: "url",
+      required: true,
+      secret: false,
+      placeholder: "https://yourco.my.salesforce.com",
+      helpText:
+        "Your Salesforce My Domain URL. The connector posts a client-credentials token request to its /services/oauth2/token endpoint.",
+    },
+    {
+      key: "apiVersion",
+      label: "API Version",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "60.0",
+      helpText: "Salesforce REST API version (default 60.0).",
+    },
+    {
+      key: "targetLine",
+      label: "Import into CRM line",
+      type: "select",
+      required: true,
+      secret: false,
+      options: [
+        { value: "MANAGED_SERVICES", label: "Managed Services" },
+        { value: "MANAGED_NOC", label: "Managed NOC" },
+        { value: "M365", label: "Microsoft 365" },
+      ],
+      helpText: "Imported opportunities are added to this line of business.",
+    },
+    {
+      key: "soqlFilter",
+      label: "Opportunity filter (SOQL WHERE)",
+      type: "textarea",
+      required: false,
+      secret: false,
+      placeholder: "RecordType.Name = 'Managed Services'",
+      helpText:
+        "Optional SOQL WHERE clause to select which opportunities to import (no 'WHERE' keyword). Leave blank to import all. Example: Type = 'Managed Services' or RecordType.Name = 'Managed Services'.",
+    },
+    {
+      key: "defaultOwnerEmail",
+      label: "Default owner email",
+      type: "text",
+      required: true,
+      secret: false,
+      placeholder: "you@yourco.com",
+      helpText:
+        "Wolf365 user who owns imported opportunities when the Salesforce owner's email doesn't match a Wolf365 user. Must be an existing Wolf365 user.",
+    },
+    {
+      key: "amountField",
+      label: "Amount field",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "Amount",
+      helpText: "Salesforce field to read the deal amount from (default Amount).",
+    },
+    {
+      key: "amountBasis",
+      label: "Amount represents",
+      type: "select",
+      required: false,
+      secret: false,
+      options: [
+        { value: "MONTHLY", label: "Monthly (MRR)" },
+        { value: "ANNUAL", label: "Annual (÷12 for MRR)" },
+        { value: "TOTAL_CONTRACT", label: "Total contract value (÷ months in term)" },
+      ],
+      helpText:
+        "How to interpret the Amount field so we can store the monthly value (MRR). Wolf365 derives TCV from MRR and the term.",
+    },
+    {
+      key: "marginField",
+      label: "Margin field (optional)",
+      type: "text",
+      required: false,
+      secret: false,
+      helpText:
+        "Optional Salesforce field holding the margin amount (interpreted with the same basis as Amount). Left blank, margin is imported empty.",
+    },
+    {
+      key: "termField",
+      label: "Term field (optional, years)",
+      type: "text",
+      required: false,
+      secret: false,
+      helpText:
+        "Optional Salesforce field giving the agreement length in YEARS (1–3). Left blank, the default term below is used.",
+    },
+    {
+      key: "defaultTermYears",
+      label: "Default term",
+      type: "select",
+      required: false,
+      secret: false,
+      options: [
+        { value: "1", label: "1 year" },
+        { value: "2", label: "2 years" },
+        { value: "3", label: "3 years" },
+      ],
+      helpText: "Used when no term field is configured (or it's empty).",
+    },
+  ],
+  secretFields: [
+    {
+      key: "clientId",
+      label: "Consumer Key",
+      type: "password",
+      required: true,
+      secret: true,
+    },
+    {
+      key: "clientSecret",
+      label: "Consumer Secret",
+      type: "password",
+      required: true,
+      secret: true,
+    },
+  ],
+  validateReadiness(config, secrets) {
+    const c = config as SalesforceConfig;
+    const s = secrets as SalesforceSecrets;
+    const missing: string[] = [];
+    if (!c.loginUrl) missing.push("My Domain URL");
+    if (!c.defaultOwnerEmail) missing.push("Default owner email");
+    if (!s.clientId) missing.push("Consumer Key");
+    if (!s.clientSecret) missing.push("Consumer Secret");
+    return missing;
+  },
+
+  async testConnection(ctx): Promise<ConnectorTestResult> {
+    const start = Date.now();
+    const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
+      ctx.saveSecrets(next),
+    );
+    // Real probe: count opportunities matching the configured filter.
+    const where = (ctx.config.soqlFilter ?? "").trim();
+    const soql = `SELECT COUNT() FROM Opportunity${where ? ` WHERE ${where}` : ""}`;
+    const { totalSize } = await runQuery(ctx, auth.instanceUrl, soql, "test_count");
+    return {
+      ok: true,
+      message: `Connected to Salesforce. ${totalSize} matching opportunit${totalSize === 1 ? "y" : "ies"} visible.`,
+      details: { instance: hostOf(auth.instanceUrl), matchingOpportunities: totalSize },
+      durationMs: Date.now() - start,
+    };
+  },
+
+  async sync(ctx): Promise<ConnectorSyncResult> {
+    const line = resolveLine(ctx.config.targetLine);
+    const ownerEmail = (ctx.config.defaultOwnerEmail ?? "").trim().toLowerCase();
+    if (!ownerEmail) {
+      throw new Error("A default owner email must be configured before importing.");
+    }
+    const defaultOwner = await prisma.user.findUnique({ where: { email: ownerEmail } });
+    if (!defaultOwner) {
+      throw new Error(
+        `Default owner "${ownerEmail}" is not a Wolf365 user. Add them (sign-in once) or set a different default owner.`,
+      );
+    }
+
+    // Build an email → Wolf365 user map so we can attribute owners when possible.
+    const users = await prisma.user.findMany({
+      where: { disabled: false },
+      select: { id: true, email: true },
+    });
+    const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
+
+    const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
+      ctx.saveSecrets(next),
+    );
+
+    const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
+    const basis = ctx.config.amountBasis ?? "MONTHLY";
+    const marginField = (ctx.config.marginField ?? "").trim();
+    const termField = (ctx.config.termField ?? "").trim();
+    const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
+    const where = (ctx.config.soqlFilter ?? "").trim();
+
+    // Standard fields + any configured custom fields (deduped).
+    const fields = [
+      "Id",
+      "Name",
+      "Account.Name",
+      "StageName",
+      "Probability",
+      "CloseDate",
+      "Type",
+      "LeadSource",
+      "NextStep",
+      "Description",
+      "ForecastCategoryName",
+      "IsClosed",
+      "IsWon",
+      "Owner.Email",
+      amountField,
+      ...(marginField ? [marginField] : []),
+      ...(termField ? [termField] : []),
+    ];
+    const soql =
+      `SELECT ${[...new Set(fields)].join(", ")} FROM Opportunity` +
+      (where ? ` WHERE ${where}` : "") +
+      ` ORDER BY CloseDate DESC`;
+
+    const records = await runQueryAll(ctx, auth.instanceUrl, soql, "import_opportunities");
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const r of records) {
+      const externalId = getStr(r, "Id");
+      if (!externalId) {
+        skipped += 1;
+        continue;
+      }
+
+      const termYears = termField
+        ? clampTerm(Number(getNum(r, termField) ?? defaultTerm))
+        : defaultTerm;
+
+      const rawAmount = getNum(r, amountField);
+      const monthlyAmount = toMonthly(rawAmount, basis, termYears);
+      const monthlyMargin = marginField
+        ? toMonthly(getNum(r, marginField), basis, termYears)
+        : null;
+
+      const tcv = monthlyAmount != null ? totalContractValue(monthlyAmount, termYears) : null;
+      const tcvMargin =
+        monthlyMargin != null ? totalContractValue(monthlyMargin, termYears) : null;
+      const marginPct = computeMarginPercentage(monthlyAmount ?? 0, monthlyMargin ?? 0);
+      const commission =
+        monthlyAmount != null ? commissionAmount(line, termYears, monthlyAmount) : null;
+
+      const stage = mapStage(r);
+      const ownerId =
+        userByEmail.get((getStr(r, "Owner.Email") ?? "").toLowerCase()) ??
+        defaultOwner.id;
+
+      const data = {
+        line,
+        name: getStr(r, "Name") ?? "(Untitled opportunity)",
+        accountName: getStr(r, "Account.Name") ?? "(No account)",
+        monthlyAmount,
+        monthlyMargin,
+        amount: tcv,
+        marginAmount: tcvMargin,
+        marginPercentage: marginPct,
+        commissionAmount: commission,
+        termYears,
+        billingFrequency: "MONTHLY" as const,
+        stage,
+        probability: clampPct(getNum(r, "Probability"), stage),
+        forecastCategory: mapForecastCategory(getStr(r, "ForecastCategoryName"), stage),
+        closeDate: parseDate(getStr(r, "CloseDate")) ?? new Date(),
+        type: mapType(getStr(r, "Type")),
+        leadSource: getStr(r, "LeadSource"),
+        nextStep: getStr(r, "NextStep"),
+        description: getStr(r, "Description"),
+      };
+
+      const existing = await prisma.crmOpportunity.findUnique({
+        where: { sourceSystem_externalId: { sourceSystem: "salesforce", externalId } },
+        select: { id: true },
+      });
+      if (existing) {
+        await prisma.crmOpportunity.update({ where: { id: existing.id }, data });
+        updated += 1;
+      } else {
+        await prisma.crmOpportunity.create({
+          data: { ...data, sourceSystem: "salesforce", externalId, ownerId },
+        });
+        imported += 1;
+      }
+    }
+
+    return {
+      imported,
+      updated,
+      skipped,
+      summary: { line, fetched: records.length, amountBasis: basis },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Salesforce REST query helpers.
+// ---------------------------------------------------------------------------
+
+interface QueryResponse {
+  totalSize: number;
+  done: boolean;
+  nextRecordsUrl?: string;
+  records: Record<string, unknown>[];
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "?";
+  }
+}
+
+function apiVersion(ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>): string {
+  return (ctx.config.apiVersion ?? "60.0").trim().replace(/^v/i, "") || "60.0";
+}
+
+/** Run a single SOQL query, returning the parsed first page. */
+async function runQuery(
+  ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>,
+  instanceUrl: string,
+  soql: string,
+  action: string,
+): Promise<QueryResponse> {
+  const url = `${instanceUrl.replace(/\/$/, "")}/services/data/v${apiVersion(ctx)}/query/?q=${encodeURIComponent(soql)}`;
+  const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
+    ctx.saveSecrets(next),
+  );
+  const res = await connectorFetch(url, {
+    connectorType: "SALESFORCE",
+    connectorId: ctx.connectorId,
+    action,
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Salesforce query failed (HTTP ${res.status}). Check the filter/field names in your configuration.`,
+    );
+  }
+  return JSON.parse(res.body) as QueryResponse;
+}
+
+/** Run a SOQL query and follow nextRecordsUrl until all records are collected. */
+async function runQueryAll(
+  ctx: ConnectorContext<SalesforceConfig, SalesforceSecrets>,
+  instanceUrl: string,
+  soql: string,
+  action: string,
+): Promise<Record<string, unknown>[]> {
+  const base = instanceUrl.replace(/\/$/, "");
+  const all: Record<string, unknown>[] = [];
+  let page = await runQuery(ctx, instanceUrl, soql, action);
+  all.push(...page.records);
+
+  let guard = 0;
+  while (!page.done && page.nextRecordsUrl && guard < 1000) {
+    guard += 1;
+    const auth = await getSalesforceAuth(ctx.config, ctx.secrets, (next) =>
+      ctx.saveSecrets(next),
+    );
+    const res = await connectorFetch(`${base}${page.nextRecordsUrl}`, {
+      connectorType: "SALESFORCE",
+      connectorId: ctx.connectorId,
+      action: `${action}_page`,
+      headers: {
+        Authorization: `Bearer ${auth.accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`Salesforce pagination failed (HTTP ${res.status}).`);
+    }
+    page = JSON.parse(res.body) as QueryResponse;
+    all.push(...page.records);
+  }
+
+  await writeDebugLog({
+    type: "SALESFORCE",
+    connectorId: ctx.connectorId,
+    action: `${action}_parsed`,
+    endpoint: hostOf(base),
+    recordsReturned: all.length,
+    outcome: "success",
+    error: `fetched ${all.length} opportunity record(s)`,
+  });
+  return all;
+}
+
+// ---------------------------------------------------------------------------
+// Field access + mapping (pure).
+// ---------------------------------------------------------------------------
+
+/** Read a field that may be a dot path into nested relationship objects. */
+function getRaw(record: Record<string, unknown>, path: string): unknown {
+  let cur: unknown = record;
+  for (const part of path.split(".")) {
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) {
+      cur = (cur as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+function getStr(record: Record<string, unknown>, path: string): string | null {
+  const v = getRaw(record, path);
+  if (typeof v === "string" && v.trim()) return v;
+  if (typeof v === "number") return String(v);
+  return null;
+}
+
+function getNum(record: Record<string, unknown>, path: string): number | null {
+  const v = getRaw(record, path);
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+  return null;
+}
+
+function resolveLine(value: string | undefined): CrmLine {
+  if (value && value in CRM_LINES) return value as CrmLine;
+  return "MANAGED_SERVICES";
+}
+
+function clampTerm(n: number): number {
+  if (!Number.isFinite(n)) return 1;
+  const r = Math.round(n);
+  return r <= 1 ? 1 : r >= 3 ? 3 : 2;
+}
+
+function clampPct(n: number | null, stage: CrmStage): number {
+  if (n == null || !Number.isFinite(n)) {
+    return stage === "CLOSED_WON" ? 100 : stage === "CLOSED_LOST" ? 0 : 10;
+  }
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/** Convert a Salesforce amount to a monthly (MRR) figure per the chosen basis. */
+function toMonthly(
+  amount: number | null,
+  basis: "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT",
+  termYears: number,
+): number | null {
+  if (amount == null) return null;
+  if (basis === "ANNUAL") return Math.round((amount / 12) * 100) / 100;
+  if (basis === "TOTAL_CONTRACT") {
+    const months = 12 * Math.max(1, termYears);
+    return Math.round((amount / months) * 100) / 100;
+  }
+  return amount;
+}
+
+/** Map a Salesforce opportunity to our stage, trusting IsWon/IsClosed first. */
+function mapStage(r: Record<string, unknown>): CrmStage {
+  if (getRaw(r, "IsWon") === true) return "CLOSED_WON";
+  if (getRaw(r, "IsClosed") === true) return "CLOSED_LOST";
+  const s = (getStr(r, "StageName") ?? "").toLowerCase();
+  if (s.includes("negoti")) return "NEGOTIATION";
+  if (s.includes("propos") || s.includes("quote")) return "PROPOSAL";
+  if (s.includes("qualif")) return "QUALIFICATION";
+  return "PROSPECTING";
+}
+
+function mapForecastCategory(
+  name: string | null,
+  stage: CrmStage,
+): CrmForecastCategory {
+  switch ((name ?? "").toLowerCase()) {
+    case "pipeline":
+      return "PIPELINE";
+    case "best case":
+      return "BEST_CASE";
+    case "commit":
+    case "forecast":
+      return "COMMIT";
+    case "closed":
+      return "CLOSED";
+    case "omitted":
+      return "OMITTED";
+    default:
+      return defaultForecastCategory(stage);
+  }
+}
+
+function mapType(value: string | null): CrmOpportunityType | null {
+  const s = (value ?? "").toLowerCase();
+  if (!s) return null;
+  if (s.includes("renew")) return "RENEWAL";
+  if (s.includes("upsell") || s.includes("expansion") || s.includes("existing"))
+    return "UPSELL";
+  if (s.includes("new")) return "NEW_BUSINESS";
+  return null;
+}
+
+function parseDate(value: string | null): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
