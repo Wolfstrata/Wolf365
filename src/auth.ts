@@ -43,11 +43,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
     useSecureCookies: process.env.NODE_ENV === "production",
     trustHost: true,
     callbacks: {
-      // Enforce the domain allowlist before any account is linked.
+      // Enforce the domain allowlist and account status before linking.
       async signIn({ user }) {
         if (!sso) return false;
         if (!isDomainAllowed(user.email, sso.allowedDomains)) {
           return false;
+        }
+        // Block users an administrator has disabled (existing accounts only;
+        // brand-new sign-ins have no record yet and are allowed in as REVIEWER).
+        if (user.email) {
+          const existing = await prisma.user.findUnique({
+            where: { email: user.email.toLowerCase() },
+            select: { disabled: true },
+          });
+          if (existing?.disabled) return false;
         }
         return true;
       },
@@ -55,7 +64,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
       async session({ session, user }) {
         if (session.user) {
           session.user.id = user.id;
-          session.user.role = (user as { role?: Role }).role ?? "AUDITOR";
+          session.user.role = (user as { role?: Role }).role ?? "REVIEWER";
           session.user.timezone =
             (user as { timezone?: string | null }).timezone ?? null;
         }
@@ -80,18 +89,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => {
           null;
 
         // Role derivation (least privilege):
-        // - Bootstrap admins are always OWNER.
+        // - Bootstrap admins are always ADMINISTRATOR.
         // - When group→role mappings are configured, role is derived strictly
-        //   from current group membership, defaulting to AUDITOR if no group
+        //   from current group membership, defaulting to REVIEWER if no group
         //   matches. This DOWNGRADES users who lose an elevated group, instead
         //   of letting stale privileges persist.
-        // - When no group mappings exist, roles are managed manually elsewhere
-        //   and are left untouched here.
+        // - When no group mappings exist, roles are managed manually in
+        //   Admin → Users and are left untouched here.
         let role: Role | null = null;
         if (bootstrapAdmins.includes(email)) {
-          role = "OWNER";
+          role = "ADMINISTRATOR";
         } else if (sso && Object.keys(sso.groupRoleMappings).length > 0) {
-          role = "AUDITOR";
+          role = "REVIEWER";
           for (const g of groups) {
             const mapped = sso.groupRoleMappings[g];
             if (mapped) {

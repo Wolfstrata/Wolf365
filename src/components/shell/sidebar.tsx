@@ -15,6 +15,7 @@ import {
   ScrollText,
   ShieldCheck,
   Settings,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ const ICONS: Record<string, LucideIcon> = {
   ScrollText,
   ShieldCheck,
   Settings,
+  Users,
 };
 
 const SECTION_ORDER = [

@@ -24,10 +24,9 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 enum Role {
-  OWNER // Owner/Admin — full control incl. connectors, security, debug logs
-  ACCOUNTING_MANAGER // Approve & push billing runs, manage mappings
-  ACCOUNTING_USER // Create/edit billing runs, propose mappings
-  AUDITOR // Read-only / auditor
+  ADMINISTRATOR // Full control — everything, incl. connector credentials, security, users
+  POWER_USER // Operate billing & run syncs/tests, but cannot change connector credentials or admin settings
+  REVIEWER // Read-only — view numbers, charts and reports; no changes, no billing, no syncs
 }
 
 model User {
@@ -36,7 +35,7 @@ model User {
   name          String?
   image         String?
   emailVerified DateTime?
-  role          Role      @default(AUDITOR)
+  role          Role      @default(REVIEWER)
   // Entra object id / group claims captured at login for traceability.
   entraOid      String?   @unique
   disabled      Boolean   @default(false)
@@ -243,6 +242,8 @@ enum AuditAction {
   EXPORT
   SSO_SETTINGS_CHANGED
   USER_ROLE_CHANGED
+  USER_DISABLED
+  USER_ENABLED
 }
 
 model AuditLog {

@@ -23,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Debug Logs", href: "/admin/debug-logs", icon: "Bug", section: "Administration", permission: "debuglogs:read" },
   { label: "API Probe", href: "/admin/probe", icon: "Plug", section: "Administration", permission: "connectors:configure" },
   { label: "Audit Log", href: "/admin/audit", icon: "ScrollText", section: "Administration", permission: "audit:read" },
+  { label: "Users", href: "/admin/users", icon: "Users", section: "Administration", permission: "users:manage" },
   { label: "Security & SSO", href: "/admin/security", icon: "ShieldCheck", section: "Administration", permission: "sso:configure" },
   { label: "Settings", href: "/settings", icon: "Settings", section: "Account" },
 ];

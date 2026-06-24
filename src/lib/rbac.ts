@@ -28,7 +28,8 @@ export type Permission =
   | "audit:read";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  OWNER: [
+  // Administrator — full control over everything.
+  ADMINISTRATOR: [
     "connectors:read",
     "connectors:configure",
     "connectors:sync",
@@ -47,9 +48,13 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports:export",
     "audit:read",
   ],
-  ACCOUNTING_MANAGER: [
+  // Power User — can operate the whole billing pipeline and run syncs / test
+  // connections, but CANNOT change connector credentials or other admin-only
+  // settings (SSO, user management). Note the absence of connectors:configure.
+  POWER_USER: [
     "connectors:read",
     "connectors:sync",
+    "debuglogs:read",
     "clients:read",
     "mappings:read",
     "mappings:propose",
@@ -62,23 +67,14 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports:export",
     "audit:read",
   ],
-  ACCOUNTING_USER: [
-    "connectors:read",
-    "clients:read",
-    "mappings:read",
-    "mappings:propose",
-    "billing:read",
-    "billing:edit",
-    "reports:read",
-    "reports:export",
-  ],
-  AUDITOR: [
+  // Reviewer — read-only. Can view numbers, charts and reports, but cannot run
+  // billing, sync anything, or change any setting.
+  REVIEWER: [
     "connectors:read",
     "clients:read",
     "mappings:read",
     "billing:read",
     "reports:read",
-    "audit:read",
   ],
 };
 
@@ -105,8 +101,24 @@ export class ForbiddenError extends Error {
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
-  OWNER: "Owner / Admin",
-  ACCOUNTING_MANAGER: "Accounting Manager",
-  ACCOUNTING_USER: "Accounting User",
-  AUDITOR: "Read-only / Auditor",
+  ADMINISTRATOR: "Administrator",
+  POWER_USER: "Power User",
+  REVIEWER: "Reviewer",
 };
+
+/** One-line description of what each role can do, for the admin UI. */
+export const ROLE_DESCRIPTIONS: Record<Role, string> = {
+  ADMINISTRATOR:
+    "Full access to everything, including connector credentials, security, and user management.",
+  POWER_USER:
+    "Can run billing, approve/push invoices, and sync or test connectors — but cannot change connector credentials or admin settings.",
+  REVIEWER:
+    "Read-only. Can view numbers, charts and reports. Cannot run billing, sync, or change anything.",
+};
+
+/** Roles assignable in the UI, ordered most → least privileged. */
+export const ASSIGNABLE_ROLES: Role[] = [
+  "ADMINISTRATOR",
+  "POWER_USER",
+  "REVIEWER",
+];

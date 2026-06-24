@@ -67,13 +67,13 @@ export function SsoForm({ initial }: Props) {
       </Field>
       <Field
         label="Group → role mappings"
-        help="One per line as groupObjectId:ROLE (OWNER, ACCOUNTING_MANAGER, ACCOUNTING_USER, AUDITOR)."
+        help="One per line as groupObjectId:ROLE (ADMINISTRATOR, POWER_USER, REVIEWER)."
       >
         <textarea
           name="groupMappings"
           defaultValue={initial?.groupMappings ?? ""}
           rows={4}
-          placeholder="00000000-0000-0000-0000-000000000000:OWNER"
+          placeholder="00000000-0000-0000-0000-000000000000:ADMINISTRATOR"
           className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
         />
       </Field>
