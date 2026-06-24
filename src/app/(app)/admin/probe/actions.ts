@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import { buildContext } from "@/connectors/runtime";
-import { connectorFetch } from "@/connectors/http";
+import { connectorFetch, proxyAgent, proxyConfigured } from "@/connectors/http";
 import {
   getStellrAccessToken,
   type StellrConfig,
@@ -43,19 +43,21 @@ export interface EgressIpResult {
  */
 export async function showEgressIpAction(): Promise<EgressIpResult> {
   await requirePermission("connectors:configure");
-  const proxied = Boolean(
-    process.env.OUTBOUND_PROXY_URL || process.env.QUOTAGUARDSTATIC_URL,
-  );
+  const proxied = proxyConfigured;
+  // Direct call through the (optional) proxy dispatcher so the REAL underlying
+  // error is surfaced — connectorFetch's retry wrapper hides the cause.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const res = await connectorFetch("https://api.ipify.org?format=json", {
-      connectorType: "QUICKBOOKS_ONLINE", // arbitrary; just for debug-log tagging
-      action: "egress_ip_check",
-      headers: { Accept: "application/json" },
-    });
+    const res = await fetch("https://api.ipify.org?format=json", {
+      signal: controller.signal,
+      cache: "no-store",
+      ...(proxyAgent ? { dispatcher: proxyAgent } : {}),
+    } as RequestInit & { dispatcher?: unknown });
     if (!res.ok) {
-      return { ok: false, proxied, message: `IP echo failed (HTTP ${res.status})` };
+      return { ok: false, proxied, message: `IP echo returned HTTP ${res.status}` };
     }
-    const ip = (JSON.parse(res.body) as { ip?: string }).ip;
+    const ip = (JSON.parse(await res.text()) as { ip?: string }).ip;
     return {
       ok: true,
       ip,
@@ -65,7 +67,16 @@ export async function showEgressIpAction(): Promise<EgressIpResult> {
         : "Egress IP (NO proxy configured — this is a rotating Vercel IP).",
     };
   } catch (err) {
-    return { ok: false, proxied, message: safeErrorMessage(err) };
+    // Surface the underlying cause (auth/connection/TLS) for diagnosis.
+    const cause = (err as { cause?: { message?: string; code?: string } }).cause;
+    const detail = cause?.code || cause?.message;
+    return {
+      ok: false,
+      proxied,
+      message: `${safeErrorMessage(err)}${detail ? ` — ${detail}` : ""}`,
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

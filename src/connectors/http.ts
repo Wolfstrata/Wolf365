@@ -31,7 +31,8 @@ function buildProxyAgent(raw: string | undefined): ProxyAgent | undefined {
 
 const proxyUrl =
   process.env.OUTBOUND_PROXY_URL || process.env.QUOTAGUARDSTATIC_URL;
-const proxyAgent = buildProxyAgent(proxyUrl);
+export const proxyAgent = buildProxyAgent(proxyUrl);
+export const proxyConfigured = Boolean(proxyUrl);
 
 /**
  * Shared HTTP client for connectors.
