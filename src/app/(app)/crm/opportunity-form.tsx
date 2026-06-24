@@ -14,14 +14,21 @@ import {
   defaultForecastCategory,
 } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
+import {
+  totalContractValue,
+  commissionAmount,
+  lineHasCommission,
+  COMMISSION_MONTHS,
+} from "@/lib/crm/pricing";
+import { formatCurrency } from "@/lib/utils";
 import type { OpportunityActionResult } from "./actions";
 
 export interface OpportunityFormValues {
   id?: string;
   name: string;
   accountName: string;
-  amount: string;
-  marginAmount: string;
+  monthlyAmount: string;
+  monthlyMargin: string;
   termYears: number;
   billingFrequency: "MONTHLY" | "YEARLY";
   stage: keyof typeof STAGE_LABELS;
@@ -90,8 +97,9 @@ export function OpportunityForm({
   const [stage, setStage] = useState(values.stage);
   const [probability, setProbability] = useState(values.probability);
   const [forecastCategory, setForecastCategory] = useState(values.forecastCategory);
-  const [amount, setAmount] = useState(values.amount);
-  const [marginAmount, setMarginAmount] = useState(values.marginAmount);
+  const [monthlyAmount, setMonthlyAmount] = useState(values.monthlyAmount);
+  const [monthlyMargin, setMonthlyMargin] = useState(values.monthlyMargin);
+  const [termYears, setTermYears] = useState(values.termYears);
 
   // When the stage changes, suggest the matching probability + forecast
   // category (still editable afterwards).
@@ -101,10 +109,11 @@ export function OpportunityForm({
     setForecastCategory(defaultForecastCategory(next));
   }
 
-  const marginPct = computeMarginPercentage(
-    Number(amount) || 0,
-    Number(marginAmount) || 0,
-  );
+  const mrr = Number(monthlyAmount) || 0;
+  const marginPct = computeMarginPercentage(mrr, Number(monthlyMargin) || 0);
+  const tcv = totalContractValue(mrr, termYears);
+  const showCommission = lineHasCommission(line);
+  const commission = commissionAmount(line, termYears, mrr);
 
   return (
     <form action={action} className="space-y-8">
@@ -166,40 +175,53 @@ export function OpportunityForm({
             </select>
           </Field>
 
-          <Field label="Amount" help="Total contract value for this opportunity.">
+          <Field
+            label="Monthly Amount (MRR)"
+            help="Monthly recurring revenue for this deal. TCV is derived from this and the term."
+          >
             <input
-              name="amount"
+              name="monthlyAmount"
               type="number"
               step="0.01"
               min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              value={monthlyAmount}
+              onChange={(e) => setMonthlyAmount(e.target.value)}
               className={inputCls}
             />
           </Field>
-          <Field label="Next Step">
-            <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
+          <Field
+            label="Total Contract Value"
+            help="MRR × 12 × term. Calculated."
+          >
+            <div className="px-1 py-2 text-sm font-medium tabular-nums">
+              {formatCurrency(tcv)}
+            </div>
           </Field>
 
-          <Field label="Margin Amount">
+          <Field label="Monthly Margin Amount">
             <input
-              name="marginAmount"
+              name="monthlyMargin"
               type="number"
               step="0.01"
               min="0"
-              value={marginAmount}
-              onChange={(e) => setMarginAmount(e.target.value)}
+              value={monthlyMargin}
+              onChange={(e) => setMonthlyMargin(e.target.value)}
               className={inputCls}
             />
           </Field>
-          <Field label="Margin Percentage" help="Calculated from Amount and Margin Amount.">
+          <Field label="Margin Percentage" help="Margin ÷ MRR. Calculated.">
             <div className="px-1 py-2 text-sm font-medium tabular-nums">
               {marginPct.toFixed(2)}%
             </div>
           </Field>
 
           <Field label="Term" required help="Length of the agreement.">
-            <select name="termYears" defaultValue={values.termYears} className={inputCls}>
+            <select
+              name="termYears"
+              value={termYears}
+              onChange={(e) => setTermYears(Number(e.target.value))}
+              className={inputCls}
+            >
               {TERM_YEARS_OPTIONS.map((y) => (
                 <option key={y} value={y}>
                   {y} year{y > 1 ? "s" : ""}
@@ -232,6 +254,27 @@ export function OpportunityForm({
               <div className="px-1 py-2 text-sm">Monthly</div>
             )}
           </Field>
+
+          {showCommission && (
+            <>
+              <Field
+                label="Commission"
+                help={`${lineLabel}: ${COMMISSION_MONTHS[termYears] ?? 0} month${(COMMISSION_MONTHS[termYears] ?? 0) === 1 ? "" : "s"} of MRR for a ${termYears}-year term. Calculated.`}
+              >
+                <div className="px-1 py-2 text-sm font-medium tabular-nums">
+                  {formatCurrency(commission)}
+                </div>
+              </Field>
+              <Field label="Next Step">
+                <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
+              </Field>
+            </>
+          )}
+          {!showCommission && (
+            <Field label="Next Step">
+              <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
+            </Field>
+          )}
 
           <Field label="Close Date" required>
             <input

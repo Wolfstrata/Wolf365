@@ -731,10 +731,16 @@ model CrmOpportunity {
   ownerId String
   owner   User   @relation("OpportunityOwner", fields: [ownerId], references: [id])
 
-  // Money. marginPercentage is derived on save from amount + marginAmount.
-  amount           Decimal? @db.Decimal(18, 2)
-  marginAmount     Decimal? @db.Decimal(18, 2)
+  // Money. The user enters MONTHLY figures (monthlyAmount = MRR, monthlyMargin).
+  // amount (= total contract value), marginAmount, marginPercentage and
+  // commissionAmount are all DERIVED on save and stored so the forecast can sum
+  // contract value directly.
+  monthlyAmount    Decimal? @db.Decimal(18, 2)
+  monthlyMargin    Decimal? @db.Decimal(18, 2)
+  amount           Decimal? @db.Decimal(18, 2) // TCV = monthlyAmount × 12 × termYears
+  marginAmount     Decimal? @db.Decimal(18, 2) // monthlyMargin × 12 × termYears
   marginPercentage Decimal? @db.Decimal(6, 2)
+  commissionAmount Decimal? @db.Decimal(18, 2) // Managed Services / NOC only
 
   // Agreement shape.
   termYears        Int                 @default(1) // 1 | 2 | 3

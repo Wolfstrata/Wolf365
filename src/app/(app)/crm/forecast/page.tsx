@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TrendingUp, Scale, Trophy, Percent, Layers } from "lucide-react";
+import { TrendingUp, Scale, Trophy, Percent, Layers, Coins } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
@@ -63,11 +63,20 @@ export default async function ForecastPage() {
       stage: true,
       amount: true,
       marginAmount: true,
+      commissionAmount: true,
       probability: true,
       forecastCategory: true,
       closeDate: true,
     },
   });
+
+  // Projected commission on open (not-yet-closed) Managed Services & NOC deals.
+  const openCommission = opps
+    .filter((o) => o.stage !== "CLOSED_WON" && o.stage !== "CLOSED_LOST")
+    .reduce(
+      (sum, o) => sum + (o.commissionAmount ? Number(o.commissionAmount) : 0),
+      0,
+    );
 
   const f = computeForecast(
     opps.map((o) => ({
@@ -157,6 +166,19 @@ export default async function ForecastPage() {
                 </Card>
               ))}
             </div>
+
+            <Card className="flex items-center gap-3">
+              <Coins className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <p className="text-sm">
+                Projected commission on open Managed Services &amp; NOC pipeline:{" "}
+                <span className="font-semibold tabular-nums">
+                  {formatCurrency(openCommission)}
+                </span>
+                <span className="ml-1 text-muted-foreground">
+                  (1 yr = 1 mo MRR · 2 yr = 1.5 mo · 3 yr = 2 mo)
+                </span>
+              </p>
+            </Card>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>

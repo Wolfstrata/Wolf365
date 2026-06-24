@@ -14,6 +14,7 @@ import {
   isOpenStage,
 } from "@/lib/crm/constants";
 import { computeForecast } from "@/lib/crm/forecast";
+import { lineHasCommission } from "@/lib/crm/pricing";
 
 const STAGE_STYLES: Record<string, string> = {
   CLOSED_WON: "text-success",
@@ -50,11 +51,19 @@ export default async function CrmLinePage({
     })),
   );
 
+  const showCommission = lineHasCommission(line);
+  // Projected commission on open (not-yet-closed) opportunities.
+  const openCommission = opps
+    .filter((o) => o.stage !== "CLOSED_WON" && o.stage !== "CLOSED_LOST")
+    .reduce((sum, o) => sum + (o.commissionAmount ? Number(o.commissionAmount) : 0), 0);
+
   const stats = [
     { label: "Open opportunities", value: String(summary.openCount) },
-    { label: "Open pipeline", value: formatCurrency(summary.openAmount) },
+    { label: "Open pipeline (TCV)", value: formatCurrency(summary.openAmount) },
     { label: "Weighted pipeline", value: formatCurrency(summary.weightedPipeline) },
-    { label: "Won", value: formatCurrency(summary.wonAmount) },
+    showCommission
+      ? { label: "Commission (open)", value: formatCurrency(openCommission) }
+      : { label: "Won", value: formatCurrency(summary.wonAmount) },
   ];
 
   return (
@@ -101,8 +110,11 @@ export default async function CrmLinePage({
                   <th className="px-4 py-2 font-medium">Opportunity</th>
                   <th className="px-4 py-2 font-medium">Account</th>
                   <th className="px-4 py-2 font-medium">Stage</th>
-                  <th className="px-4 py-2 font-medium">Amount</th>
+                  <th className="px-4 py-2 font-medium">TCV</th>
                   <th className="px-4 py-2 font-medium">Margin</th>
+                  {showCommission && (
+                    <th className="px-4 py-2 font-medium">Commission</th>
+                  )}
                   <th className="px-4 py-2 font-medium">Term</th>
                   <th className="px-4 py-2 font-medium">Billing</th>
                   <th className="px-4 py-2 font-medium">Close</th>
@@ -128,12 +140,24 @@ export default async function CrmLinePage({
                     </td>
                     <td className="px-4 py-2 tabular-nums">
                       {o.amount != null ? formatCurrency(Number(o.amount)) : "—"}
+                      {o.monthlyAmount != null && (
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(Number(o.monthlyAmount))}/mo
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2 tabular-nums">
                       {o.marginPercentage != null
                         ? `${Number(o.marginPercentage).toFixed(1)}%`
                         : "—"}
                     </td>
+                    {showCommission && (
+                      <td className="px-4 py-2 tabular-nums">
+                        {o.commissionAmount != null
+                          ? formatCurrency(Number(o.commissionAmount))
+                          : "—"}
+                      </td>
+                    )}
                     <td className="px-4 py-2 tabular-nums">
                       {o.termYears} yr{o.termYears > 1 ? "s" : ""}
                     </td>

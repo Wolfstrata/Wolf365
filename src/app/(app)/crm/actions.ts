@@ -16,6 +16,7 @@ import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import { CRM_LINES, STAGE_PROBABILITY } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
+import { totalContractValue, commissionAmount } from "@/lib/crm/pricing";
 
 export interface OpportunityActionResult {
   ok: boolean;
@@ -42,8 +43,8 @@ const schema = z.object({
   line: z.nativeEnum(CrmLine),
   name: z.string().trim().min(1, "Opportunity Name is required"),
   accountName: z.string().trim().min(1, "Account Name is required"),
-  amount: numberish,
-  marginAmount: numberish,
+  monthlyAmount: numberish,
+  monthlyMargin: numberish,
   termYears: z.coerce.number().int().refine((n) => [1, 2, 3].includes(n), {
     message: "Term must be 1, 2 or 3 years",
   }),
@@ -70,8 +71,8 @@ function parse(formData: FormData) {
     line: formData.get("line"),
     name: formData.get("name"),
     accountName: formData.get("accountName"),
-    amount: formData.get("amount"),
-    marginAmount: formData.get("marginAmount"),
+    monthlyAmount: formData.get("monthlyAmount"),
+    monthlyMargin: formData.get("monthlyMargin"),
     termYears: formData.get("termYears"),
     billingFrequency: formData.get("billingFrequency"),
     stage: formData.get("stage"),
@@ -111,18 +112,31 @@ export async function saveOpportunityAction(
 
     lineSlug = CRM_LINES[data.line].slug;
     const probability = data.probability ?? STAGE_PROBABILITY[data.stage];
+
+    // Derive TCV, contract-level margin, margin % and commission from the
+    // monthly figures the user entered.
+    const tcv = totalContractValue(data.monthlyAmount, data.termYears);
+    const tcvMargin = totalContractValue(data.monthlyMargin, data.termYears);
     const marginPercentage = computeMarginPercentage(
-      data.amount ?? 0,
-      data.marginAmount ?? 0,
+      data.monthlyAmount ?? 0,
+      data.monthlyMargin ?? 0,
+    );
+    const commission = commissionAmount(
+      data.line,
+      data.termYears,
+      data.monthlyAmount,
     );
 
     const fields = {
       line: data.line,
       name: data.name,
       accountName: data.accountName,
-      amount: data.amount ?? null,
-      marginAmount: data.marginAmount ?? null,
+      monthlyAmount: data.monthlyAmount ?? null,
+      monthlyMargin: data.monthlyMargin ?? null,
+      amount: data.monthlyAmount != null ? tcv : null,
+      marginAmount: data.monthlyMargin != null ? tcvMargin : null,
       marginPercentage,
+      commissionAmount: data.monthlyAmount != null ? commission : null,
       termYears: data.termYears,
       billingFrequency: data.billingFrequency,
       stage: data.stage,
