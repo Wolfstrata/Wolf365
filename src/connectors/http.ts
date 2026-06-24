@@ -4,12 +4,14 @@ import { writeDebugLog } from "@/lib/debug-log";
 import { safeUrl } from "@/lib/redact";
 
 /**
- * Optional static-IP egress proxy. When OUTBOUND_PROXY_URL is set, every
- * connector API call is dispatched through it so the request originates from a
- * fixed IP (required by, e.g., QuickBooks Online production IP allowlisting).
+ * Optional static-IP egress proxy. When a proxy URL is set, every connector API
+ * call is dispatched through it so the request originates from a fixed IP
+ * (required by, e.g., QuickBooks Online production IP allowlisting). Accepts the
+ * generic OUTBOUND_PROXY_URL or QuotaGuard's default QUOTAGUARDSTATIC_URL.
  * Created once per process.
  */
-const proxyUrl = process.env.OUTBOUND_PROXY_URL;
+const proxyUrl =
+  process.env.OUTBOUND_PROXY_URL || process.env.QUOTAGUARDSTATIC_URL;
 const proxyAgent = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 
 /**
