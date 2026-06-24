@@ -10,9 +10,28 @@ import { safeUrl } from "@/lib/redact";
  * generic OUTBOUND_PROXY_URL or QuotaGuard's default QUOTAGUARDSTATIC_URL.
  * Created once per process.
  */
+function buildProxyAgent(raw: string | undefined): ProxyAgent | undefined {
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    // undici's ProxyAgent does NOT read user:pass from the URL — pass the
+    // credentials explicitly as a Basic Proxy-Authorization token.
+    const token = u.username
+      ? "Basic " +
+        Buffer.from(
+          `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`,
+        ).toString("base64")
+      : undefined;
+    const uri = `${u.protocol}//${u.host}`;
+    return new ProxyAgent(token ? { uri, token } : { uri });
+  } catch {
+    return new ProxyAgent(raw);
+  }
+}
+
 const proxyUrl =
   process.env.OUTBOUND_PROXY_URL || process.env.QUOTAGUARDSTATIC_URL;
-const proxyAgent = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+const proxyAgent = buildProxyAgent(proxyUrl);
 
 /**
  * Shared HTTP client for connectors.
