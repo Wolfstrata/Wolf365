@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
+import { fetch as undiciFetch } from "undici";
 import { buildContext } from "@/connectors/runtime";
 import { connectorFetch, proxyAgent, proxyConfigured } from "@/connectors/http";
 import {
@@ -49,11 +50,10 @@ export async function showEgressIpAction(): Promise<EgressIpResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const res = await fetch("https://api.ipify.org?format=json", {
+    const res = await undiciFetch("https://api.ipify.org?format=json", {
       signal: controller.signal,
-      cache: "no-store",
       ...(proxyAgent ? { dispatcher: proxyAgent } : {}),
-    } as RequestInit & { dispatcher?: unknown });
+    });
     if (!res.ok) {
       return { ok: false, proxied, message: `IP echo returned HTTP ${res.status}` };
     }

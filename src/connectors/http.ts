@@ -1,5 +1,8 @@
 import type { ConnectorType } from "@prisma/client";
-import { ProxyAgent } from "undici";
+// Use undici's own fetch + ProxyAgent from the SAME package, so the proxy
+// dispatcher is compatible (Node's built-in fetch uses a different internal
+// undici and rejects an external ProxyAgent with UND_ERR_INVALID_ARG).
+import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from "undici";
 import { writeDebugLog } from "@/lib/debug-log";
 import { safeUrl } from "@/lib/redact";
 
@@ -93,16 +96,14 @@ export async function connectorFetch(
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const res = await fetch(url, {
+      const res = await undiciFetch(url, {
         method,
         headers: opts.headers,
         body: opts.body,
         signal: controller.signal,
-        // Connectors talk to external HTTPS APIs; never cache.
-        cache: "no-store",
         // Route through the static-IP proxy when configured (undici dispatcher).
         ...(proxyAgent ? { dispatcher: proxyAgent } : {}),
-      } as RequestInit & { dispatcher?: unknown });
+      } as UndiciRequestInit);
       clearTimeout(timer);
 
       const text = await res.text();
@@ -136,7 +137,7 @@ export async function connectorFetch(
           ok: res.ok,
           status: res.status,
           body: text,
-          headers: res.headers,
+          headers: res.headers as unknown as Headers,
           durationMs: Date.now() - start,
           attempts: attempt,
         };
