@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, PiggyBank } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
-import { recurringSummary } from "@/lib/billing/recurring";
+import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -12,36 +13,46 @@ import { recurringSummary } from "@/lib/billing/recurring";
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [clients, connectors, openExceptions, billingRuns, subscriptions] =
+  const [clients, connectors, openExceptions, billingRuns, clientsWithSubs] =
     await Promise.all([
       prisma.client.count(),
       prisma.connector.count({ where: { enabled: true } }),
       prisma.exception.count({ where: { status: "OPEN" } }),
       prisma.billingRun.count(),
-      prisma.tdSynnexSubscription.findMany({
+      prisma.client.findMany({
+        where: { tdSynnexCustomer: { isNot: null } },
         select: {
-          customerPrice: true,
-          unitCost: true,
-          quantity: true,
-          billingFrequency: true,
-          status: true,
-          currency: true,
+          tdSynnexCustomer: {
+            select: {
+              subscriptions: {
+                select: {
+                  customerPrice: true,
+                  unitCost: true,
+                  quantity: true,
+                  billingFrequency: true,
+                  status: true,
+                  currency: true,
+                },
+              },
+            },
+          },
         },
       }),
     ]);
 
-  // Recurring revenue / cost / margin from synced M365 licensing.
-  const recurring = recurringSummary(
-    subscriptions.map((s) => ({
-      customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
-      unitCost: s.unitCost != null ? Number(s.unitCost) : null,
-      quantity: s.quantity,
-      billingFrequency: s.billingFrequency,
-      status: s.status,
-    })),
+  // Recurring revenue / cost / margin from synced M365 licensing. Computed
+  // per-client so we can also flag clients that bill below cost.
+  const allSubs = clientsWithSubs.flatMap(
+    (c) => c.tdSynnexCustomer?.subscriptions ?? [],
   );
-  const currency =
-    subscriptions.find((s) => s.currency)?.currency ?? "USD";
+  const recurring = recurringSummary(allSubs.map(toRecurringInput));
+  const negativeMarginClients = clientsWithSubs.filter((c) => {
+    const s = recurringSummary(
+      (c.tdSynnexCustomer?.subscriptions ?? []).map(toRecurringInput),
+    );
+    return s.activeCount > 0 && s.monthlyMargin < 0;
+  }).length;
+  const currency = allSubs.find((s) => s.currency)?.currency ?? "USD";
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },
@@ -101,6 +112,28 @@ export default async function DashboardPage() {
             </p>
           </Card>
         </div>
+
+        {/* Negative-margin warning — clients billing below cost */}
+        {negativeMarginClients > 0 && (
+          <Link href="/clients" className="mb-4 block">
+            <Card className="border-danger/40 bg-danger/10 transition hover:bg-danger/15">
+              <div className="flex items-center gap-3">
+                <TriangleAlert className="h-5 w-5 shrink-0 text-danger" />
+                <div>
+                  <p className="text-sm font-semibold text-danger">
+                    {negativeMarginClients}{" "}
+                    {negativeMarginClients === 1 ? "client is" : "clients are"}{" "}
+                    billing below cost
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Negative monthly margin on synced M365 licensing. Review and
+                    adjust pricing — view the client list.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </Link>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {stats.map((s) => (

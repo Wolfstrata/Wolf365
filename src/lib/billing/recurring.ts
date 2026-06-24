@@ -15,6 +15,27 @@ export interface RecurringSubscriptionInput {
   status: string | null;
 }
 
+/**
+ * Map a stored TD SYNNEX subscription row (Decimal money columns) into the
+ * plain-number shape this module works with. Accepts anything with the
+ * relevant fields so callers don't repeat the Decimal→Number coercion.
+ */
+export function toRecurringInput(row: {
+  customerPrice: unknown;
+  unitCost: unknown;
+  quantity: number;
+  billingFrequency: string | null;
+  status: string | null;
+}): RecurringSubscriptionInput {
+  return {
+    customerPrice: row.customerPrice != null ? Number(row.customerPrice) : null,
+    unitCost: row.unitCost != null ? Number(row.unitCost) : null,
+    quantity: row.quantity,
+    billingFrequency: row.billingFrequency,
+    status: row.status,
+  };
+}
+
 const INACTIVE = /expire|cancel|inactiv|suspend|discontinu/i;
 
 /** Whether a subscription counts toward recurring totals. */
