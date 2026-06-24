@@ -2,7 +2,12 @@
 
 import { useActionState } from "react";
 import { cn } from "@/lib/utils";
-import { runProbeAction, type ProbeResult } from "./actions";
+import {
+  runProbeAction,
+  showEgressIpAction,
+  type ProbeResult,
+  type EgressIpResult,
+} from "./actions";
 
 const SUGGESTIONS = [
   "/api/v1/cloud/customers",
@@ -17,9 +22,57 @@ export function ProbeForm() {
     runProbeAction,
     null,
   );
+  const [egress, egressAction, egressPending] = useActionState<
+    EgressIpResult | null,
+    FormData
+  >(async () => showEgressIpAction(), null);
 
   return (
     <div className="space-y-4">
+      {/* Egress IP — what to put in a vendor IP allowlist (e.g. QBO production) */}
+      <form action={egressAction} className="rounded-lg border bg-card p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold">Outbound (egress) IP</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The IP connector API calls originate from. Use this for vendor IP
+              allowlists (e.g. QuickBooks production).
+            </p>
+          </div>
+          <button
+            type="submit"
+            disabled={egressPending}
+            className="shrink-0 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent disabled:opacity-60"
+          >
+            {egressPending ? "Checking…" : "Show egress IP"}
+          </button>
+        </div>
+        {egress && (
+          <div className="mt-3">
+            {egress.ok ? (
+              <p className="font-mono text-lg">
+                {egress.ip}{" "}
+                <span
+                  className={cn(
+                    "ml-2 align-middle text-xs",
+                    egress.proxied ? "text-success" : "text-warning",
+                  )}
+                >
+                  {egress.proxied ? "via static proxy" : "no proxy — rotating IP"}
+                </span>
+              </p>
+            ) : (
+              <p className="text-sm text-danger">{egress.message}</p>
+            )}
+            {egress.ok && !egress.proxied && (
+              <p className="mt-1 text-xs text-warning">
+                Set QUOTAGUARDSTATIC_URL (or OUTBOUND_PROXY_URL) in Vercel and
+                redeploy — this rotating IP is not safe to allowlist.
+              </p>
+            )}
+          </div>
+        )}
+      </form>
       <form action={action} className="space-y-4 rounded-lg border bg-card p-6">
         <div>
           <label className="mb-1 block text-sm font-medium">Connector</label>

@@ -28,6 +28,47 @@ export interface ProbeResult {
   preview?: string;
 }
 
+export interface EgressIpResult {
+  ok: boolean;
+  ip?: string;
+  proxied: boolean;
+  message: string;
+}
+
+/**
+ * Report the outbound (egress) IP that connector API calls originate from, by
+ * calling a public IP-echo service through the SAME path connectors use (so a
+ * configured static-IP proxy is reflected). Use this value for vendor IP
+ * allowlists (e.g. QuickBooks production "where is your app hosted").
+ */
+export async function showEgressIpAction(): Promise<EgressIpResult> {
+  await requirePermission("connectors:configure");
+  const proxied = Boolean(
+    process.env.OUTBOUND_PROXY_URL || process.env.QUOTAGUARDSTATIC_URL,
+  );
+  try {
+    const res = await connectorFetch("https://api.ipify.org?format=json", {
+      connectorType: "QUICKBOOKS_ONLINE", // arbitrary; just for debug-log tagging
+      action: "egress_ip_check",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      return { ok: false, proxied, message: `IP echo failed (HTTP ${res.status})` };
+    }
+    const ip = (JSON.parse(res.body) as { ip?: string }).ip;
+    return {
+      ok: true,
+      ip,
+      proxied,
+      message: proxied
+        ? "Egress IP (through the configured static-IP proxy)."
+        : "Egress IP (NO proxy configured — this is a rotating Vercel IP).",
+    };
+  } catch (err) {
+    return { ok: false, proxied, message: safeErrorMessage(err) };
+  }
+}
+
 const MAX_PREVIEW = 6000;
 
 /**
