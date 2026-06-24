@@ -8,6 +8,7 @@
  * frequency is interpreted into a monthly figure, so you can confirm the
  * dashboard MRR is correct (or spot data-entry gaps) line by line.
  */
+import { readFileSync, existsSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import {
   recurringSummary,
@@ -15,6 +16,37 @@ import {
   toRecurringInput,
   billingPeriodMonths,
 } from "../src/lib/billing/recurring";
+
+/**
+ * Minimal .env loader (no dependency) so `npx tsx scripts/diagnose-mrr.ts`
+ * works without exporting DATABASE_URL by hand. Existing env vars win.
+ */
+function loadEnv(file: string): void {
+  if (!existsSync(file)) return;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    const key = m[1]!;
+    let val = m[2]!;
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+loadEnv(".env");
+loadEnv(".env.local");
+
+if (!process.env.DATABASE_URL) {
+  console.error(
+    "DATABASE_URL is not set. Run this from the project root where .env lives, " +
+      "or prefix the command: DATABASE_URL=... npx tsx scripts/diagnose-mrr.ts",
+  );
+  process.exit(1);
+}
 
 const prisma = new PrismaClient();
 
