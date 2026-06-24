@@ -50,6 +50,19 @@ export function loginOrigin(loginUrl: string): string {
   return new URL(loginUrl).origin;
 }
 
+/** Extract Salesforce's OAuth error + description from an error body (safe). */
+function parseOAuthError(body: string): string | null {
+  try {
+    const j = JSON.parse(body) as { error?: string; error_description?: string };
+    const parts = [j.error, j.error_description].filter(Boolean);
+    return parts.length ? parts.join(" — ") : null;
+  } catch {
+    // Non-JSON (e.g. HTML redirect page) — surface a short, safe snippet.
+    const snippet = body.replace(/\s+/g, " ").trim().slice(0, 120);
+    return snippet || null;
+  }
+}
+
 export interface SalesforceAuth {
   accessToken: string;
   instanceUrl: string;
@@ -106,9 +119,15 @@ export async function getSalesforceAuth(
     body: body.toString(),
   });
   if (!res.ok) {
+    // Surface Salesforce's OAuth error/description — these are diagnostic and
+    // contain no secrets (we never echo client_id/secret). They pinpoint the
+    // cause: invalid_client (bad key/secret), unsupported_grant_type (Client
+    // Credentials Flow not enabled), invalid_grant (Run-As user missing/inactive
+    // or lacks API Enabled), etc.
+    const detail = parseOAuthError(res.body);
     throw new ConnectorHttpError(
-      `Salesforce token request failed (HTTP ${res.status}). Verify the My Domain URL, ` +
-        "Consumer Key/Secret, and that the Client Credentials Flow + a Run-As user are configured.",
+      `Salesforce token request failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}. ` +
+        "Verify the My Domain URL, Consumer Key/Secret, and that the Client Credentials Flow + a Run-As user are configured on the connected app.",
     );
   }
   const token = JSON.parse(res.body) as TokenResponse;
