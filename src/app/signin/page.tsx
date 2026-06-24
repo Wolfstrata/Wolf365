@@ -29,9 +29,9 @@ export default async function SignInPage() {
           alt="Wolf365"
           className="h-auto w-full max-w-md max-h-[40vh] object-contain"
         />
-        <p className="mt-3 text-base text-muted-foreground">
-          Microsoft 365 billing reconciliation for MSPs
-        </p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+          Microsoft 365 Billing Application
+        </h1>
       </div>
 
       <div className="w-full max-w-md rounded-lg border bg-card p-8 shadow-sm">
