@@ -13,6 +13,10 @@ import {
   testConnectionAction,
   syncNowAction,  toggleConnectorAction,
 } from "../actions";
+import {
+  connectQuickBooksAction,
+  disconnectQuickBooksAction,
+} from "../qbo-actions";
 
 // Manual Sync Now runs as a server action on this route; allow up to 5 minutes
 // for connectors that make many per-record API calls (capped lower on Hobby).
@@ -108,18 +112,22 @@ export default async function ConnectorConfigPage({
             )}
             {canConfigure && view.secretsSet.clientId && (
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <a
-                  href="/api/connectors/quickbooks/connect"
-                  className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-                >
-                  {view.health === "HEALTHY" ? "Reconnect QuickBooks" : "Connect QuickBooks"}
-                </a>
-                <a
-                  href="/api/connectors/quickbooks/disconnect"
-                  className="inline-block rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent"
-                >
-                  Disconnect
-                </a>
+                <form action={connectQuickBooksAction}>
+                  <button
+                    type="submit"
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                  >
+                    {view.health === "HEALTHY" ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                  </button>
+                </form>
+                <form action={disconnectQuickBooksAction}>
+                  <button
+                    type="submit"
+                    className="rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent"
+                  >
+                    Disconnect
+                  </button>
+                </form>
               </div>
             )}
           </div>
