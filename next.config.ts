@@ -20,24 +20,8 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
-  {
-    // Conservative CSP. `unsafe-inline` for styles is required by Tailwind's
-    // injected styles; scripts are restricted to same-origin + Next's inline
-    // bootstrap. Form posts and API calls stay same-origin; framing is denied.
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https:",
-      "font-src 'self'",
-      "connect-src 'self'",
-      "form-action 'self'",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "object-src 'none'",
-    ].join("; "),
-  },
+  // NOTE: Content-Security-Policy is set per-request in middleware.ts so it can
+  // include a unique nonce (no 'unsafe-inline' for scripts).
 ];
 
 const nextConfig: NextConfig = {
