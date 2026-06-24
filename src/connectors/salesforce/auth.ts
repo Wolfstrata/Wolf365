@@ -117,6 +117,9 @@ export async function getSalesforceAuth(
       Accept: "application/json",
     },
     body: body.toString(),
+    // Go direct: Salesforce needs no static IP and blocks our shared egress
+    // proxy as an anonymizing proxy.
+    directConnection: true,
   });
   if (!res.ok) {
     // Surface Salesforce's OAuth error/description — these are diagnostic and

@@ -364,6 +364,7 @@ async function authedGet(
     connectorId: ctx.connectorId,
     action,
     headers: { Authorization: `Bearer ${auth.accessToken}`, Accept: "application/json" },
+    directConnection: true,
   });
   if (res.status === 401) {
     auth = await getSalesforceAuth(ctx.config, ctx.secrets, save, true);
@@ -372,6 +373,7 @@ async function authedGet(
       connectorId: ctx.connectorId,
       action: `${action}_retry`,
       headers: { Authorization: `Bearer ${auth.accessToken}`, Accept: "application/json" },
+      directConnection: true,
     });
   }
   if (!res.ok) {

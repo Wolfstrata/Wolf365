@@ -70,6 +70,13 @@ export interface ConnectorRequestOptions {
   timeoutMs?: number;
   /** Header name carrying a correlation/request id, if the API returns one. */
   correlationHeader?: string;
+  /**
+   * Bypass the static-IP egress proxy for this call (go direct). Use for APIs
+   * that do NOT require a fixed source IP and that flag shared proxy IPs as
+   * anonymizing proxies (e.g. Salesforce). The proxy is only needed where the
+   * vendor allowlists our IP (e.g. QuickBooks production).
+   */
+  directConnection?: boolean;
 }
 
 export interface ConnectorResponse {
@@ -90,6 +97,7 @@ export async function connectorFetch(
   const method = opts.method ?? "GET";
   const maxAttempts = opts.maxAttempts ?? 3;
   const timeoutMs = opts.timeoutMs ?? 30_000;
+  const useProxy = Boolean(proxyAgent) && !opts.directConnection;
   const start = Date.now();
 
   let attempt = 0;
@@ -107,8 +115,10 @@ export async function connectorFetch(
         headers: opts.headers,
         body: opts.body,
         signal: controller.signal,
-        // Route through the static-IP proxy when configured (undici dispatcher).
-        ...(proxyAgent ? { dispatcher: proxyAgent } : {}),
+        // Route through the static-IP proxy when configured (undici dispatcher),
+        // unless this call opts out (directConnection) — some vendors flag the
+        // shared proxy IP as an anonymizing proxy and block it.
+        ...(useProxy ? { dispatcher: proxyAgent } : {}),
       } as UndiciRequestInit);
       clearTimeout(timer);
 
