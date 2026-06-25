@@ -189,6 +189,31 @@ export async function saveOpportunityAction(
   redirect(`/crm/${lineSlug}`);
 }
 
+/**
+ * Lock or unlock an opportunity. A locked opportunity (locallyModifiedAt set)
+ * is skipped by the Salesforce sync; unlocking clears the flag so it syncs again.
+ */
+export async function setOpportunityLockAction(id: string, lock: boolean): Promise<void> {
+  const actor = await requirePermission("crm:write");
+  const existing = await prisma.crmOpportunity.findUniqueOrThrow({
+    where: { id },
+    select: { line: true, name: true },
+  });
+  await prisma.crmOpportunity.update({
+    where: { id },
+    data: { locallyModifiedAt: lock ? new Date() : null },
+  });
+  await audit({
+    action: "OPPORTUNITY_UPDATED",
+    actorId: actor.id,
+    actorEmail: actor.email,
+    target: `opportunity:${id}`,
+    metadata: { name: existing.name, line: existing.line, locked: lock },
+  });
+  revalidatePath("/crm/forecast");
+  revalidatePath(`/crm/${CRM_LINES[existing.line].slug}`);
+}
+
 const deleteSchema = z.object({ id: z.string().min(1) });
 
 /** Delete an opportunity. */

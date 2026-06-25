@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronUp, ChevronDown, ChevronsUpDown, Lock, LockOpen } from "lucide-react";
 import type { CrmStage } from "@prisma/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { setOpportunityLockAction } from "../actions";
 
 export interface OpportunityRow {
   id: string;
@@ -24,6 +26,7 @@ export interface OpportunityRow {
   createdAt: string; // ISO
   probability: number;
   isOpen: boolean;
+  locked: boolean;
 }
 
 type SortKey =
@@ -66,10 +69,28 @@ const COLUMNS: Column[] = [
   { key: "createdAt", label: "Created", sort: (r) => r.createdAt },
 ];
 
-export function OpportunitiesTable({ rows }: { rows: OpportunityRow[] }) {
+export function OpportunitiesTable({
+  rows,
+  canWrite,
+}: {
+  rows: OpportunityRow[];
+  canWrite: boolean;
+}) {
   // Default: newest opportunity first.
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [dir, setDir] = useState<Dir>("desc");
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function toggleLock(id: string, currentlyLocked: boolean) {
+    setPendingId(id);
+    startTransition(async () => {
+      await setOpportunityLockAction(id, !currentlyLocked);
+      router.refresh();
+      setPendingId(null);
+    });
+  }
 
   function toggle(key: SortKey) {
     if (key === sortKey) {
@@ -97,6 +118,7 @@ export function OpportunitiesTable({ rows }: { rows: OpportunityRow[] }) {
       <table className="w-full text-sm">
         <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
           <tr>
+            <th className="px-3 py-2 font-medium" aria-label="Sync lock" />
             {COLUMNS.map((c) => {
               const active = c.key === sortKey;
               const Icon = !active ? ChevronsUpDown : dir === "asc" ? ChevronUp : ChevronDown;
@@ -119,8 +141,32 @@ export function OpportunitiesTable({ rows }: { rows: OpportunityRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((o) => (
+          {sorted.map((o) => {
+            const LockIcon = o.locked ? Lock : LockOpen;
+            const busy = isPending && pendingId === o.id;
+            const title = o.locked
+              ? "Locked — Salesforce won't overwrite this. Click to allow sync."
+              : "Unlocked — Salesforce can update this. Click to lock.";
+            return (
             <tr key={o.id} className="border-t hover:bg-accent/40">
+              <td className="px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => toggleLock(o.id, o.locked)}
+                  disabled={!canWrite || busy}
+                  title={title}
+                  aria-label={title}
+                  aria-pressed={o.locked}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded p-1 transition",
+                    o.locked ? "text-warning" : "text-muted-foreground",
+                    canWrite ? "hover:bg-accent hover:text-foreground" : "cursor-default",
+                    busy && "opacity-50",
+                  )}
+                >
+                  <LockIcon className="h-4 w-4" />
+                </button>
+              </td>
               <td className="px-4 py-2 font-medium">
                 <Link href={`/crm/edit/${o.id}`} className="hover:underline">
                   {o.name}
@@ -149,7 +195,8 @@ export function OpportunitiesTable({ rows }: { rows: OpportunityRow[] }) {
               </td>
               <td className="px-4 py-2 whitespace-nowrap">{formatDate(o.createdAt)}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

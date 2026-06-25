@@ -72,6 +72,7 @@ export default async function CrmLinePage({
     createdAt: o.createdAt.toISOString(),
     probability: o.probability,
     isOpen: isOpenStage(o.stage),
+    locked: o.locallyModifiedAt != null,
   }));
 
   return (
@@ -111,7 +112,7 @@ export default async function CrmLinePage({
             }
           />
         ) : (
-          <OpportunitiesTable rows={rows} />
+          <OpportunitiesTable rows={rows} canWrite={canWrite} />
         )}
       </div>
     </div>
