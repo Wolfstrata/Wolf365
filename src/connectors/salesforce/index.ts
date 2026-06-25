@@ -10,7 +10,7 @@ import type {
 } from "@/connectors/types";
 import { CRM_LINES, forecastCategoryForProbability } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
-import { totalContractValue, commissionAmount } from "@/lib/crm/pricing";
+import { commissionAmount } from "@/lib/crm/pricing";
 import {
   getSalesforceAuth,
   type SalesforceConfig,
@@ -96,34 +96,8 @@ export const salesforceConnector: ConnectorDefinition<
       required: false,
       secret: false,
       placeholder: "Amount",
-      helpText: "Salesforce field to read the deal amount from (default Amount).",
-    },
-    {
-      key: "amountBasis",
-      label: "Amount represents",
-      type: "select",
-      required: false,
-      secret: false,
-      options: [
-        { value: "AUTO", label: "Auto-detect (monthly if under threshold, else annual)" },
-        { value: "MONTHLY", label: "Monthly (MRR)" },
-        { value: "ANNUAL", label: "Annual (÷12 for MRR)" },
-        { value: "TOTAL_CONTRACT", label: "Total contract value (÷ months in term)" },
-      ],
-      default: "AUTO",
       helpText:
-        "How to interpret the Amount field. Reps enter it inconsistently, so Auto-detect uses the threshold below: an Amount under the threshold is treated as already-monthly (MRR = Amount); at or above it, as annual (MRR = Amount ÷ 12).",
-    },
-    {
-      key: "autoThreshold",
-      label: "Auto-detect threshold",
-      type: "text",
-      required: false,
-      secret: false,
-      placeholder: "10000",
-      default: "10000",
-      helpText:
-        "Used by Auto-detect: Amount below this = monthly fee; at or above = annual value. Default 10000.",
+        "Salesforce field to read the deal amount from (default Amount). The Amount is stored as the total contract value (TCV); MRR is derived as TCV ÷ 12.",
     },
     {
       key: "marginField",
@@ -132,7 +106,7 @@ export const salesforceConnector: ConnectorDefinition<
       required: false,
       secret: false,
       helpText:
-        "Optional Salesforce field holding the margin amount. Treated as ONE YEAR of margin (monthly margin = field ÷ 12). Left blank, margin is imported empty.",
+        "Optional Salesforce field holding the total margin amount. Stored as the margin TCV; monthly margin is derived as field ÷ 12. Left blank, margin is imported empty.",
     },
     {
       key: "termField",
@@ -224,8 +198,6 @@ export const salesforceConnector: ConnectorDefinition<
     const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
 
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
-    const basis = ctx.config.amountBasis ?? "AUTO";
-    const autoThreshold = Number(ctx.config.autoThreshold ?? "10000") || 10000;
     const marginField = (ctx.config.marginField ?? "").trim();
     const termField = (ctx.config.termField ?? "").trim();
     const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
@@ -272,17 +244,12 @@ export const salesforceConnector: ConnectorDefinition<
         ? clampTerm(Number(getNum(r, termField) ?? defaultTerm))
         : defaultTerm;
 
-      const rawAmount = getNum(r, amountField);
-      const monthlyAmount =
-        basis === "AUTO"
-          ? autoMonthly(rawAmount, autoThreshold)
-          : toMonthly(rawAmount, basis, termYears);
-      // The Salesforce margin field holds one YEAR of margin → ÷12 for monthly.
-      const monthlyMargin = marginField ? annualToMonthly(getNum(r, marginField)) : null;
-
-      const tcv = monthlyAmount != null ? totalContractValue(monthlyAmount, termYears) : null;
-      const tcvMargin =
-        monthlyMargin != null ? totalContractValue(monthlyMargin, termYears) : null;
+      // The Salesforce Amount IS the total contract value; MRR is TCV ÷ 12.
+      // Margin is likewise the total margin, with monthly margin = margin ÷ 12.
+      const tcv = getNum(r, amountField);
+      const monthlyAmount = tcv != null ? round2(tcv / 12) : null;
+      const tcvMargin = marginField ? getNum(r, marginField) : null;
+      const monthlyMargin = tcvMargin != null ? round2(tcvMargin / 12) : null;
       const marginPct = computeMarginPercentage(monthlyAmount ?? 0, monthlyMargin ?? 0);
       const commission =
         monthlyAmount != null ? commissionAmount(line, termYears, monthlyAmount) : null;
@@ -334,7 +301,7 @@ export const salesforceConnector: ConnectorDefinition<
       imported,
       updated,
       skipped,
-      summary: { line, fetched: records.length, amountBasis: basis },
+      summary: { line, fetched: records.length },
     };
   },
 };
@@ -500,35 +467,6 @@ function clampPct(n: number | null, stage: CrmStage): number {
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-/**
- * Auto-detect a monthly (MRR) figure when reps enter Amount inconsistently:
- * below the threshold it's already monthly; at/above it's annual (÷12).
- */
-function autoMonthly(amount: number | null, threshold: number): number | null {
-  if (amount == null) return null;
-  return amount >= threshold ? round2(amount / 12) : round2(amount);
-}
-
-/** A value that holds one year of money → its monthly share. */
-function annualToMonthly(amount: number | null): number | null {
-  return amount == null ? null : round2(amount / 12);
-}
-
-/** Convert a Salesforce amount to a monthly (MRR) figure per the chosen basis. */
-function toMonthly(
-  amount: number | null,
-  basis: "AUTO" | "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT",
-  termYears: number,
-): number | null {
-  if (amount == null) return null;
-  if (basis === "ANNUAL") return round2(amount / 12);
-  if (basis === "TOTAL_CONTRACT") {
-    const months = 12 * Math.max(1, termYears);
-    return round2(amount / months);
-  }
-  return round2(amount);
 }
 
 /** Map a Salesforce opportunity to our stage, trusting IsWon/IsClosed first. */
