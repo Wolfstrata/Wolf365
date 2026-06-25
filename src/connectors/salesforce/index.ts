@@ -232,6 +232,7 @@ export const salesforceConnector: ConnectorDefinition<
     let imported = 0;
     let updated = 0;
     let skipped = 0;
+    let localEditsPreserved = 0;
 
     for (const r of records) {
       const externalId = getStr(r, "Id");
@@ -284,11 +285,17 @@ export const salesforceConnector: ConnectorDefinition<
 
       const existing = await prisma.crmOpportunity.findUnique({
         where: { sourceSystem_externalId: { sourceSystem: "salesforce", externalId } },
-        select: { id: true },
+        select: { id: true, locallyModifiedAt: true },
       });
       if (existing) {
-        await prisma.crmOpportunity.update({ where: { id: existing.id }, data });
-        updated += 1;
+        if (existing.locallyModifiedAt) {
+          // The opportunity was edited in Wolf365 — never overwrite local edits.
+          localEditsPreserved += 1;
+          skipped += 1;
+        } else {
+          await prisma.crmOpportunity.update({ where: { id: existing.id }, data });
+          updated += 1;
+        }
       } else {
         await prisma.crmOpportunity.create({
           data: { ...data, sourceSystem: "salesforce", externalId, ownerId },
@@ -301,7 +308,7 @@ export const salesforceConnector: ConnectorDefinition<
       imported,
       updated,
       skipped,
-      summary: { line, fetched: records.length },
+      summary: { line, fetched: records.length, localEditsPreserved },
     };
   },
 };

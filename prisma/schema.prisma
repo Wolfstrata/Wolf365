@@ -769,6 +769,10 @@ model CrmOpportunity {
   sourceSystem String?
   externalId   String?
 
+  // Set when a user edits an imported opportunity inside Wolf365. Once set, the
+  // Salesforce sync stops overwriting this row so local edits are never lost.
+  locallyModifiedAt DateTime?
+
   createdById String?
   createdBy   User?    @relation("OpportunityCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())

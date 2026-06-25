@@ -156,7 +156,11 @@ export async function saveOpportunityAction(
       const existing = await prisma.crmOpportunity.findUniqueOrThrow({
         where: { id: data.id },
       });
-      await prisma.crmOpportunity.update({ where: { id: data.id }, data: fields });
+      await prisma.crmOpportunity.update({
+        where: { id: data.id },
+        // Mark the row as locally edited so the Salesforce sync won't overwrite it.
+        data: { ...fields, locallyModifiedAt: new Date() },
+      });
       await audit({
         action: "OPPORTUNITY_UPDATED",
         actorId: actor.id,
