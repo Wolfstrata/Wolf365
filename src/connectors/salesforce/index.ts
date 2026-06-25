@@ -105,13 +105,25 @@ export const salesforceConnector: ConnectorDefinition<
       required: false,
       secret: false,
       options: [
+        { value: "AUTO", label: "Auto-detect (monthly if under threshold, else annual)" },
         { value: "MONTHLY", label: "Monthly (MRR)" },
         { value: "ANNUAL", label: "Annual (÷12 for MRR)" },
         { value: "TOTAL_CONTRACT", label: "Total contract value (÷ months in term)" },
       ],
-      default: "TOTAL_CONTRACT",
+      default: "AUTO",
       helpText:
-        "How to interpret the Amount field. The standard Salesforce Opportunity Amount is the TOTAL contract value, so this defaults to Total contract value — Wolf365 divides it by (12 × term) to get the monthly MRR, and TCV ends up equal to the Salesforce Amount. Choose Annual if your Amount is one year's value, or Monthly if it's already the monthly fee.",
+        "How to interpret the Amount field. Reps enter it inconsistently, so Auto-detect uses the threshold below: an Amount under the threshold is treated as already-monthly (MRR = Amount); at or above it, as annual (MRR = Amount ÷ 12).",
+    },
+    {
+      key: "autoThreshold",
+      label: "Auto-detect threshold",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "10000",
+      default: "10000",
+      helpText:
+        "Used by Auto-detect: Amount below this = monthly fee; at or above = annual value. Default 10000.",
     },
     {
       key: "marginField",
@@ -120,7 +132,7 @@ export const salesforceConnector: ConnectorDefinition<
       required: false,
       secret: false,
       helpText:
-        "Optional Salesforce field holding the margin amount (interpreted with the same basis as Amount). Left blank, margin is imported empty.",
+        "Optional Salesforce field holding the margin amount. Treated as ONE YEAR of margin (monthly margin = field ÷ 12). Left blank, margin is imported empty.",
     },
     {
       key: "termField",
@@ -212,7 +224,8 @@ export const salesforceConnector: ConnectorDefinition<
     const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
 
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
-    const basis = ctx.config.amountBasis ?? "MONTHLY";
+    const basis = ctx.config.amountBasis ?? "AUTO";
+    const autoThreshold = Number(ctx.config.autoThreshold ?? "10000") || 10000;
     const marginField = (ctx.config.marginField ?? "").trim();
     const termField = (ctx.config.termField ?? "").trim();
     const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
@@ -260,10 +273,12 @@ export const salesforceConnector: ConnectorDefinition<
         : defaultTerm;
 
       const rawAmount = getNum(r, amountField);
-      const monthlyAmount = toMonthly(rawAmount, basis, termYears);
-      const monthlyMargin = marginField
-        ? toMonthly(getNum(r, marginField), basis, termYears)
-        : null;
+      const monthlyAmount =
+        basis === "AUTO"
+          ? autoMonthly(rawAmount, autoThreshold)
+          : toMonthly(rawAmount, basis, termYears);
+      // The Salesforce margin field holds one YEAR of margin → ÷12 for monthly.
+      const monthlyMargin = marginField ? annualToMonthly(getNum(r, marginField)) : null;
 
       const tcv = monthlyAmount != null ? totalContractValue(monthlyAmount, termYears) : null;
       const tcvMargin =
@@ -483,19 +498,37 @@ function clampPct(n: number | null, stage: CrmStage): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Auto-detect a monthly (MRR) figure when reps enter Amount inconsistently:
+ * below the threshold it's already monthly; at/above it's annual (÷12).
+ */
+function autoMonthly(amount: number | null, threshold: number): number | null {
+  if (amount == null) return null;
+  return amount >= threshold ? round2(amount / 12) : round2(amount);
+}
+
+/** A value that holds one year of money → its monthly share. */
+function annualToMonthly(amount: number | null): number | null {
+  return amount == null ? null : round2(amount / 12);
+}
+
 /** Convert a Salesforce amount to a monthly (MRR) figure per the chosen basis. */
 function toMonthly(
   amount: number | null,
-  basis: "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT",
+  basis: "AUTO" | "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT",
   termYears: number,
 ): number | null {
   if (amount == null) return null;
-  if (basis === "ANNUAL") return Math.round((amount / 12) * 100) / 100;
+  if (basis === "ANNUAL") return round2(amount / 12);
   if (basis === "TOTAL_CONTRACT") {
     const months = 12 * Math.max(1, termYears);
-    return Math.round((amount / months) * 100) / 100;
+    return round2(amount / months);
   }
-  return amount;
+  return round2(amount);
 }
 
 /** Map a Salesforce opportunity to our stage, trusting IsWon/IsClosed first. */

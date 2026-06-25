@@ -31,7 +31,9 @@ export interface SalesforceConfig {
   targetLine?: string;
   soqlFilter?: string;
   amountField?: string;
-  amountBasis?: "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT";
+  amountBasis?: "AUTO" | "MONTHLY" | "ANNUAL" | "TOTAL_CONTRACT";
+  /** For AUTO: Amount at or above this is treated as annual (÷12), else monthly. */
+  autoThreshold?: string;
   marginField?: string;
   termField?: string;
   defaultTermYears?: string;
