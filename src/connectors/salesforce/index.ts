@@ -109,9 +109,9 @@ export const salesforceConnector: ConnectorDefinition<
         { value: "ANNUAL", label: "Annual (÷12 for MRR)" },
         { value: "TOTAL_CONTRACT", label: "Total contract value (÷ months in term)" },
       ],
-      default: "MONTHLY",
+      default: "TOTAL_CONTRACT",
       helpText:
-        "How to interpret the Amount field so we can store the monthly value (MRR). Salesforce shows your deals monthly, so this is Monthly by default. Wolf365 derives TCV from MRR and the term.",
+        "How to interpret the Amount field. The standard Salesforce Opportunity Amount is the TOTAL contract value, so this defaults to Total contract value — Wolf365 divides it by (12 × term) to get the monthly MRR, and TCV ends up equal to the Salesforce Amount. Choose Annual if your Amount is one year's value, or Monthly if it's already the monthly fee.",
     },
     {
       key: "marginField",
@@ -143,7 +143,8 @@ export const salesforceConnector: ConnectorDefinition<
         { value: "3", label: "3 years" },
       ],
       default: "1",
-      helpText: "Used when no term field is configured (or it's empty).",
+      helpText:
+        "Agreement length used when no Term field is set. With Amount = Total contract value, this is how the total is split into months (MRR = Amount ÷ 12 ÷ term). Most deals are 1 year; correct any multi-year deals on the opportunity after import.",
     },
   ],
   secretFields: [
