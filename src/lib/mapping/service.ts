@@ -19,10 +19,21 @@ export async function materializeClients(actor: {
   id: string;
   email: string;
 }): Promise<{ created: number; merged: number; clients: number }> {
-  const [tds, qbos] = await Promise.all([
+  // Customers with a pending match proposal are left unlinked so they remain
+  // reviewable; everything else gets a materialized client.
+  const pending = await prisma.clientMatchProposal.findMany({
+    where: { status: "PROPOSED" },
+    select: { qboCustomerId: true, tdSynnexCustomerId: true },
+  });
+  const skipQbo = new Set(pending.map((p) => p.qboCustomerId));
+  const skipTd = new Set(pending.map((p) => p.tdSynnexCustomerId));
+
+  const [tdsAll, qbosAll] = await Promise.all([
     prisma.tdSynnexCustomer.findMany({ where: { clientId: null } }),
     prisma.qboCustomer.findMany({ where: { clientId: null } }),
   ]);
+  const tds = tdsAll.filter((c) => !skipTd.has(c.id));
+  const qbos = qbosAll.filter((c) => !skipQbo.has(c.id));
 
   let created = 0;
   let merged = 0;
@@ -113,15 +124,28 @@ function emailDomain(email: string | null | undefined): string | null {
   return d ?? null;
 }
 
-/** Scan unlinked QBO + TD SYNNEX customers and (re)build client proposals. */
+/**
+ * (Re)build client-match proposals between QuickBooks and TD SYNNEX customers
+ * that are not yet cross-linked — a customer qualifies when it has no client
+ * yet, OR its client is missing the other system's side (e.g. a QBO-only client
+ * and a TD-only client that look like the same company). Exact name matches are
+ * merged automatically; fuzzy matches are proposed for human review.
+ */
 export async function proposeClientMatches(actor: {
   id: string;
   email: string;
 }): Promise<{ proposed: number; autoConfirmed: number }> {
-  const [qbo, td] = await Promise.all([
-    prisma.qboCustomer.findMany({ where: { clientId: null } }),
-    prisma.tdSynnexCustomer.findMany({ where: { clientId: null } }),
+  const [qboAll, tdAll] = await Promise.all([
+    prisma.qboCustomer.findMany({
+      include: { client: { select: { tdSynnexCustomer: { select: { id: true } } } } },
+    }),
+    prisma.tdSynnexCustomer.findMany({
+      include: { client: { select: { qboCustomer: { select: { id: true } } } } },
+    }),
   ]);
+  // Candidates: no client yet, or a client that lacks the other system's side.
+  const qbo = qboAll.filter((c) => !c.client || !c.client.tdSynnexCustomer);
+  const td = tdAll.filter((c) => !c.client || !c.client.qboCustomer);
 
   const sources: Candidate[] = qbo.map((c) => ({
     id: c.id,
@@ -140,7 +164,7 @@ export async function proposeClientMatches(actor: {
 
   for (const p of proposals) {
     if (p.exact) {
-      await linkClient(p.sourceId, p.targetId, p.confidence, "DETERMINISTIC", actor);
+      await mergeOrLink(p.sourceId, p.targetId, p.confidence, "DETERMINISTIC", actor);
       autoConfirmed += 1;
     } else {
       await prisma.clientMatchProposal.upsert({
@@ -173,8 +197,14 @@ export async function proposeClientMatches(actor: {
   return { proposed, autoConfirmed };
 }
 
-/** Create a Wolf365 Client linking a QBO + TD SYNNEX customer. */
-async function linkClient(
+/**
+ * Link a QBO + TD SYNNEX customer onto a single Wolf365 Client, handling every
+ * starting state: create a new client when neither is linked, attach to the
+ * existing client when one side is, and MERGE when both already have separate
+ * clients (the TD-side client's data moves to the QBO-side client, then the
+ * emptied client is deleted). Marks the proposal CONFIRMED.
+ */
+async function mergeOrLink(
   qboCustomerId: string,
   tdSynnexCustomerId: string,
   confidence: number,
@@ -188,15 +218,41 @@ async function linkClient(
   const name = qbo.companyName ?? qbo.displayName ?? td.name;
 
   const clientId = await prisma.$transaction(async (tx) => {
-    const client = await tx.client.create({ data: { name } });
-    await tx.qboCustomer.update({
-      where: { id: qboCustomerId },
-      data: { clientId: client.id },
-    });
-    await tx.tdSynnexCustomer.update({
-      where: { id: tdSynnexCustomerId },
-      data: { clientId: client.id },
-    });
+    let targetClientId: string;
+
+    if (qbo.clientId && td.clientId && qbo.clientId !== td.clientId) {
+      // Both already have separate clients → keep the QBO client, fold the TD
+      // client into it, then delete the now-empty TD client.
+      targetClientId = qbo.clientId;
+      const fromId = td.clientId;
+      await tx.tdSynnexCustomer.update({
+        where: { id: td.id },
+        data: { clientId: targetClientId },
+      });
+      // Move any business data off the client being removed.
+      await tx.billingRun.updateMany({ where: { clientId: fromId }, data: { clientId: targetClientId } });
+      await tx.exception.updateMany({ where: { clientId: fromId }, data: { clientId: targetClientId } });
+      await tx.crmOpportunity.updateMany({ where: { clientId: fromId }, data: { clientId: targetClientId } });
+      await tx.superOpsInvoice.updateMany({ where: { clientId: fromId }, data: { clientId: targetClientId } });
+      // Any Hudu/SuperOps 1:1 links on the removed client are released (SetNull)
+      // and can be re-materialized; we don't force-move them to avoid unique
+      // conflicts when the target already has one.
+      await tx.client.delete({ where: { id: fromId } });
+    } else if (qbo.clientId) {
+      targetClientId = qbo.clientId;
+      if (td.clientId !== targetClientId) {
+        await tx.tdSynnexCustomer.update({ where: { id: td.id }, data: { clientId: targetClientId } });
+      }
+    } else if (td.clientId) {
+      targetClientId = td.clientId;
+      await tx.qboCustomer.update({ where: { id: qbo.id }, data: { clientId: targetClientId } });
+    } else {
+      const client = await tx.client.create({ data: { name } });
+      targetClientId = client.id;
+      await tx.qboCustomer.update({ where: { id: qbo.id }, data: { clientId: targetClientId } });
+      await tx.tdSynnexCustomer.update({ where: { id: td.id }, data: { clientId: targetClientId } });
+    }
+
     await tx.clientMatchProposal.upsert({
       where: {
         qboCustomerId_tdSynnexCustomerId: { qboCustomerId, tdSynnexCustomerId },
@@ -216,7 +272,7 @@ async function linkClient(
         reviewedAt: new Date(),
       },
     });
-    return client.id;
+    return targetClientId;
   });
   return clientId;
 }
@@ -228,7 +284,7 @@ export async function confirmClientMatch(
   const p = await prisma.clientMatchProposal.findUniqueOrThrow({
     where: { id: proposalId },
   });
-  await linkClient(
+  await mergeOrLink(
     p.qboCustomerId,
     p.tdSynnexCustomerId,
     p.confidence,

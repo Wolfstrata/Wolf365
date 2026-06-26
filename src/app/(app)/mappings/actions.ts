@@ -13,10 +13,11 @@ import {
 
 export async function autoMatchClientsAction(): Promise<void> {
   const user = await requirePermission("mappings:propose");
-  // Create a Client for every synced customer (merging QBO↔TD by name), then
-  // surface any remaining fuzzy near-matches as proposals for review.
-  await materializeClients({ id: user.id, email: user.email });
+  // First match QBO↔TD: exact names merge automatically, fuzzy near-matches
+  // become proposals for review. THEN materialize a Client for every remaining
+  // customer (skipping those with a pending proposal, so they stay reviewable).
   await proposeClientMatches({ id: user.id, email: user.email });
+  await materializeClients({ id: user.id, email: user.email });
   revalidatePath("/mappings");
   revalidatePath("/clients");
 }
