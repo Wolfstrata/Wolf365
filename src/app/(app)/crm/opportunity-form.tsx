@@ -4,6 +4,8 @@ import { useActionState, useState } from "react";
 import type { CrmLine } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import {
+  CRM_LINES,
+  CRM_LINE_ORDER,
   STAGE_ORDER,
   STAGE_LABELS,
   STAGE_PROBABILITY,
@@ -79,15 +81,19 @@ const inputCls =
   "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export function OpportunityForm({
-  line,
+  line: initialLine,
   lineSlug,
-  lineLabel,
-  allowYearly,
   ownerName,
   values,
   saveAction,
 }: Props) {
   const [result, action, pending] = useActionState(saveAction, null);
+
+  // Line / category is editable so a user can manually re-categorize an
+  // opportunity (e.g. after name-based auto-routing on import).
+  const [line, setLine] = useState<CrmLine>(initialLine);
+  const lineLabel = CRM_LINES[line].label;
+  const allowYearly = CRM_LINES[line].billing === "MONTHLY_OR_YEARLY";
 
   const [stage, setStage] = useState(values.stage);
   const [probability, setProbability] = useState(values.probability);
@@ -117,7 +123,6 @@ export function OpportunityForm({
   return (
     <form action={action} className="space-y-8">
       {values.id && <input type="hidden" name="id" value={values.id} />}
-      <input type="hidden" name="line" value={line} />
       {!allowYearly && <input type="hidden" name="billingFrequency" value="MONTHLY" />}
 
       {result && !result.ok && (
@@ -131,6 +136,24 @@ export function OpportunityForm({
           Opportunity Information
         </h2>
         <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
+          <Field
+            label="Line / Category"
+            required
+            help="Move this opportunity to another category. Imports auto-route by name; changing it here keeps your choice."
+          >
+            <select
+              name="line"
+              value={line}
+              onChange={(e) => setLine(e.target.value as CrmLine)}
+              className={inputCls}
+            >
+              {CRM_LINE_ORDER.map((l) => (
+                <option key={l} value={l}>
+                  {CRM_LINES[l].label}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Account Name" required>
             <input
               name="accountName"

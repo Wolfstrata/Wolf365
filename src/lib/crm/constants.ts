@@ -59,6 +59,52 @@ export function lineFromSlug(slug: string): CrmLine | null {
   return SLUG_TO_LINE[slug] ?? null;
 }
 
+/**
+ * Route an opportunity to a line by keyword in its name: "365"/"m365"/
+ * "microsoft 365" → M365; "NOC" → Managed NOC; otherwise the fallback. 365 wins
+ * when both appear. Used on import (e.g. Salesforce) for automatic categorization.
+ */
+export function lineFromName(
+  name: string | null | undefined,
+  fallback: CrmLine = "MANAGED_SERVICES",
+): CrmLine {
+  const n = (name ?? "").toLowerCase();
+  if (n.includes("365")) return "M365";
+  if (n.includes("noc")) return "MANAGED_NOC";
+  return fallback;
+}
+
+/**
+ * Editable opportunity form fields → the DB columns they own, for field-level
+ * sync locking. Editing a field locks its columns (including derived ones) so
+ * the connector sync won't overwrite them.
+ */
+export const OPPORTUNITY_FIELD_COLUMNS: Record<string, string[]> = {
+  name: ["name"],
+  accountName: ["accountName"],
+  line: ["line"],
+  monthlyAmount: ["monthlyAmount", "amount", "marginPercentage", "commissionAmount"],
+  monthlyMargin: ["monthlyMargin", "marginAmount", "marginPercentage"],
+  termYears: ["termYears", "amount", "marginAmount", "commissionAmount"],
+  billingFrequency: ["billingFrequency"],
+  stage: ["stage"],
+  probability: ["probability"],
+  forecastCategory: ["forecastCategory"],
+  closeDate: ["closeDate"],
+  estimatedInvoiceDate: ["estimatedInvoiceDate"],
+  cashInDate: ["cashInDate"],
+  lockbox: ["lockbox"],
+  type: ["type"],
+  leadSource: ["leadSource"],
+  nextStep: ["nextStep"],
+  description: ["description"],
+};
+
+/** Every lockable DB column (used by "lock all"). */
+export const ALL_LOCKABLE_COLUMNS: string[] = [
+  ...new Set(Object.values(OPPORTUNITY_FIELD_COLUMNS).flat()),
+];
+
 export const STAGE_LABELS: Record<CrmStage, string> = {
   PROSPECTING: "Prospecting",
   QUALIFICATION: "Qualification",

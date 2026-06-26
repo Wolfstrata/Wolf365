@@ -57,6 +57,7 @@ const ICONS: Record<string, LucideIcon> = {
 
 const SECTION_ORDER = [
   "Workspace",
+  "Connector Data",
   "CRM",
   "Reconciliation",
   "Administration",

@@ -14,7 +14,12 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
-import { CRM_LINES, STAGE_PROBABILITY } from "@/lib/crm/constants";
+import {
+  CRM_LINES,
+  STAGE_PROBABILITY,
+  OPPORTUNITY_FIELD_COLUMNS,
+  ALL_LOCKABLE_COLUMNS,
+} from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import { totalContractValue, commissionAmount } from "@/lib/crm/pricing";
 
@@ -156,17 +161,32 @@ export async function saveOpportunityAction(
       const existing = await prisma.crmOpportunity.findUniqueOrThrow({
         where: { id: data.id },
       });
+      // Field-level sync lock: lock exactly the fields the user changed (plus the
+      // columns they derive) so the connector sync keeps those values but still
+      // updates everything else.
+      const changed = changedFormFields(existing, { ...fields, probability });
+      const lockedFields = [
+        ...new Set([
+          ...existing.lockedFields,
+          ...changed.flatMap((f) => OPPORTUNITY_FIELD_COLUMNS[f] ?? []),
+        ]),
+      ];
       await prisma.crmOpportunity.update({
         where: { id: data.id },
-        // Mark the row as locally edited so the Salesforce sync won't overwrite it.
-        data: { ...fields, locallyModifiedAt: new Date() },
+        data: { ...fields, lockedFields, locallyModifiedAt: new Date() },
       });
       await audit({
         action: "OPPORTUNITY_UPDATED",
         actorId: actor.id,
         actorEmail: actor.email,
         target: `opportunity:${data.id}`,
-        metadata: { name: data.name, line: data.line, stage: data.stage, from: existing.stage },
+        metadata: {
+          name: data.name,
+          line: data.line,
+          stage: data.stage,
+          from: existing.stage,
+          lockedFields,
+        },
       });
     } else {
       const created = await prisma.crmOpportunity.create({
@@ -189,9 +209,49 @@ export async function saveOpportunityAction(
   redirect(`/crm/${lineSlug}`);
 }
 
+/** Which editable form fields changed vs the stored row (for field-level locks). */
+function changedFormFields(
+  existing: Record<string, unknown>,
+  next: Record<string, unknown>,
+): string[] {
+  const numEq = (a: unknown, b: unknown) => {
+    const an = a == null ? null : Number(a);
+    const bn = b == null ? null : Number(b);
+    return an === bn;
+  };
+  const dateEq = (a: unknown, b: unknown) => {
+    const at = a instanceof Date ? a.getTime() : a == null ? null : new Date(a as string).getTime();
+    const bt = b instanceof Date ? b.getTime() : b == null ? null : new Date(b as string).getTime();
+    return at === bt;
+  };
+  const strEq = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
+
+  const changed: string[] = [];
+  if (!strEq(existing.name, next.name)) changed.push("name");
+  if (!strEq(existing.accountName, next.accountName)) changed.push("accountName");
+  if (!strEq(existing.line, next.line)) changed.push("line");
+  if (!numEq(existing.monthlyAmount, next.monthlyAmount)) changed.push("monthlyAmount");
+  if (!numEq(existing.monthlyMargin, next.monthlyMargin)) changed.push("monthlyMargin");
+  if (existing.termYears !== next.termYears) changed.push("termYears");
+  if (!strEq(existing.billingFrequency, next.billingFrequency)) changed.push("billingFrequency");
+  if (!strEq(existing.stage, next.stage)) changed.push("stage");
+  if (existing.probability !== next.probability) changed.push("probability");
+  if (!strEq(existing.forecastCategory, next.forecastCategory)) changed.push("forecastCategory");
+  if (!dateEq(existing.closeDate, next.closeDate)) changed.push("closeDate");
+  if (!dateEq(existing.estimatedInvoiceDate, next.estimatedInvoiceDate)) changed.push("estimatedInvoiceDate");
+  if (!dateEq(existing.cashInDate, next.cashInDate)) changed.push("cashInDate");
+  if (existing.lockbox !== next.lockbox) changed.push("lockbox");
+  if (!strEq(existing.type, next.type)) changed.push("type");
+  if (!strEq(existing.leadSource, next.leadSource)) changed.push("leadSource");
+  if (!strEq(existing.nextStep, next.nextStep)) changed.push("nextStep");
+  if (!strEq(existing.description, next.description)) changed.push("description");
+  return changed;
+}
+
 /**
- * Lock or unlock an opportunity. A locked opportunity (locallyModifiedAt set)
- * is skipped by the Salesforce sync; unlocking clears the flag so it syncs again.
+ * Lock or unlock ALL of an opportunity's fields from connector sync (the
+ * padlock). Locking sets every lockable column; unlocking clears them so the
+ * row syncs freely again. Per-field locks are managed automatically on edit.
  */
 export async function setOpportunityLockAction(id: string, lock: boolean): Promise<void> {
   const actor = await requirePermission("crm:write");
@@ -201,7 +261,10 @@ export async function setOpportunityLockAction(id: string, lock: boolean): Promi
   });
   await prisma.crmOpportunity.update({
     where: { id },
-    data: { locallyModifiedAt: lock ? new Date() : null },
+    data: {
+      lockedFields: lock ? ALL_LOCKABLE_COLUMNS : [],
+      locallyModifiedAt: lock ? new Date() : null,
+    },
   });
   await audit({
     action: "OPPORTUNITY_UPDATED",

@@ -106,7 +106,7 @@ export default async function CrmLinePage({
     createdAt: o.createdAt.toISOString(),
     probability: o.probability,
     isOpen: isOpenStage(o.stage),
-    locked: o.locallyModifiedAt != null,
+    locked: o.lockedFields.length > 0,
   }));
 
   const filtered = Boolean(stage || fromDate || toDate);

@@ -50,7 +50,7 @@ export default async function SignInPage({
               type="submit"
               className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
             >
-              Sign in with Microsoft
+              Sign in with Microsoft SSO
             </button>
           </form>
         ) : (

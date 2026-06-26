@@ -8,7 +8,7 @@ import type {
   ConnectorSyncResult,
   ConnectorTestResult,
 } from "@/connectors/types";
-import { CRM_LINES, forecastCategoryForProbability } from "@/lib/crm/constants";
+import { CRM_LINES, forecastCategoryForProbability, lineFromName } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import { commissionAmount } from "@/lib/crm/pricing";
 import {
@@ -245,6 +245,11 @@ export const salesforceConnector: ConnectorDefinition<
         ? clampTerm(Number(getNum(r, termField) ?? defaultTerm))
         : defaultTerm;
 
+      // Auto-route to a line by opportunity name (NOC / 365 keywords), falling
+      // back to the connector's configured line.
+      const name = getStr(r, "Name") ?? "(Untitled opportunity)";
+      const recordLine = lineFromName(name, line);
+
       // The Salesforce Amount IS the total contract value; MRR is TCV ÷ 12.
       // Margin is likewise the total margin, with monthly margin = margin ÷ 12.
       const tcv = getNum(r, amountField);
@@ -253,7 +258,7 @@ export const salesforceConnector: ConnectorDefinition<
       const monthlyMargin = tcvMargin != null ? round2(tcvMargin / 12) : null;
       const marginPct = computeMarginPercentage(monthlyAmount ?? 0, monthlyMargin ?? 0);
       const commission =
-        monthlyAmount != null ? commissionAmount(line, termYears, monthlyAmount) : null;
+        monthlyAmount != null ? commissionAmount(recordLine, termYears, monthlyAmount) : null;
 
       const stage = mapStage(r);
       const probability = clampPct(getNum(r, "Probability"), stage);
@@ -262,8 +267,8 @@ export const salesforceConnector: ConnectorDefinition<
         defaultOwner.id;
 
       const data = {
-        line,
-        name: getStr(r, "Name") ?? "(Untitled opportunity)",
+        line: recordLine,
+        name,
         accountName: getStr(r, "Account.Name") ?? "(No account)",
         monthlyAmount,
         monthlyMargin,
@@ -285,17 +290,16 @@ export const salesforceConnector: ConnectorDefinition<
 
       const existing = await prisma.crmOpportunity.findUnique({
         where: { sourceSystem_externalId: { sourceSystem: "salesforce", externalId } },
-        select: { id: true, locallyModifiedAt: true },
+        select: { id: true, lockedFields: true },
       });
       if (existing) {
-        if (existing.locallyModifiedAt) {
-          // The opportunity was edited in Wolf365 — never overwrite local edits.
-          localEditsPreserved += 1;
-          skipped += 1;
-        } else {
-          await prisma.crmOpportunity.update({ where: { id: existing.id }, data });
-          updated += 1;
-        }
+        // Field-level protection: don't overwrite columns the user locked/edited
+        // in Wolf365; update everything else.
+        const writable: Record<string, unknown> = { ...data };
+        for (const col of existing.lockedFields) delete writable[col];
+        if (existing.lockedFields.length > 0) localEditsPreserved += 1;
+        await prisma.crmOpportunity.update({ where: { id: existing.id }, data: writable });
+        updated += 1;
       } else {
         await prisma.crmOpportunity.create({
           data: { ...data, sourceSystem: "salesforce", externalId, ownerId },
