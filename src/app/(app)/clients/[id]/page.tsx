@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { SubsidiaryMapper } from "./subsidiary-mapper";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import {
@@ -54,36 +53,60 @@ export default async function ClientProfilePage({
   if (!client) notFound();
 
   const canMap = can(user.role, "mappings:approve");
-  // All clients for the subsidiary picker (only loaded when the user can map).
-  const allClients = canMap
-    ? await prisma.client.findMany({
-        select: { id: true, name: true, parentClientId: true },
-        orderBy: { name: "asc" },
-      })
-    : [];
+  const isGroup = client.subsidiaries.length > 0;
 
   // Group rollup: cumulative recurring across this client + all its
-  // subsidiaries' M365 licensing (only when it actually has subsidiaries).
-  const groupSubs =
-    client.subsidiaries.length > 0
-      ? await prisma.tdSynnexSubscription.findMany({
-          where: {
-            customer: {
-              client: { OR: [{ id: client.id }, { parentClientId: client.id }] },
-            },
-          },
-          select: {
-            customerPrice: true,
-            unitCost: true,
-            quantity: true,
-            billingFrequency: true,
-            status: true,
-            currency: true,
-          },
-        })
-      : [];
+  // subsidiaries' M365 licensing. Each subscription belongs to exactly one
+  // client, so this query counts each once (no double-counting).
+  const groupSubs = isGroup
+    ? await prisma.tdSynnexSubscription.findMany({
+        where: {
+          customer: { client: { OR: [{ id: client.id }, { parentClientId: client.id }] } },
+        },
+        select: {
+          productSku: true,
+          productName: true,
+          customerPrice: true,
+          unitCost: true,
+          quantity: true,
+          billingFrequency: true,
+          status: true,
+          currency: true,
+        },
+      })
+    : [];
   const groupSummary = groupSubs.length > 0 ? recurringSummary(groupSubs.map(toRecurringInput)) : null;
   const groupCurrency = groupSubs.find((s) => s.currency)?.currency ?? "CAD";
+
+  // Aggregate the group's licensing by SKU — one row per SKU with summed
+  // quantity and recurring totals.
+  type GroupSub = (typeof groupSubs)[number];
+  const bySku = new Map<string, { sku: string; name: string; qty: number; subs: GroupSub[] }>();
+  for (const s of groupSubs) {
+    const key = s.productSku ?? s.productName ?? "—";
+    const entry = bySku.get(key) ?? {
+      sku: s.productSku ?? "—",
+      name: s.productName ?? key,
+      qty: 0,
+      subs: [],
+    };
+    entry.qty += s.quantity;
+    entry.subs.push(s);
+    bySku.set(key, entry);
+  }
+  const groupSkuRows = [...bySku.values()]
+    .map((e) => {
+      const summary = recurringSummary(e.subs.map(toRecurringInput));
+      return {
+        sku: e.sku,
+        name: e.name,
+        qty: e.qty,
+        mrr: summary.mrr,
+        monthlyCost: summary.monthlyCost,
+        monthlyMargin: summary.monthlyMargin,
+      };
+    })
+    .sort((a, b) => b.mrr - a.mrr);
 
   const qbo = client.qboCustomer;
   const td = client.tdSynnexCustomer;
@@ -203,54 +226,49 @@ export default async function ClientProfilePage({
           </Card>
         </div>
 
-        {/* Client associations (parent / subsidiaries) */}
+        {/* Client associations — compact summary; editing lives on its own page */}
         <Card>
-          <h2 className="text-sm font-semibold">Client associations</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Group related clients — e.g. subsidiaries under a parent company.
-          </p>
-
-          {client.parentClient && (
-            <p className="mt-3 text-sm">
-              Parent:{" "}
-              <Link
-                href={`/clients/${client.parentClient.id}`}
-                className="font-medium text-primary hover:underline"
-              >
-                {client.parentClient.name}
-              </Link>
-            </p>
-          )}
-
-          <div className="mt-2">
-            <p className="text-sm">
-              Subsidiaries: {client.subsidiaries.length === 0 && (
-                <span className="text-muted-foreground">none</span>
-              )}
-            </p>
-            {client.subsidiaries.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {client.subsidiaries.map((s) => (
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Client associations</h2>
+              {client.parentClient ? (
+                <p className="mt-1 text-sm">
+                  Subsidiary of{" "}
                   <Link
-                    key={s.id}
-                    href={`/clients/${s.id}`}
-                    className="rounded-full border px-2.5 py-0.5 text-xs hover:bg-accent"
+                    href={`/clients/${client.parentClient.id}`}
+                    className="font-medium text-primary hover:underline"
                   >
-                    {s.name}
+                    {client.parentClient.name}
                   </Link>
-                ))}
-              </div>
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {client.subsidiaries.length > 0
+                    ? `${client.subsidiaries.length} subsidiary${client.subsidiaries.length === 1 ? "" : "ies"}`
+                    : "No parent or subsidiaries."}
+                </p>
+              )}
+            </div>
+            {canMap && (
+              <Link
+                href={`/clients/${client.id}/associations`}
+                className="shrink-0 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+              >
+                Edit associations
+              </Link>
             )}
           </div>
-
-          {canMap && (
-            <div className="mt-4 border-t pt-4">
-              <SubsidiaryMapper
-                parentId={client.id}
-                parentName={client.name}
-                options={allClients}
-                initialSelectedIds={client.subsidiaries.map((s) => s.id)}
-              />
+          {client.subsidiaries.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {client.subsidiaries.map((s) => (
+                <Link
+                  key={s.id}
+                  href={`/clients/${s.id}`}
+                  className="rounded-full border px-2.5 py-0.5 text-xs hover:bg-accent"
+                >
+                  {s.name}
+                </Link>
+              ))}
             </div>
           )}
         </Card>
@@ -283,6 +301,51 @@ export default async function ClientProfilePage({
               {groupSummary.activeCount === 1 ? "" : "s"} across{" "}
               {1 + client.subsidiaries.length} clients.
             </p>
+          </Card>
+        )}
+
+        {/* Group licensing combined by SKU (counts each subscription once) */}
+        {isGroup && groupSkuRows.length > 0 && (
+          <Card>
+            <h2 className="mb-1 text-sm font-semibold">
+              Group Microsoft 365 licensing — by SKU
+            </h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              All licensing across {client.name} and its subsidiaries, combined per
+              SKU.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-4 font-medium">SKU</th>
+                    <th className="py-1 pr-4 font-medium">Product</th>
+                    <th className="py-1 pr-4 font-medium">Total qty</th>
+                    <th className="py-1 pr-4 font-medium">Monthly cost</th>
+                    <th className="py-1 pr-4 font-medium">MRR / mo</th>
+                    <th className="py-1 pr-4 font-medium">Monthly margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupSkuRows.map((r) => (
+                    <tr key={`${r.sku}|${r.name}`} className="border-t align-top">
+                      <td className="py-1.5 pr-4 font-mono text-xs">{r.sku}</td>
+                      <td className="py-1.5 pr-4">{r.name}</td>
+                      <td className="py-1.5 pr-4 tabular-nums">{r.qty}</td>
+                      <td className="py-1.5 pr-4 tabular-nums">
+                        {formatCurrency(r.monthlyCost, groupCurrency)}
+                      </td>
+                      <td className="py-1.5 pr-4 tabular-nums">
+                        {formatCurrency(r.mrr, groupCurrency)}
+                      </td>
+                      <td className="py-1.5 pr-4 tabular-nums">
+                        {formatCurrency(r.monthlyMargin, groupCurrency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
         )}
 
@@ -331,9 +394,9 @@ export default async function ClientProfilePage({
           </div>
         )}
 
-        {/* Licensing / subscriptions — always shown when a TD SYNNEX record is
-            linked, with an honest empty state. */}
-        {td && (
+        {/* This client's own licensing (groups show the combined by-SKU table
+            above instead, to avoid a long duplicated list). */}
+        {!isGroup && td && (
           <Card>
             <h2 className="mb-3 text-sm font-semibold">
               Microsoft 365 licensing ({td.subscriptions.length})
