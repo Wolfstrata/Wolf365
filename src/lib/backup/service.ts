@@ -295,8 +295,10 @@ export async function dryRunRestore(opts: { now: Date }): Promise<DryRunResult> 
     });
     const status = await waitForOperations(operationIds);
 
-    // Best-effort cleanup: the preserve branch (looked up by name), then the
-    // source and target test branches.
+    // Best-effort cleanup. After a restore the branches get re-parented, and
+    // Neon won't delete a branch that still has children — so we retry a couple
+    // of passes (children delete first, then their freed parents) rather than
+    // guessing the order.
     const toDelete: { id?: string; name: string }[] = [];
     try {
       const branches = await listBranches();
@@ -306,15 +308,22 @@ export async function dryRunRestore(opts: { now: Date }): Promise<DryRunResult> 
       /* listing failed; preserve branch (if any) will show as a leftover below */
       leftovers.push(preserveName);
     }
-    toDelete.push({ id: source.id, name: sourceName });
     toDelete.push({ id: target.id, name: targetName });
-    for (const b of toDelete) {
-      try {
-        if (b.id) await deleteBranch(b.id);
-      } catch {
-        leftovers.push(b.name);
+    toDelete.push({ id: source.id, name: sourceName });
+
+    let remaining = toDelete.filter((b) => b.id);
+    for (let pass = 0; pass < 3 && remaining.length > 0; pass++) {
+      const failed: typeof remaining = [];
+      for (const b of remaining) {
+        try {
+          await deleteBranch(b.id!);
+        } catch {
+          failed.push(b);
+        }
       }
+      remaining = failed;
     }
+    leftovers.push(...remaining.map((b) => b.name));
 
     const ok = status === "finished";
     let message = ok
