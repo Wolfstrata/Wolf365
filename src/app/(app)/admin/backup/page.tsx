@@ -7,6 +7,7 @@ import { formatDateTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { isNeonConfigured } from "@/lib/backup/neon";
 import { BackupPanel } from "./backup-panel";
+import { RestoreButton } from "./restore-button";
 
 const STATUS_STYLES: Record<string, string> = {
   SUCCESS: "bg-success/15 text-success",
@@ -95,6 +96,7 @@ export default async function BackupPage() {
                     <th className="px-4 py-2 font-medium">Status</th>
                     <th className="px-4 py-2 font-medium">Snapshot</th>
                     <th className="px-4 py-2 font-medium">By</th>
+                    <th className="px-4 py-2 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -122,6 +124,16 @@ export default async function BackupPage() {
                       </td>
                       <td className="px-4 py-2 text-muted-foreground">
                         {b.createdBy?.name ?? b.createdBy?.email ?? "Cron"}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {b.status === "SUCCESS" &&
+                        b.kind === "NEON_BRANCH" &&
+                        b.neonBranchId &&
+                        b.branchName ? (
+                          <RestoreButton backupId={b.id} branchName={b.branchName} />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

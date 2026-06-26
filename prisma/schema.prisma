@@ -255,6 +255,7 @@ enum AuditAction {
   OPPORTUNITY_DELETED
   BACKUP_CREATED
   BACKUP_DELETED
+  BACKUP_RESTORED
 }
 
 model AuditLog {

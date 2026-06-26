@@ -55,6 +55,9 @@ const serverSchema = z.object({
   // the backup UI shows "not configured" and only the JSON export works.
   NEON_API_KEY: z.string().optional(),
   NEON_PROJECT_ID: z.string().optional(),
+  // Production/default branch to restore INTO. Optional — auto-detected from
+  // the project's default branch when blank.
+  NEON_BRANCH_ID: z.string().optional(),
   // How long to keep Neon backup branches before they're pruned.
   BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 

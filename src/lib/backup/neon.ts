@@ -24,6 +24,9 @@ export interface NeonBranch {
   id: string;
   name: string;
   created_at?: string;
+  /** Production/primary branch flag (Neon renamed `primary` → `default`). */
+  default?: boolean;
+  primary?: boolean;
 }
 
 function neonConfig(): { apiKey: string; projectId: string } {
@@ -101,4 +104,77 @@ export async function deleteBranch(branchId: string): Promise<void> {
   });
   // 404 = already gone; treat as success so pruning is idempotent.
   if (!res.ok && res.status !== 404) throw new Error(await describeError(res));
+}
+
+/**
+ * Resolve the production branch id to restore INTO. Uses NEON_BRANCH_ID when
+ * set, otherwise the project's default (a.k.a. primary) branch.
+ */
+export async function getDefaultBranchId(): Promise<string> {
+  const override = getEnv().NEON_BRANCH_ID;
+  if (override) return override;
+  const branches = await listBranches();
+  const def = branches.find((b) => b.default === true || b.primary === true);
+  if (!def) {
+    throw new Error("Could not determine the default Neon branch; set NEON_BRANCH_ID.");
+  }
+  return def.id;
+}
+
+/**
+ * Restore `targetBranchId` to the state of `sourceBranchId`. `preserveName`
+ * saves the target's CURRENT state as a new branch first (a safety backup), so
+ * the restore is reversible. Returns the ids of the async operations to poll.
+ */
+export async function restoreBranch(opts: {
+  targetBranchId: string;
+  sourceBranchId: string;
+  preserveName: string;
+}): Promise<string[]> {
+  const { apiKey, projectId } = neonConfig();
+  const res = await neonFetch(
+    `/projects/${projectId}/branches/${opts.targetBranchId}/restore`,
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        source_branch_id: opts.sourceBranchId,
+        preserve_under_name: opts.preserveName,
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(await describeError(res));
+  const data = (await res.json()) as { operations?: { id: string }[] };
+  return (data.operations ?? []).map((o) => o.id);
+}
+
+/**
+ * Best-effort poll of Neon operations until all finish or the timeout elapses.
+ * Returns "finished", "failed", or "in_progress" (on timeout). Bounded so it
+ * stays well under the calling route's maxDuration.
+ */
+export async function waitForOperations(
+  operationIds: string[],
+  timeoutMs = 20_000,
+): Promise<"finished" | "failed" | "in_progress"> {
+  if (operationIds.length === 0) return "finished";
+  const { apiKey, projectId } = neonConfig();
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const statuses = await Promise.all(
+      operationIds.map(async (id) => {
+        const res = await neonFetch(`/projects/${projectId}/operations/${id}`, apiKey, {
+          method: "GET",
+        });
+        if (!res.ok) return "unknown";
+        const data = (await res.json()) as { operation?: { status?: string } };
+        return data.operation?.status ?? "unknown";
+      }),
+    );
+    if (statuses.some((s) => s === "failed" || s === "error")) return "failed";
+    if (statuses.every((s) => s === "finished")) return "finished";
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return "in_progress";
 }

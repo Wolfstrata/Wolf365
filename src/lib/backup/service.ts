@@ -2,7 +2,14 @@ import { prisma } from "@/lib/db";
 import { getEnv } from "@/env";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
-import { isNeonConfigured, createBranch, deleteBranch } from "@/lib/backup/neon";
+import {
+  isNeonConfigured,
+  createBranch,
+  deleteBranch,
+  getDefaultBranchId,
+  restoreBranch,
+  waitForOperations,
+} from "@/lib/backup/neon";
 
 export interface BackupActor {
   id: string | null;
@@ -132,6 +139,114 @@ export async function pruneExpiredBackups(now: Date): Promise<{ pruned: number; 
     }
   }
   return { pruned, errors };
+}
+
+export interface RestoreResult {
+  ok: boolean;
+  configured: boolean;
+  message: string;
+  preserveName?: string;
+}
+
+/**
+ * Restore the production database from a previously captured Neon snapshot.
+ * DESTRUCTIVE: overwrites all current data with the snapshot. A safety branch
+ * (the current state) is preserved first so the restore is reversible.
+ *
+ * The caller must pass `confirmation` equal to the snapshot's branch name; this
+ * is re-validated server-side. No DB writes happen after the restore call (the
+ * connection resets), so the audit entry is written beforehand and is captured
+ * in the preserved safety branch.
+ */
+export async function restoreFromBackup(opts: {
+  backupId: string;
+  confirmation: string;
+  actor: BackupActor;
+  now: Date;
+}): Promise<RestoreResult> {
+  if (!isNeonConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      message: "Neon backups are not configured (set NEON_API_KEY and NEON_PROJECT_ID).",
+    };
+  }
+
+  const backup = await prisma.backup.findUnique({ where: { id: opts.backupId } });
+  if (
+    !backup ||
+    backup.kind !== "NEON_BRANCH" ||
+    backup.status !== "SUCCESS" ||
+    !backup.neonBranchId
+  ) {
+    return {
+      ok: false,
+      configured: true,
+      message: "This snapshot is not restorable (missing, failed, or already pruned).",
+    };
+  }
+
+  if (opts.confirmation !== backup.branchName) {
+    return {
+      ok: false,
+      configured: true,
+      message: "Confirmation text did not match the snapshot name. Restore cancelled.",
+    };
+  }
+
+  let targetBranchId: string;
+  try {
+    targetBranchId = await getDefaultBranchId();
+  } catch (err) {
+    return { ok: false, configured: true, message: safeErrorMessage(err) };
+  }
+
+  if (targetBranchId === backup.neonBranchId) {
+    return {
+      ok: false,
+      configured: true,
+      message: "The snapshot branch is the live branch; nothing to restore.",
+    };
+  }
+
+  const preserveName = `pre-restore-${opts.now.toISOString().replace(/[:.]/g, "-")}`;
+
+  // Written BEFORE the restore so it lands in the preserved safety branch. The
+  // restore reverts production data, so this row will not persist in production.
+  await audit({
+    action: "BACKUP_RESTORED",
+    actorId: opts.actor.id,
+    actorEmail: opts.actor.email,
+    target: `backup:${backup.id}`,
+    metadata: {
+      branchName: backup.branchName,
+      sourceBranchId: backup.neonBranchId,
+      targetBranchId,
+      preserveName,
+    },
+  });
+
+  try {
+    const operationIds = await restoreBranch({
+      targetBranchId,
+      sourceBranchId: backup.neonBranchId,
+      preserveName,
+    });
+    const status = await waitForOperations(operationIds);
+    const done = status === "finished";
+    return {
+      ok: status !== "failed",
+      configured: true,
+      preserveName,
+      message: done
+        ? `Restore complete. Current state was preserved as "${preserveName}".`
+        : status === "failed"
+          ? "Restore failed — see the Neon console. Your data was not changed by a failed restore."
+          : `Restore initiated; it is still completing in Neon. Current state preserved as "${preserveName}".`,
+    };
+  } catch (err) {
+    return { ok: false, configured: true, message: safeErrorMessage(err) };
+  }
 }
 
 /**
