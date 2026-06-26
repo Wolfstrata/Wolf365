@@ -256,6 +256,7 @@ enum AuditAction {
   BACKUP_CREATED
   BACKUP_DELETED
   BACKUP_RESTORED
+  SANDBOX_DATA_PURGED
 }
 
 model AuditLog {

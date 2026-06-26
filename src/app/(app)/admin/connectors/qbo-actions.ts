@@ -20,9 +20,50 @@ import {
 } from "@/connectors/quickbooks/oauth";
 import { getQboEndpoints } from "@/connectors/quickbooks/discovery";
 import { loadQboConnection, qboRedirectUri } from "@/connectors/quickbooks/store";
+import { purgeNonProductionQboData } from "@/lib/maintenance/qbo-cleanup";
 
 const STATE_COOKIE = "qbo_oauth_state";
 const CONNECTOR_PAGE = "/admin/connectors/QUICKBOOKS_ONLINE";
+
+export interface QboCleanupActionResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Remove leftover sandbox/test QuickBooks data, keeping only the connected
+ * production company's records. DESTRUCTIVE but scoped by production realm id.
+ */
+export async function cleanupSandboxDataAction(
+  _prev: QboCleanupActionResult | null,
+  _formData: FormData,
+): Promise<QboCleanupActionResult> {
+  const user = await requirePermission("connectors:configure");
+  const rl = await rateLimit(`qbo-cleanup:${user.id}`, 10, 60_000);
+  if (!rl.ok) return { ok: false, message: "Too many attempts — wait a moment and retry." };
+  try {
+    const result = await purgeNonProductionQboData();
+    if (result.ok) {
+      await audit({
+        action: "SANDBOX_DATA_PURGED",
+        actorId: user.id,
+        actorEmail: user.email,
+        target: "connector:QUICKBOOKS_ONLINE",
+        metadata: {
+          customersDeleted: result.customersDeleted,
+          itemsDeleted: result.itemsDeleted,
+          clientsDeleted: result.clientsDeleted,
+          clientsKept: result.clientsKept,
+        },
+      });
+      revalidatePath(CONNECTOR_PAGE);
+      revalidatePath("/clients");
+    }
+    return { ok: result.ok, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
 
 /**
  * Begin the QuickBooks OAuth flow. A POST server action (CSRF-protected by

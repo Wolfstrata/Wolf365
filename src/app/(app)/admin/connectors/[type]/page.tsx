@@ -8,6 +8,7 @@ import { getConnectorView } from "@/lib/connectors/service";
 import { PageHeader, HealthBadge, StatItem } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
 import { ConnectorConfigForm } from "./config-form";
+import { SandboxCleanup } from "../sandbox-cleanup";
 import {
   saveConnectorAction,
   testConnectionAction,
@@ -133,6 +134,7 @@ export default async function ConnectorConfigPage({
                 </form>
               </div>
             )}
+            {canConfigure && <SandboxCleanup />}
           </div>
         )}
 
