@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Activity, DatabaseBackup, Download, Loader2 } from "lucide-react";
+import { Activity, DatabaseBackup, Download, FlaskConical, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   triggerBackupAction,
   checkNeonAccessAction,
+  dryRunRestoreAction,
   type BackupActionResult,
 } from "./actions";
 
@@ -19,6 +20,10 @@ export function BackupPanel({ neonConfigured }: { neonConfigured: boolean }) {
     BackupActionResult | null,
     FormData
   >(checkNeonAccessAction, null);
+  const [dryState, dryAction, drying] = useActionState<
+    BackupActionResult | null,
+    FormData
+  >(dryRunRestoreAction, null);
 
   return (
     <div className="space-y-3">
@@ -71,6 +76,25 @@ export function BackupPanel({ neonConfigured }: { neonConfigured: boolean }) {
             Check Neon connection
           </button>
         </form>
+
+        <form action={dryAction}>
+          <button
+            type="submit"
+            disabled={!neonConfigured || drying}
+            title="Safe end-to-end test: creates throwaway test branches, restores one from the other, then deletes them. Never touches production."
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent",
+              (!neonConfigured || drying) && "cursor-not-allowed opacity-50",
+            )}
+          >
+            {drying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FlaskConical className="h-4 w-4" />
+            )}
+            Dry-run restore (safe test)
+          </button>
+        </form>
       </div>
 
       {state && (
@@ -81,6 +105,11 @@ export function BackupPanel({ neonConfigured }: { neonConfigured: boolean }) {
       {checkState && (
         <p className={cn("text-sm", checkState.ok ? "text-success" : "text-danger")}>
           {checkState.message}
+        </p>
+      )}
+      {dryState && (
+        <p className={cn("text-sm", dryState.ok ? "text-success" : "text-danger")}>
+          {dryState.message}
         </p>
       )}
     </div>

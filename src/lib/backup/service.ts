@@ -6,6 +6,7 @@ import {
   isNeonConfigured,
   createBranch,
   deleteBranch,
+  listBranches,
   getDefaultBranchId,
   restoreBranch,
   waitForOperations,
@@ -246,6 +247,99 @@ export async function restoreFromBackup(opts: {
     };
   } catch (err) {
     return { ok: false, configured: true, message: safeErrorMessage(err) };
+  }
+}
+
+export interface DryRunResult {
+  ok: boolean;
+  configured: boolean;
+  message: string;
+  /** Test branch names that could not be auto-cleaned up. */
+  leftovers: string[];
+}
+
+/**
+ * Validate the full restore API end-to-end WITHOUT touching production: create
+ * two disposable test branches, restore one from the other (exercising the same
+ * restoreBranch + operations-polling + preserve-branch path used for real), then
+ * delete every test branch created. The target is always a brand-new branch, so
+ * production/default is never the restore target.
+ */
+export async function dryRunRestore(opts: { now: Date }): Promise<DryRunResult> {
+  if (!isNeonConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      message: "Neon backups are not configured (set NEON_API_KEY and NEON_PROJECT_ID).",
+      leftovers: [],
+    };
+  }
+
+  const stamp = opts.now.toISOString().replace(/[:.]/g, "-");
+  const targetName = `restore-selftest-target-${stamp}`;
+  const sourceName = `restore-selftest-source-${stamp}`;
+  const preserveName = `restore-selftest-preserve-${stamp}`;
+  const created: { id: string; name: string }[] = [];
+  const leftovers: string[] = [];
+
+  try {
+    const target = await createBranch(targetName);
+    created.push(target);
+    const source = await createBranch(sourceName);
+    created.push(source);
+
+    const operationIds = await restoreBranch({
+      targetBranchId: target.id,
+      sourceBranchId: source.id,
+      preserveName,
+    });
+    const status = await waitForOperations(operationIds);
+
+    // Best-effort cleanup: the preserve branch (looked up by name), then the
+    // source and target test branches.
+    const toDelete: { id?: string; name: string }[] = [];
+    try {
+      const branches = await listBranches();
+      const preserve = branches.find((b) => b.name === preserveName);
+      if (preserve) toDelete.push({ id: preserve.id, name: preserveName });
+    } catch {
+      /* listing failed; preserve branch (if any) will show as a leftover below */
+      leftovers.push(preserveName);
+    }
+    toDelete.push({ id: source.id, name: sourceName });
+    toDelete.push({ id: target.id, name: targetName });
+    for (const b of toDelete) {
+      try {
+        if (b.id) await deleteBranch(b.id);
+      } catch {
+        leftovers.push(b.name);
+      }
+    }
+
+    const ok = status === "finished";
+    let message = ok
+      ? "Dry-run succeeded: created two test branches, restored one from the other, and the safety branch was created — the restore API works end-to-end. Production was untouched."
+      : status === "failed"
+        ? "Dry-run FAILED at the Neon operations stage — fix this before relying on restore. Production was untouched."
+        : "Dry-run was accepted by Neon but operations were still completing at timeout. The API call shape is valid; production was untouched.";
+    if (leftovers.length) {
+      message += ` Could not auto-delete test branch(es): ${leftovers.join(", ")} — remove them in the Neon console.`;
+    }
+    return { ok, configured: true, message, leftovers };
+  } catch (err) {
+    // Clean up anything we created before the failure.
+    for (const b of created) {
+      try {
+        await deleteBranch(b.id);
+      } catch {
+        leftovers.push(b.name);
+      }
+    }
+    let message = `Dry-run error: ${safeErrorMessage(err)} Production was untouched.`;
+    if (leftovers.length) {
+      message += ` Could not auto-delete: ${leftovers.join(", ")} — remove them in the Neon console.`;
+    }
+    return { ok: false, configured: true, message, leftovers };
   }
 }
 

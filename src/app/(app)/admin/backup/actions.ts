@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/session";
 import { safeErrorMessage } from "@/lib/redact";
-import { runNeonBackup, restoreFromBackup } from "@/lib/backup/service";
+import { runNeonBackup, restoreFromBackup, dryRunRestore } from "@/lib/backup/service";
 import { checkNeonAccess } from "@/lib/backup/neon";
 
 export interface BackupActionResult {
@@ -24,6 +24,23 @@ export async function triggerBackupAction(
       now: new Date(),
     });
     revalidatePath("/admin/backup");
+    return { ok: result.ok, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Validate the restore API end-to-end on disposable test branches. Never
+ * touches production; cleans up after itself.
+ */
+export async function dryRunRestoreAction(
+  _prev: BackupActionResult | null,
+  _formData: FormData,
+): Promise<BackupActionResult> {
+  await requirePermission("backups:manage");
+  try {
+    const result = await dryRunRestore({ now: new Date() });
     return { ok: result.ok, message: result.message };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

@@ -9,6 +9,10 @@ import { isNeonConfigured } from "@/lib/backup/neon";
 import { BackupPanel } from "./backup-panel";
 import { RestoreButton } from "./restore-button";
 
+// Server actions on this route (dry-run restore) make several sequential Neon
+// API calls; give them headroom.
+export const maxDuration = 120;
+
 const STATUS_STYLES: Record<string, string> = {
   SUCCESS: "bg-success/15 text-success",
   FAILED: "bg-danger/15 text-danger",
