@@ -62,6 +62,29 @@ export default async function ClientProfilePage({
       })
     : [];
 
+  // Group rollup: cumulative recurring across this client + all its
+  // subsidiaries' M365 licensing (only when it actually has subsidiaries).
+  const groupSubs =
+    client.subsidiaries.length > 0
+      ? await prisma.tdSynnexSubscription.findMany({
+          where: {
+            customer: {
+              client: { OR: [{ id: client.id }, { parentClientId: client.id }] },
+            },
+          },
+          select: {
+            customerPrice: true,
+            unitCost: true,
+            quantity: true,
+            billingFrequency: true,
+            status: true,
+            currency: true,
+          },
+        })
+      : [];
+  const groupSummary = groupSubs.length > 0 ? recurringSummary(groupSubs.map(toRecurringInput)) : null;
+  const groupCurrency = groupSubs.find((s) => s.currency)?.currency ?? "CAD";
+
   const qbo = client.qboCustomer;
   const td = client.tdSynnexCustomer;
 
@@ -231,6 +254,37 @@ export default async function ClientProfilePage({
             </div>
           )}
         </Card>
+
+        {/* Group rollup across parent + subsidiaries */}
+        {client.subsidiaries.length > 0 && groupSummary && (
+          <Card>
+            <h2 className="text-sm font-semibold">
+              Group totals — {client.name} + {client.subsidiaries.length}{" "}
+              subsidiary{client.subsidiaries.length === 1 ? "" : "ies"}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Cumulative recurring across this client and all its subsidiaries&apos;
+              Microsoft 365 licensing.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatItem label="Group MRR" value={formatCurrency(groupSummary.mrr, groupCurrency)} />
+              <StatItem label="Group ARR" value={formatCurrency(groupSummary.arr, groupCurrency)} />
+              <StatItem
+                label="Monthly cost"
+                value={formatCurrency(groupSummary.monthlyCost, groupCurrency)}
+              />
+              <StatItem
+                label={`Monthly margin (${groupSummary.marginPct}%)`}
+                value={formatCurrency(groupSummary.monthlyMargin, groupCurrency)}
+              />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {groupSummary.activeCount} active subscription
+              {groupSummary.activeCount === 1 ? "" : "s"} across{" "}
+              {1 + client.subsidiaries.length} clients.
+            </p>
+          </Card>
+        )}
 
         {/* Per-client recurring totals from M365 licensing */}
         {recurring && recurring.activeCount > 0 && (
