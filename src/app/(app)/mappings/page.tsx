@@ -58,6 +58,18 @@ export default async function MappingsPage() {
     }),
   ]);
 
+  // Human-readable product name per SKU, so reviewers aren't decoding raw codes.
+  const skuList = [...new Set(productMappings.map((m) => m.tdSynnexSku))];
+  const skuNames = new Map(
+    (
+      await prisma.tdSynnexSubscription.findMany({
+        where: { productSku: { in: skuList } },
+        select: { productSku: true, productName: true },
+        distinct: ["productSku"],
+      })
+    ).map((s) => [s.productSku, s.productName]),
+  );
+
   const linkCounts = {
     total: links.length,
     both: links.filter((l) => l.qboCustomer && l.tdSynnexCustomer).length,
@@ -225,10 +237,18 @@ export default async function MappingsPage() {
               {productMappings.map((m) => (
                 <Card key={m.id} className="flex items-center justify-between">
                   <div className="text-sm">
-                    <p className="font-mono">{m.tdSynnexSku}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      → {m.qboItemName ?? m.qboItemId ?? "Unmapped"} · Confidence{" "}
-                      <ConfidenceBadge value={m.confidence} /> · {m.status}
+                    <p className="font-medium">
+                      {skuNames.get(m.tdSynnexSku) ?? m.tdSynnexSku}
+                    </p>
+                    <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                      {m.tdSynnexSku}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Bill under QuickBooks item:{" "}
+                      <span className="font-medium text-foreground">
+                        {m.qboItemName ?? m.qboItemId ?? "Unmapped"}
+                      </span>{" "}
+                      · Confidence <ConfidenceBadge value={m.confidence} /> · {m.status}
                     </p>
                   </div>
                   {canApprove && m.status === "PROPOSED" && (
