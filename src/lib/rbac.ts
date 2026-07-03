@@ -28,6 +28,7 @@ export type Permission =
   | "audit:read"
   | "crm:read"
   | "crm:write"
+  | "crm:manage"
   | "backups:manage";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -52,6 +53,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "audit:read",
     "crm:read",
     "crm:write",
+    "crm:manage",
     "backups:manage",
   ],
   // Power User — can operate the whole billing pipeline and run syncs / test
@@ -74,6 +76,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "audit:read",
     "crm:read",
     "crm:write",
+    "crm:manage",
   ],
   // Sales — CRM only. Manage opportunities and view the sales forecast; no
   // access to billing, connectors, or admin settings.

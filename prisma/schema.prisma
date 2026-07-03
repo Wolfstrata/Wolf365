@@ -51,6 +51,7 @@ model User {
   ownedOpportunities   CrmOpportunity[] @relation("OpportunityOwner")
   createdOpportunities CrmOpportunity[] @relation("OpportunityCreator")
   createdBackups       Backup[]         @relation("BackupCreator")
+  salesQuotas          SalesQuota[]     @relation("SalesQuotaUser")
 
   @@index([role])
 }
@@ -257,6 +258,9 @@ enum AuditAction {
   BACKUP_DELETED
   BACKUP_RESTORED
   SANDBOX_DATA_PURGED
+  QUOTA_SET
+  LEAD_UPDATED
+  LEADS_IMPORTED
 }
 
 model AuditLog {
@@ -800,6 +804,51 @@ model CrmOpportunity {
   @@index([ownerId])
   @@index([closeDate])
   @@index([clientId])
+}
+
+// ---------------------------------------------------------------------------
+// Sales management — quota targets per salesperson. quarter 0 = annual,
+// 1–4 = calendar quarters (0 instead of NULL so the composite unique works).
+// Attainment is computed from CLOSED_WON opportunity amounts in the period.
+model SalesQuota {
+  id           String  @id @default(cuid())
+  userId       String
+  user         User    @relation("SalesQuotaUser", fields: [userId], references: [id], onDelete: Cascade)
+  year         Int
+  quarter      Int     @default(0) // 0 = annual, 1..4 = quarter
+  targetAmount Decimal @db.Decimal(18, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, year, quarter])
+  @@index([year])
+}
+
+// ---------------------------------------------------------------------------
+// Leads — fed in from external sources (e.g. a ZoomInfo workflow POSTing to
+// /api/leads). String status keeps the migration simple; allowed values:
+// NEW | CONTACTED | QUALIFIED | DISQUALIFIED | CONVERTED.
+model Lead {
+  id         String  @id @default(cuid())
+  externalId String? @unique // source id (e.g. ZoomInfo person id)
+  firstName  String?
+  lastName   String?
+  fullName   String?
+  company    String?
+  title      String?
+  email      String?
+  phone      String?
+  website    String?
+  source     String  @default("zoominfo")
+  status     String  @default("NEW")
+  notes      String? @db.Text
+  raw        Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([status])
+  @@index([email])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Managed Services", href: "/crm/managed-services", icon: "Wrench", section: "CRM", permission: "crm:read" },
   { label: "Managed NOC", href: "/crm/managed-noc", icon: "Network", section: "CRM", permission: "crm:read" },
   { label: "M365", href: "/crm/m365", icon: "Cloud", section: "CRM", permission: "crm:read" },
+  { label: "Leads", href: "/crm/leads", icon: "Inbox", section: "CRM", permission: "crm:read" },
+  { label: "Sales Management", href: "/crm/sales-management", icon: "Target", section: "CRM", permission: "crm:read" },
   { label: "Mappings", href: "/mappings", icon: "GitMerge", section: "Reconciliation", permission: "mappings:read" },
   { label: "Exceptions", href: "/exceptions", icon: "TriangleAlert", section: "Reconciliation", permission: "reports:read" },
   { label: "Reports", href: "/reports", icon: "BarChart3", section: "Reconciliation", permission: "reports:read" },

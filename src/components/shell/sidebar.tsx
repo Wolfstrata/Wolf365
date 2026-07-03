@@ -25,6 +25,8 @@ import {
   BookText,
   Headset,
   Building,
+  Inbox,
+  Target,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,6 +55,8 @@ const ICONS: Record<string, LucideIcon> = {
   BookText,
   Headset,
   Building,
+  Inbox,
+  Target,
 };
 
 const SECTION_ORDER = [

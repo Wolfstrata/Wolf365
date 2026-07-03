@@ -65,6 +65,10 @@ const serverSchema = z.object({
   // mailto:) or an http(s) support URL. Defaults to the shared support inbox.
   WOLF365_SUPPORT_CONTACT: z.string().default("rperumal@wolfstrata.com"),
 
+  // Bearer token that external workflows (e.g. ZoomInfo) use to POST leads to
+  // /api/leads. The endpoint refuses all requests until this is set.
+  WOLF365_LEADS_TOKEN: z.string().optional(),
+
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
