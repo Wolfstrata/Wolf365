@@ -17,7 +17,6 @@ import { safeErrorMessage } from "@/lib/redact";
 import {
   CRM_LINES,
   STAGE_PROBABILITY,
-  OPPORTUNITY_FIELD_COLUMNS,
   ALL_LOCKABLE_COLUMNS,
 } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
@@ -161,16 +160,12 @@ export async function saveOpportunityAction(
       const existing = await prisma.crmOpportunity.findUniqueOrThrow({
         where: { id: data.id },
       });
-      // Field-level sync lock: lock exactly the fields the user changed (plus the
-      // columns they derive) so the connector sync keeps those values but still
-      // updates everything else.
+      // Once a user changes ANY value, their numbers win from then on: lock the
+      // whole record against future connector syncs. (Imports still use the
+      // standard rules for untouched records; the padlock unlocks this one.)
       const changed = changedFormFields(existing, { ...fields, probability });
-      const lockedFields = [
-        ...new Set([
-          ...existing.lockedFields,
-          ...changed.flatMap((f) => OPPORTUNITY_FIELD_COLUMNS[f] ?? []),
-        ]),
-      ];
+      const lockedFields =
+        changed.length > 0 ? ALL_LOCKABLE_COLUMNS : existing.lockedFields;
       await prisma.crmOpportunity.update({
         where: { id: data.id },
         data: { ...fields, lockedFields, locallyModifiedAt: new Date() },
