@@ -116,9 +116,42 @@ export function OpportunityForm({
     setForecastCategory(forecastCategoryForProbability(stage, prob));
   }
 
+  // Changing the term is ambiguous for money: keep the MRR (contract value
+  // changes) or keep the contract value (MRR changes)? Ask instead of guessing.
+  // `from` anchors to the term the current MRR was entered against, even if the
+  // user flips the select several times before deciding.
+  const [termPrompt, setTermPrompt] = useState<{ from: number; to: number } | null>(null);
+
+  function onTermChange(next: number) {
+    const prev = termYears;
+    setTermYears(next);
+    const anchor = termPrompt?.from ?? prev;
+    if (next !== anchor && (Number(monthlyAmount) || 0) > 0) {
+      setTermPrompt({ from: anchor, to: next });
+    } else {
+      setTermPrompt(null); // back to the original term, or no MRR to adjust
+    }
+  }
+
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  /** Keep the total contract value: rescale MRR (and margin) to the new term. */
+  function recalcMrrForTerm() {
+    if (!termPrompt) return;
+    const factor = termPrompt.from / termPrompt.to;
+    const amt = Number(monthlyAmount) || 0;
+    if (amt > 0) setMonthlyAmount(String(round2(amt * factor)));
+    const mgn = Number(monthlyMargin) || 0;
+    if (mgn > 0) setMonthlyMargin(String(round2(mgn * factor)));
+    setTermPrompt(null);
+  }
+
   const mrr = Number(monthlyAmount) || 0;
   const marginPct = computeMarginPercentage(mrr, Number(monthlyMargin) || 0);
   const tcv = totalContractValue(mrr, termYears);
+  // Preview for the term prompt: what MRR becomes if the contract value is kept.
+  const promptMrr = termPrompt ? round2(mrr * (termPrompt.from / termPrompt.to)) : 0;
+  const promptTcv = termPrompt ? totalContractValue(mrr, termPrompt.from) : 0;
 
   return (
     <form action={action} className="space-y-8">
@@ -241,7 +274,7 @@ export function OpportunityForm({
             <select
               name="termYears"
               value={termYears}
-              onChange={(e) => setTermYears(Number(e.target.value))}
+              onChange={(e) => onTermChange(Number(e.target.value))}
               className={inputCls}
             >
               {TERM_YEARS_OPTIONS.map((y) => (
@@ -250,6 +283,34 @@ export function OpportunityForm({
                 </option>
               ))}
             </select>
+            {termPrompt && (
+              <div className="mt-2 space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+                <p>
+                  Term changed from {termPrompt.from} to {termPrompt.to} year
+                  {termPrompt.to > 1 ? "s" : ""}. Keep the total contract value at{" "}
+                  <strong>{formatCurrency(promptTcv)}</strong> by recalculating MRR{" "}
+                  {formatCurrency(mrr)} → <strong>{formatCurrency(promptMrr)}</strong>
+                  /mo, or keep the MRR (contract value becomes{" "}
+                  {formatCurrency(tcv)})?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={recalcMrrForTerm}
+                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+                  >
+                    Recalculate MRR (keep contract value)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTermPrompt(null)}
+                    className="rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
+                  >
+                    Keep MRR
+                  </button>
+                </div>
+              </div>
+            )}
           </Field>
           <Field
             label="Billing Frequency"
