@@ -167,6 +167,7 @@ export const salesforceConnector: ConnectorDefinition<
     );
     // Real probe: count opportunities matching the configured filter.
     const where = (ctx.config.soqlFilter ?? "").trim();
+    if (where) assertSoqlFilter(where);
     const soql = `SELECT COUNT() FROM Opportunity${where ? ` WHERE ${where}` : ""}`;
     const { totalSize } = await runQuery(ctx, soql, "test_count");
     return {
@@ -202,6 +203,13 @@ export const salesforceConnector: ConnectorDefinition<
     const termField = (ctx.config.termField ?? "").trim();
     const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
     const where = (ctx.config.soqlFilter ?? "").trim();
+
+    // Validate all admin-configured values that get interpolated into the SOQL
+    // before building the query (field names in the SELECT, filter in WHERE).
+    assertFieldName(amountField, "Amount field");
+    if (marginField) assertFieldName(marginField, "Margin field");
+    if (termField) assertFieldName(termField, "Term field");
+    if (where) assertSoqlFilter(where);
 
     // Standard fields + any configured custom fields (deduped).
     const fields = [
@@ -326,6 +334,42 @@ interface QueryResponse {
   done: boolean;
   nextRecordsUrl?: string;
   records: Record<string, unknown>[];
+}
+
+// --- SOQL safety -----------------------------------------------------------
+
+/**
+ * SObject field API names are simple identifiers that may traverse
+ * relationships (e.g. Account.Name) and carry custom __c/__r suffixes. The
+ * amount/margin/term fields are ADMIN-configured and interpolated into the
+ * SELECT clause, so we validate them as field names — a value that isn't a
+ * plain identifier can't be used to restructure the query.
+ */
+const SOQL_FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$/;
+
+function assertFieldName(value: string, label: string): void {
+  if (!SOQL_FIELD_NAME.test(value)) {
+    throw new Error(
+      `Invalid Salesforce ${label} "${value}". Use a field API name such as "Amount" or "Account.Name".`,
+    );
+  }
+}
+
+/**
+ * The opportunity filter is an admin-authored SOQL WHERE fragment (a deliberate
+ * power-user feature, gated by connectors:configure and audited). SOQL is
+ * read-only and cannot stack statements, but we still reject characters that
+ * have no place in a WHERE clause so the fragment can't break out of the query.
+ */
+// eslint-disable-next-line no-control-regex
+const SOQL_FILTER_ILLEGAL = /[;{}\\\x00-\x1f]/;
+
+function assertSoqlFilter(where: string): void {
+  if (SOQL_FILTER_ILLEGAL.test(where)) {
+    throw new Error(
+      "Invalid opportunity filter: illegal character in the SOQL WHERE clause.",
+    );
+  }
 }
 
 function hostOf(url: string): string {
