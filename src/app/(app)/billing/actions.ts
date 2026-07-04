@@ -84,7 +84,7 @@ export async function createBillingRunAction(
 
 export async function transitionRunAction(formData: FormData): Promise<void> {
   const user = await requirePermission("billing:approve");
-  const runId = String(formData.get("runId"));
+  const runId = z.string().min(1).parse(formData.get("runId"));
   const to = String(formData.get("to")) as BillingRunStatus;
   await transitionBillingRun(runId, to, { id: user.id, email: user.email });
   revalidatePath(`/billing/${runId}`);
@@ -93,7 +93,7 @@ export async function transitionRunAction(formData: FormData): Promise<void> {
 /** Approve-gated push of the run to QuickBooks Online. */
 export async function pushRunAction(formData: FormData): Promise<void> {
   const user = await requirePermission("billing:push");
-  const runId = String(formData.get("runId"));
+  const runId = z.string().min(1).parse(formData.get("runId"));
   const { pushBillingRunToQbo } = await import("@/lib/billing/push");
   await pushBillingRunToQbo(runId, { id: user.id, email: user.email });
   revalidatePath(`/billing/${runId}`);
