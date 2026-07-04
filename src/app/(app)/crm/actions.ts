@@ -44,7 +44,7 @@ const dateish = z.preprocess(
 
 const schema = z.object({
   id: z.preprocess(emptyToUndefined, z.string().optional()),
-  line: z.nativeEnum(CrmLine),
+  line: z.enum(CrmLine),
   name: z.string().trim().min(1, "Opportunity Name is required"),
   accountName: z.string().trim().min(1, "Account Name is required"),
   monthlyAmount: numberish,
@@ -52,18 +52,18 @@ const schema = z.object({
   termYears: z.coerce.number().int().refine((n) => [1, 2, 3].includes(n), {
     message: "Term must be 1, 2 or 3 years",
   }),
-  billingFrequency: z.nativeEnum(CrmBillingFrequency),
-  stage: z.nativeEnum(CrmStage),
+  billingFrequency: z.enum(CrmBillingFrequency),
+  stage: z.enum(CrmStage),
   probability: z.preprocess(
     emptyToUndefined,
     z.coerce.number().int().min(0).max(100).optional(),
   ),
-  forecastCategory: z.nativeEnum(CrmForecastCategory),
+  forecastCategory: z.enum(CrmForecastCategory),
   closeDate: z.coerce.date({ message: "Close Date is required" }),
   estimatedInvoiceDate: dateish,
   cashInDate: dateish,
   lockbox: z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean()),
-  type: z.preprocess(emptyToUndefined, z.nativeEnum(CrmOpportunityType).optional()),
+  type: z.preprocess(emptyToUndefined, z.enum(CrmOpportunityType).optional()),
   leadSource: z.preprocess(emptyToUndefined, z.string().trim().optional()),
   nextStep: z.preprocess(emptyToUndefined, z.string().trim().optional()),
   description: z.preprocess(emptyToUndefined, z.string().trim().optional()),

@@ -19,12 +19,12 @@ const createSchema = z.object({
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().trim().optional(),
   ),
-  role: z.nativeEnum(Role),
+  role: z.enum(Role),
 });
 
 const roleSchema = z.object({
   userId: z.string().min(1),
-  role: z.nativeEnum(Role),
+  role: z.enum(Role),
 });
 
 const disableSchema = z.object({
