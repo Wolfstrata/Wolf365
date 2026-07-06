@@ -176,6 +176,63 @@ npx prisma migrate resolve --applied <migration_folder_name>
 > If sign-in ever shows "Server error / Configuration", it usually means a
 > migration is pending — run the Action (or `migrate deploy`) to apply it.
 
+### Baselining an existing database (error `P3005`)
+
+If `migrate deploy` fails with **`P3005 — The database schema is not empty`**,
+the database already has the tables but Prisma has no migration history
+(`_prisma_migrations`) for them — e.g. the schema was created out-of-band, or
+the DB was branched/restored. `migrate deploy` refuses to touch a non-empty DB
+it can't account for. Fix it **once** by recording the already-present
+migrations as applied. `migrate resolve --applied` only writes history rows; it
+never runs DDL, so it can't alter your data.
+
+From the repo folder with the **prod** Neon URLs exported (same values as the
+`DATABASE_URL` / `DIRECT_URL` CI secrets — resolve uses the direct URL):
+
+```powershell
+# 1. Verify FIRST — expect all migrations listed as "not yet applied" and the
+#    P3005 note. Only continue if the schema already matches the code (the app
+#    runs fine against this DB). If any show as genuinely pending NEW DDL, stop.
+npx --yes prisma@6.19.3 migrate status
+
+# 2. Mark every existing migration as applied, in order:
+$migrations = @(
+  "0_init",
+  "20260617120000_add_user_timezone",
+  "20260618000000_superops_billing",
+  "20260623000000_subscription_customer_price",
+  "20260624000000_rate_limit",
+  "20260624010000_three_role_model",
+  "20260624020000_crm_opportunities",
+  "20260624030000_crm_monthly_commission",
+  "20260624040000_salesforce_connector",
+  "20260624050000_user_created_audit",
+  "20260625000000_crm_fix_annual_mrr",
+  "20260625010000_crm_reclassify_by_name",
+  "20260625020000_crm_mrr_from_tcv",
+  "20260625030000_crm_local_edit_lock",
+  "20260626000000_backups",
+  "20260626010000_backup_restore",
+  "20260626020000_sandbox_purge_audit",
+  "20260626030000_opportunity_locked_fields",
+  "20260626040000_client_hierarchy",
+  "20260627000000_sales_quotas_leads"
+)
+foreach ($m in $migrations) {
+  Write-Host "resolving $m"
+  npx --yes prisma@6.19.3 migrate resolve --applied $m
+  if ($LASTEXITCODE -ne 0) { break }  # stop on the first failure
+}
+
+# 3. Confirm — status should say "up to date"; deploy should apply nothing:
+npx --yes prisma@6.19.3 migrate status
+npx --yes prisma@6.19.3 migrate deploy
+```
+
+After this the **Migrate Neon Database** Action goes green, and future runs only
+apply genuinely new migrations. Keep the list above in sync with
+`prisma/migrations/` if you ever need to baseline again.
+
 ---
 
 ## Gotchas
