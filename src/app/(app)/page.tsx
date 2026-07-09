@@ -8,6 +8,10 @@ import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
+import { DashboardSyncButtons } from "./sync-buttons";
+
+// On-demand connector syncs run inline; allow the same window as the cron.
+export const maxDuration = 300;
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -93,6 +97,7 @@ export default async function DashboardPage() {
       <PageHeader
         title={`Welcome${user.name ? `, ${user.name.split(" ")[0]}` : ""}`}
         description="Microsoft 365 billing reconciliation workspace"
+        actions={can(user.role, "connectors:sync") ? <DashboardSyncButtons /> : undefined}
       />
       <div className="p-8">
         {/* Recurring revenue / cost / margin from synced M365 licensing */}

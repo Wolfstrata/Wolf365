@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
+import { ClearRunsButton } from "./clear-runs-button";
 
 const STATUS_STYLES: Record<string, string> = {
   DRAFT: "bg-muted text-muted-foreground",
@@ -18,11 +19,16 @@ const STATUS_STYLES: Record<string, string> = {
 /** Billing run history. Real runs only; empty until the first run is created. */
 export default async function BillingPage() {
   const user = await requirePermission("billing:read");
-  const runs = await prisma.billingRun.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { client: true, _count: { select: { lines: true } } },
-    take: 100,
-  });
+  const [runs, clearableCount] = await Promise.all([
+    prisma.billingRun.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { client: true, _count: { select: { lines: true } } },
+      take: 100,
+    }),
+    prisma.billingRun.count({ where: { status: { in: ["DRAFT", "CANCELLED"] } } }),
+  ]);
+
+  const canEdit = can(user.role, "billing:edit");
 
   return (
     <div>
@@ -30,13 +36,16 @@ export default async function BillingPage() {
         title="Billing Runs"
         description="Generate, review, approve, and push invoices to QuickBooks Online."
         actions={
-          can(user.role, "billing:edit") ? (
-            <Link
-              href="/billing/new"
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              New billing run
-            </Link>
+          canEdit ? (
+            <div className="flex items-center gap-3">
+              <ClearRunsButton count={clearableCount} />
+              <Link
+                href="/billing/new"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                New billing run
+              </Link>
+            </div>
           ) : null
         }
       />

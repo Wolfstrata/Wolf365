@@ -62,7 +62,7 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 const SECTION_ORDER = [
-  "Workspace",
+  "Finance Workspace",
   "Connector Data",
   "CRM",
   "Reconciliation",

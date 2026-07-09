@@ -105,6 +105,48 @@ export async function createBillingRunAction(
   redirect(`/billing/${runId}`);
 }
 
+/** Statuses that are safe to bulk-delete: not-yet-committed work only. */
+const CLEARABLE_STATUSES: BillingRunStatus[] = ["DRAFT", "CANCELLED"];
+
+/**
+ * Clear the billing-run log of all DRAFT and CANCELLED runs in one action.
+ * Committed runs (REVIEWED/APPROVED/PUSHED/PARTIALLY_FAILED) are never touched.
+ * Lines and edit history cascade-delete with the run. Gated by billing:edit and
+ * audited.
+ */
+export async function clearInactiveBillingRunsAction(
+  _prev: BillingActionResult | null,
+  _formData: FormData,
+): Promise<BillingActionResult> {
+  const user = await requirePermission("billing:edit");
+  try {
+    const targets = await prisma.billingRun.findMany({
+      where: { status: { in: CLEARABLE_STATUSES } },
+      select: { id: true },
+    });
+    if (targets.length === 0) {
+      return { ok: true, message: "No draft or cancelled runs to clear." };
+    }
+    const { count } = await prisma.billingRun.deleteMany({
+      where: { status: { in: CLEARABLE_STATUSES } },
+    });
+    await audit({
+      action: "BILLING_RUN_DELETED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "billingRun:draft+cancelled",
+      metadata: { count, ids: targets.map((t) => t.id) },
+    });
+    revalidatePath("/billing");
+    return {
+      ok: true,
+      message: `Cleared ${count} draft/cancelled run${count === 1 ? "" : "s"}.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 export async function transitionRunAction(formData: FormData): Promise<void> {
   const user = await requirePermission("billing:approve");
   const runId = z.string().min(1).parse(formData.get("runId"));
