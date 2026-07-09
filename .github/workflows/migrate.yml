@@ -20,6 +20,11 @@ on:
         type: boolean
         required: false
         default: false
+      repair_snapshot:
+        description: "Tick to (re)create the M365CostSnapshot table on the app's own database (idempotent). Use if it was marked applied but the table is missing."
+        type: boolean
+        required: false
+        default: false
 
 # Never let two migration runs overlap.
 concurrency:
@@ -76,6 +81,17 @@ jobs:
             echo "resolving $m"
             npx --yes prisma@6.19.3 migrate resolve --applied "$m" || echo "  (already applied — skipping)"
           done
+
+      # Repair for a "marked-applied but table-missing" migration: runs the
+      # idempotent snapshot migration SQL directly against the app's OWN database
+      # (via the same secrets the app uses), so the table lands wherever
+      # DATABASE_URL points — no guessing which Neon branch. Safe to re-run.
+      - name: Repair M365CostSnapshot table
+        if: ${{ inputs.repair_snapshot }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: npx --yes prisma@6.19.3 db execute --file prisma/migrations/20260709000000_m365_cost_snapshot/migration.sql --schema prisma/schema.prisma
 
       - name: Apply migrations
         env:
