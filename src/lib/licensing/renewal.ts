@@ -47,6 +47,21 @@ export function daysUntilRenewal(
 }
 
 /**
+ * Whether a licensing subscription has expired. TD SYNNEX maps the term's
+ * end/expiry date into `renewalDate`, so a renewal date in the past means the
+ * term has lapsed. An explicit "expired" status counts too, even without a date.
+ */
+export function isExpired(
+  renewalDate: Date | null | undefined,
+  status: string | null | undefined,
+  now: Date,
+): boolean {
+  if ((status ?? "").toLowerCase().trim() === "expired") return true;
+  if (renewalDate && renewalDate.getTime() < now.getTime()) return true;
+  return false;
+}
+
+/**
  * The renewal window a subscription is in, or null when it has no renewal date,
  * already renewed (past), or renews more than 90 days out.
  */

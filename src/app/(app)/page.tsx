@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, PiggyBank, ChevronRight } from "lucide-react";
+import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, CalendarX, PiggyBank, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
-import { renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -70,6 +70,7 @@ export default async function DashboardPage() {
   const upcomingRenewals = allSubs.filter(
     (s) =>
       !isMonthToMonth(s.commitmentTerm, s.billingFrequency) &&
+      !isExpired(s.renewalDate, s.status, now) &&
       renewalWindow(s.renewalDate, now) !== null,
   ).length;
   const marginExceptions = allSubs.filter(
@@ -78,6 +79,7 @@ export default async function DashboardPage() {
       s.customerPrice != null &&
       Number(s.customerPrice) < Number(s.unitCost),
   ).length;
+  const expiredLicenses = allSubs.filter((s) => isExpired(s.renewalDate, s.status, now)).length;
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },
@@ -138,8 +140,8 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* Attention cards — renewals & margin exceptions, clickable to reports */}
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Attention cards — renewals, margin exceptions & expired, clickable to reports */}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link href="/reports/renewals" className="block">
             <Card
               className={`flex items-center justify-between transition ${
@@ -182,6 +184,30 @@ export default async function DashboardPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     M365 lines sold under cost — review pricing.
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Card>
+          </Link>
+          <Link href="/reports/expired" className="block">
+            <Card
+              className={`flex items-center justify-between transition ${
+                expiredLicenses > 0
+                  ? "border-orange-500/50 bg-orange-500/10 hover:bg-orange-500/20"
+                  : "hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <CalendarX
+                  className={`h-5 w-5 shrink-0 ${expiredLicenses > 0 ? "text-orange-600 dark:text-orange-400" : "text-muted-foreground"}`}
+                />
+                <div>
+                  <p className="text-sm font-semibold">
+                    {expiredLicenses} expired license{expiredLicenses === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    M365 licensing past its term — review or renew.
                   </p>
                 </div>
               </div>

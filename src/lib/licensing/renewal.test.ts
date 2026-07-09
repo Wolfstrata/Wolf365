@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { daysUntilRenewal, renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
+import { daysUntilRenewal, renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 
 const now = new Date("2026-07-09T00:00:00.000Z");
 const inDays = (n: number) => new Date(now.getTime() + n * 24 * 60 * 60 * 1000);
@@ -58,5 +58,23 @@ describe("isMonthToMonth", () => {
   it("prefers the commitment term over billing frequency", () => {
     // Annual commitment billed monthly still renews annually.
     expect(isMonthToMonth("annual", "monthly")).toBe(false);
+  });
+});
+
+describe("isExpired", () => {
+  it("is true when the end/renewal date is in the past", () => {
+    expect(isExpired(inDays(-1), null, now)).toBe(true);
+    expect(isExpired(inDays(-90), "active", now)).toBe(true);
+  });
+
+  it("is true for an explicit expired status even without a date", () => {
+    expect(isExpired(null, "expired", now)).toBe(true);
+    expect(isExpired(null, "Expired", now)).toBe(true);
+  });
+
+  it("is false for future or missing dates with a non-expired status", () => {
+    expect(isExpired(inDays(30), null, now)).toBe(false);
+    expect(isExpired(inDays(0), "active", now)).toBe(false);
+    expect(isExpired(null, null, now)).toBe(false);
   });
 });

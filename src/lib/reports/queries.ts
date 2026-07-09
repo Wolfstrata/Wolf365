@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { renewalWindow, isMonthToMonth, type RenewalBucket } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth, isExpired, type RenewalBucket } from "@/lib/licensing/renewal";
 
 /**
  * Report computations. Each returns plain row objects (column-keyed) so the
@@ -246,6 +246,46 @@ export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
     });
   }
   return rows.sort((a, b) => a.marginPerUnit - b.marginPerUnit);
+}
+
+export interface ExpiredLicenseRow {
+  client: string;
+  clientId: string | null;
+  sku: string;
+  product: string;
+  quantity: number;
+  expiryDate: string; // YYYY-MM-DD or "—"
+  daysAgo: number | null; // whole days since expiry (null when only status-expired)
+  status: string;
+}
+
+/** TD SYNNEX subscriptions whose term has lapsed (past end date or expired status). */
+export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
+  const now = new Date();
+  const subs = await prisma.tdSynnexSubscription.findMany({
+    include: { customer: { include: { client: true } } },
+    orderBy: { renewalDate: "asc" },
+  });
+  const rows: ExpiredLicenseRow[] = [];
+  for (const s of subs) {
+    if (!isExpired(s.renewalDate, s.status, now)) continue;
+    const daysAgo =
+      s.renewalDate && s.renewalDate.getTime() < now.getTime()
+        ? Math.floor((now.getTime() - s.renewalDate.getTime()) / (24 * 60 * 60 * 1000))
+        : null;
+    rows.push({
+      client: s.customer.client?.name ?? s.customer.name,
+      clientId: s.customer.clientId,
+      sku: s.productSku ?? "—",
+      product: s.productName ?? "—",
+      quantity: s.quantity,
+      expiryDate: s.renewalDate ? s.renewalDate.toISOString().slice(0, 10) : "—",
+      daysAgo,
+      status: s.status ?? "—",
+    });
+  }
+  // Most-recently-expired first; status-only expiries (null daysAgo) last.
+  return rows.sort((a, b) => (a.daysAgo ?? Infinity) - (b.daysAgo ?? Infinity));
 }
 
 function round2(n: number): number {

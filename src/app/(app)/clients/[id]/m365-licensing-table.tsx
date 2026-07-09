@@ -13,6 +13,8 @@ export interface M365LicensingRow {
   oneTime: boolean;
   /** Month-to-month commitment — rolls over, so no renewal to flag. */
   monthToMonth: boolean;
+  /** Term has lapsed (past end date or expired status). */
+  expired: boolean;
   quantity: number;
   unitCost: number | null;
   extendedCost: number | null;
@@ -159,11 +161,13 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                 <tr
                   key={r.id}
                   className={`border-t align-top ${
-                    r.attention === "bad"
-                      ? "bg-danger/5"
-                      : r.attention === "good"
-                        ? "bg-warning/5"
-                        : ""
+                    r.expired
+                      ? "bg-orange-500/15"
+                      : r.attention === "bad"
+                        ? "bg-danger/5"
+                        : r.attention === "good"
+                          ? "bg-warning/5"
+                          : ""
                   }`}
                 >
                   <td className="py-1.5 pr-4">
@@ -222,17 +226,28 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                     {formatCurrency(r.mrr, r.currency)}
                   </td>
                   <td className="py-1.5 pr-4 whitespace-nowrap">
-                    {r.monthToMonth ? (
-                      <span className="text-muted-foreground">Monthly</span>
-                    ) : r.renewalDate ? (
-                      formatDateTime(new Date(r.renewalDate))
-                    ) : (
-                      "—"
-                    )}
-                    {win && (
-                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[win.bucket]}`}>
-                        in {win.daysUntil}d
+                    {r.expired ? (
+                      <span className="font-semibold text-orange-600 dark:text-orange-400">
+                        {r.renewalDate ? formatDateTime(new Date(r.renewalDate)) : "—"}
+                        <span className="ml-2 rounded-full bg-orange-500 px-2 py-0.5 text-xs font-medium text-white">
+                          Expired
+                        </span>
                       </span>
+                    ) : (
+                      <>
+                        {r.monthToMonth ? (
+                          <span className="text-muted-foreground">Monthly</span>
+                        ) : r.renewalDate ? (
+                          formatDateTime(new Date(r.renewalDate))
+                        ) : (
+                          "—"
+                        )}
+                        {win && (
+                          <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[win.bucket]}`}>
+                            in {win.daysUntil}d
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="py-1.5 pr-4">{r.status ?? "—"}</td>

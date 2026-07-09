@@ -19,6 +19,11 @@ const REPORTS = [
     description: "Synced M365 lines sold under cost (suggested price below cost).",
   },
   {
+    href: "/reports/expired",
+    title: "Expired licenses",
+    description: "M365 licensing whose term has lapsed (past end date or expired).",
+  },
+  {
     href: "/reports/leakage",
     title: "Revenue leakage",
     description: "Licenses present in TD SYNNEX but not billed in QuickBooks.",

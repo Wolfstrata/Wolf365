@@ -7,7 +7,7 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
-import { renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
@@ -161,6 +161,7 @@ export default async function ClientProfilePage({
     const oneTime =
       (s.commitmentTerm ?? s.billingFrequency ?? "").toLowerCase() === "one_time";
     const monthToMonth = isMonthToMonth(s.commitmentTerm, s.billingFrequency);
+    const expired = isExpired(s.renewalDate, s.status, attentionNow);
     const rawObj =
       s.raw && typeof s.raw === "object" && !Array.isArray(s.raw)
         ? (s.raw as Record<string, unknown>)
@@ -190,6 +191,7 @@ export default async function ClientProfilePage({
       billingType: billingTypeLabel(s.commitmentTerm, s.billingFrequency),
       oneTime,
       monthToMonth,
+      expired,
       quantity: s.quantity,
       unitCost,
       extendedCost: unitCost != null ? round2(unitCost * s.quantity) : null,
@@ -212,7 +214,10 @@ export default async function ClientProfilePage({
   const clientRenewals = m365Rows
     .map((r) => ({
       r,
-      win: r.renewalDate && !r.monthToMonth ? renewalWindow(new Date(r.renewalDate), attentionNow) : null,
+      win:
+        r.renewalDate && !r.monthToMonth && !r.expired
+          ? renewalWindow(new Date(r.renewalDate), attentionNow)
+          : null,
     }))
     .filter((x): x is { r: M365LicensingRow; win: NonNullable<ReturnType<typeof renewalWindow>> } => x.win !== null)
     .sort((a, b) => a.win.daysUntil - b.win.daysUntil);

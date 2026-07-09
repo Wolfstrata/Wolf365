@@ -11,6 +11,7 @@ import {
   getOverbillingRisk,
   getUpcomingRenewals,
   getMarginExceptions,
+  getExpiredLicenses,
 } from "@/lib/reports/queries";
 
 const META: Record<string, { title: string; description: string }> = {
@@ -33,6 +34,10 @@ const META: Record<string, { title: string; description: string }> = {
   "margin-exceptions": {
     title: "Margin exceptions",
     description: "Synced M365 lines sold under cost — suggested price below our cost.",
+  },
+  expired: {
+    title: "Expired licenses",
+    description: "TD SYNNEX (M365) licensing whose term has lapsed — past end date or expired status.",
   },
 };
 
@@ -82,6 +87,7 @@ export default async function ReportPage({
           {type === "overbilling" && <OverbillingTable />}
           {type === "renewals" && <RenewalsTable />}
           {type === "margin-exceptions" && <MarginExceptionsTable />}
+          {type === "expired" && <ExpiredTable />}
         </Card>
       </div>
     </div>
@@ -197,6 +203,42 @@ async function MarginExceptionsTable() {
           <Td num>
             <span className="font-medium text-danger">{formatCurrency(r.marginPerUnit)}</span>
           </Td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+async function ExpiredTable() {
+  const rows = await getExpiredLicenses();
+  if (rows.length === 0) return <Empty />;
+  return (
+    <Table headers={["Client", "SKU", "Product", "Qty", "Expired", "Status"]}>
+      {rows.map((r, i) => (
+        <tr key={i} className="border-t">
+          <Td>
+            {r.clientId ? (
+              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
+                {r.client}
+              </Link>
+            ) : (
+              r.client
+            )}
+          </Td>
+          <Td>{r.sku}</Td>
+          <Td>{r.product}</Td>
+          <Td num>{r.quantity}</Td>
+          <Td>
+            <span className="font-medium text-orange-600 dark:text-orange-400">
+              {r.expiryDate}
+              {r.daysAgo != null && (
+                <span className="ml-1 text-xs text-muted-foreground">
+                  ({r.daysAgo}d ago)
+                </span>
+              )}
+            </span>
+          </Td>
+          <Td>{r.status}</Td>
         </tr>
       ))}
     </Table>
