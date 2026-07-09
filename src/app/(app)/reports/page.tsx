@@ -9,6 +9,16 @@ import { PageHeader, Card } from "@/components/ui/primitives";
  */
 const REPORTS = [
   {
+    href: "/reports/renewals",
+    title: "Upcoming renewals",
+    description: "M365 licensing renewing within 90 days, by client.",
+  },
+  {
+    href: "/reports/margin-exceptions",
+    title: "Margin exceptions",
+    description: "Synced M365 lines sold under cost (suggested price below cost).",
+  },
+  {
     href: "/reports/leakage",
     title: "Revenue leakage",
     description: "Licenses present in TD SYNNEX but not billed in QuickBooks.",

@@ -18,6 +18,10 @@ export interface M365LicensingRow {
   extendedPrice: number | null;
   marginPerUnit: number | null;
   underCost: boolean;
+  /** Margin change vs last month (per unit); null when no prior snapshot. */
+  marginDelta: number | null;
+  /** "bad" = under cost or margin dropped; "good" = margin improved. */
+  attention: "good" | "bad" | null;
   mrr: number;
   term: string | null;
   renewalDate: string | null; // ISO
@@ -149,7 +153,13 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
               return (
                 <tr
                   key={r.id}
-                  className={`border-t align-top ${r.underCost ? "bg-danger/5" : ""}`}
+                  className={`border-t align-top ${
+                    r.attention === "bad"
+                      ? "bg-danger/5"
+                      : r.attention === "good"
+                        ? "bg-warning/5"
+                        : ""
+                  }`}
                 >
                   <td className="py-1.5 pr-4">
                     <div className="font-mono text-xs text-muted-foreground">{r.sku ?? "—"}</div>
@@ -184,6 +194,18 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                         {r.underCost && (
                           <span className="ml-1 rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger">
                             below cost
+                          </span>
+                        )}
+                        {!r.underCost && r.marginDelta != null && r.marginDelta !== 0 && (
+                          <span
+                            className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                              r.marginDelta > 0
+                                ? "bg-warning/15 text-warning"
+                                : "bg-danger/15 text-danger"
+                            }`}
+                            title="Change vs last month"
+                          >
+                            {r.marginDelta > 0 ? "▲" : "▼"} {formatCurrency(Math.abs(r.marginDelta), r.currency)} vs last mo
                           </span>
                         )}
                       </span>

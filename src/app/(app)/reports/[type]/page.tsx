@@ -9,6 +9,8 @@ import {
   getMarginReport,
   getRevenueLeakage,
   getOverbillingRisk,
+  getUpcomingRenewals,
+  getMarginExceptions,
 } from "@/lib/reports/queries";
 
 const META: Record<string, { title: string; description: string }> = {
@@ -24,6 +26,23 @@ const META: Record<string, { title: string; description: string }> = {
     title: "Overbilling risk",
     description: "Pushed invoice lines whose TD SYNNEX subscription is gone or inactive.",
   },
+  renewals: {
+    title: "Upcoming renewals",
+    description: "TD SYNNEX (M365) licensing renewing within the next 90 days.",
+  },
+  "margin-exceptions": {
+    title: "Margin exceptions",
+    description: "Synced M365 lines sold under cost — suggested price below our cost.",
+  },
+};
+
+/** Report types with a CSV export handler in /api/export. */
+const EXPORTABLE = new Set(["margin", "leakage", "overbilling"]);
+
+const RENEWAL_BADGE: Record<number, string> = {
+  30: "bg-danger/15 text-danger",
+  60: "bg-warning/15 text-warning",
+  90: "bg-accent text-accent-foreground",
 };
 
 export default async function ReportPage({
@@ -43,7 +62,7 @@ export default async function ReportPage({
         title={meta.title}
         description={meta.description}
         actions={
-          canExport ? (
+          canExport && EXPORTABLE.has(type) ? (
             <a
               href={`/api/export?type=${type}`}
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
@@ -61,6 +80,8 @@ export default async function ReportPage({
           {type === "margin" && <MarginTable />}
           {type === "leakage" && <LeakageTable />}
           {type === "overbilling" && <OverbillingTable />}
+          {type === "renewals" && <RenewalsTable />}
+          {type === "margin-exceptions" && <MarginExceptionsTable />}
         </Card>
       </div>
     </div>
@@ -115,6 +136,67 @@ async function OverbillingTable() {
           <Td>{r.description}</Td>
           <Td num>{formatCurrency(r.total)}</Td>
           <Td>{r.reason}</Td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+async function RenewalsTable() {
+  const rows = await getUpcomingRenewals();
+  if (rows.length === 0) return <Empty />;
+  return (
+    <Table headers={["Client", "SKU", "Product", "Qty", "Renews", "In"]}>
+      {rows.map((r, i) => (
+        <tr key={i} className="border-t">
+          <Td>
+            {r.clientId ? (
+              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
+                {r.client}
+              </Link>
+            ) : (
+              r.client
+            )}
+          </Td>
+          <Td>{r.sku}</Td>
+          <Td>{r.product}</Td>
+          <Td num>{r.quantity}</Td>
+          <Td>{r.renewalDate}</Td>
+          <Td>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[r.bucket]}`}>
+              {r.daysUntil}d
+            </span>
+          </Td>
+        </tr>
+      ))}
+    </Table>
+  );
+}
+
+async function MarginExceptionsTable() {
+  const rows = await getMarginExceptions();
+  if (rows.length === 0) return <Empty />;
+  return (
+    <Table headers={["Client", "SKU", "Product", "Qty", "Unit cost", "Cust. price / MSRP", "Margin"]}>
+      {rows.map((r, i) => (
+        <tr key={i} className="border-t">
+          <Td>
+            {r.clientId ? (
+              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
+                {r.client}
+              </Link>
+            ) : (
+              r.client
+            )}
+          </Td>
+          <Td>{r.sku}</Td>
+          <Td>{r.product}</Td>
+          <Td num>{r.quantity}</Td>
+          <Td num>{formatCurrency(r.unitCost)}</Td>
+          <Td num>{formatCurrency(r.customerPrice)}</Td>
+          <Td num>
+            <span className="font-medium text-danger">{formatCurrency(r.marginPerUnit)}</span>
+          </Td>
         </tr>
       ))}
     </Table>

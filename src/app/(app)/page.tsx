@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, PiggyBank } from "lucide-react";
+import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, PiggyBank, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
+import { renewalWindow } from "@/lib/licensing/renewal";
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -39,6 +40,7 @@ export default async function DashboardPage() {
                   billingFrequency: true,
                   status: true,
                   currency: true,
+                  renewalDate: true,
                 },
               },
             },
@@ -60,6 +62,17 @@ export default async function DashboardPage() {
     return s.activeCount > 0 && s.monthlyMargin < 0;
   }).length;
   const currency = allSubs.find((s) => s.currency)?.currency ?? "USD";
+
+  // Attention counts: subscriptions renewing within 90 days, and lines sold
+  // under cost (suggested customer price below our cost).
+  const now = new Date();
+  const upcomingRenewals = allSubs.filter((s) => renewalWindow(s.renewalDate, now) !== null).length;
+  const marginExceptions = allSubs.filter(
+    (s) =>
+      s.unitCost != null &&
+      s.customerPrice != null &&
+      Number(s.customerPrice) < Number(s.unitCost),
+  ).length;
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },
@@ -118,6 +131,58 @@ export default async function DashboardPage() {
               {recurring.marginPct}% margin
             </p>
           </Card>
+        </div>
+
+        {/* Attention cards — renewals & margin exceptions, clickable to reports */}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Link href="/reports/renewals" className="block">
+            <Card
+              className={`flex items-center justify-between transition ${
+                upcomingRenewals > 0
+                  ? "border-warning/40 bg-warning/10 hover:bg-warning/15"
+                  : "hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <CalendarClock
+                  className={`h-5 w-5 shrink-0 ${upcomingRenewals > 0 ? "text-warning" : "text-muted-foreground"}`}
+                />
+                <div>
+                  <p className="text-sm font-semibold">
+                    {upcomingRenewals} renewal{upcomingRenewals === 1 ? "" : "s"} in the next 90 days
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    M365 licensing coming up for renewal — view the list.
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Card>
+          </Link>
+          <Link href="/reports/margin-exceptions" className="block">
+            <Card
+              className={`flex items-center justify-between transition ${
+                marginExceptions > 0
+                  ? "border-danger/40 bg-danger/10 hover:bg-danger/15"
+                  : "hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <TriangleAlert
+                  className={`h-5 w-5 shrink-0 ${marginExceptions > 0 ? "text-danger" : "text-muted-foreground"}`}
+                />
+                <div>
+                  <p className="text-sm font-semibold">
+                    {marginExceptions} margin exception{marginExceptions === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    M365 lines sold under cost — review pricing.
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Card>
+          </Link>
         </div>
 
         {/* Negative-margin warning — clients billing below cost */}

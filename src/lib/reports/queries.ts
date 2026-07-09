@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 
 /**
  * Report computations. Each returns plain row objects (column-keyed) so the
@@ -169,6 +170,80 @@ export async function getChangeExplanation(
     rows.push({ description: desc, previous: round2(prev), current: round2(cur), delta, explanation });
   }
   return { runs: runs.length, rows: rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
+}
+
+export interface RenewalReportRow {
+  client: string;
+  clientId: string | null;
+  sku: string;
+  product: string;
+  quantity: number;
+  renewalDate: string; // YYYY-MM-DD
+  daysUntil: number;
+  bucket: RenewalBucket;
+}
+
+/** TD SYNNEX subscriptions renewing within the next `withinDays` days. */
+export async function getUpcomingRenewals(withinDays = 90): Promise<RenewalReportRow[]> {
+  const now = new Date();
+  const horizon = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
+  const subs = await prisma.tdSynnexSubscription.findMany({
+    where: { renewalDate: { gte: now, lte: horizon } },
+    include: { customer: { include: { client: true } } },
+    orderBy: { renewalDate: "asc" },
+  });
+  const rows: RenewalReportRow[] = [];
+  for (const s of subs) {
+    const win = renewalWindow(s.renewalDate, now);
+    if (!win) continue;
+    rows.push({
+      client: s.customer.client?.name ?? s.customer.name,
+      clientId: s.customer.clientId,
+      sku: s.productSku ?? "—",
+      product: s.productName ?? "—",
+      quantity: s.quantity,
+      renewalDate: s.renewalDate ? s.renewalDate.toISOString().slice(0, 10) : "—",
+      daysUntil: win.daysUntil,
+      bucket: win.bucket,
+    });
+  }
+  return rows;
+}
+
+export interface MarginExceptionRow {
+  client: string;
+  clientId: string | null;
+  sku: string;
+  product: string;
+  quantity: number;
+  unitCost: number;
+  customerPrice: number;
+  marginPerUnit: number;
+}
+
+/** Synced M365 lines sold under cost (suggested customer price < our cost). */
+export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
+  const subs = await prisma.tdSynnexSubscription.findMany({
+    include: { customer: { include: { client: true } } },
+  });
+  const rows: MarginExceptionRow[] = [];
+  for (const s of subs) {
+    if (s.unitCost == null || s.customerPrice == null) continue;
+    const unitCost = Number(s.unitCost);
+    const customerPrice = Number(s.customerPrice);
+    if (customerPrice >= unitCost) continue; // only under-cost lines
+    rows.push({
+      client: s.customer.client?.name ?? s.customer.name,
+      clientId: s.customer.clientId,
+      sku: s.productSku ?? "—",
+      product: s.productName ?? "—",
+      quantity: s.quantity,
+      unitCost: round2(unitCost),
+      customerPrice: round2(customerPrice),
+      marginPerUnit: round2(customerPrice - unitCost),
+    });
+  }
+  return rows.sort((a, b) => a.marginPerUnit - b.marginPerUnit);
 }
 
 function round2(n: number): number {

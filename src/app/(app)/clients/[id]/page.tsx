@@ -7,6 +7,8 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
+import { renewalWindow } from "@/lib/licensing/renewal";
+import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
   detectDiscrepancies,
@@ -141,6 +143,16 @@ export default async function ClientProfilePage({
   const recurringCurrency =
     td?.subscriptions.find((s) => s.currency)?.currency ?? "CAD";
 
+  // Previous-month cost snapshot per subscription, to flag month-over-month
+  // margin changes (degrades to empty when no snapshots exist yet).
+  const attentionNow = new Date();
+  const prevCosts = td
+    ? await previousMonthCosts(
+        td.subscriptions.map((s) => s.stellrSubscriptionId),
+        attentionNow,
+      )
+    : new Map();
+
   // Rows for the enhanced, sortable/filterable M365 licensing table.
   const m365Rows: M365LicensingRow[] = (td?.subscriptions ?? []).map((s) => {
     const currency = s.currency ?? "CAD";
@@ -153,6 +165,22 @@ export default async function ClientProfilePage({
         ? (s.raw as Record<string, unknown>)
         : {};
     const contractNo = rawObj.contractNo != null ? String(rawObj.contractNo) : null;
+    const marginPerUnit =
+      unitCost != null && customerPrice != null ? round2(customerPrice - unitCost) : null;
+    const underCost = unitCost != null && customerPrice != null && customerPrice < unitCost;
+
+    // Month-over-month margin change (current margin vs last month's snapshot).
+    const prev = prevCosts.get(s.stellrSubscriptionId) ?? null;
+    const prevMargin =
+      prev && prev.unitCost != null && prev.customerPrice != null
+        ? prev.customerPrice - prev.unitCost
+        : null;
+    const marginDelta =
+      marginPerUnit != null && prevMargin != null ? round2(marginPerUnit - prevMargin) : null;
+    let attention: "good" | "bad" | null = null;
+    if (underCost || (marginDelta != null && marginDelta < 0)) attention = "bad";
+    else if (marginDelta != null && marginDelta > 0) attention = "good";
+
     return {
       id: s.id,
       sku: s.productSku,
@@ -165,9 +193,10 @@ export default async function ClientProfilePage({
       extendedCost: unitCost != null ? round2(unitCost * s.quantity) : null,
       customerPrice,
       extendedPrice: customerPrice != null ? round2(customerPrice * s.quantity) : null,
-      marginPerUnit:
-        unitCost != null && customerPrice != null ? round2(customerPrice - unitCost) : null,
-      underCost: unitCost != null && customerPrice != null && customerPrice < unitCost,
+      marginPerUnit,
+      underCost,
+      marginDelta,
+      attention,
       mrr: monthlyRevenue(toRecurringInput(s)),
       term: s.commitmentTerm,
       renewalDate: s.renewalDate ? s.renewalDate.toISOString() : null,
@@ -176,6 +205,14 @@ export default async function ClientProfilePage({
       currency,
     };
   });
+
+  // Per-client attention summary: upcoming renewals + under-cost lines.
+  const clientRenewals = m365Rows
+    .map((r) => ({ r, win: r.renewalDate ? renewalWindow(new Date(r.renewalDate), attentionNow) : null }))
+    .filter((x): x is { r: M365LicensingRow; win: NonNullable<ReturnType<typeof renewalWindow>> } => x.win !== null)
+    .sort((a, b) => a.win.daysUntil - b.win.daysUntil);
+  const marginExRows = m365Rows.filter((r) => r.underCost);
+  const attentionCurrency = m365Rows.find((r) => r.currency)?.currency ?? "CAD";
 
   const discrepancies = detectDiscrepancies({
     qbo: qbo
@@ -276,6 +313,88 @@ export default async function ClientProfilePage({
             )}
           </Card>
         </div>
+
+        {/* Renewals & margin exceptions — highlighted attention section */}
+        {(clientRenewals.length > 0 || marginExRows.length > 0) && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card
+              className={
+                clientRenewals.length > 0 ? "border-warning/40 bg-warning/5" : undefined
+              }
+            >
+              <h2 className="text-sm font-semibold">
+                Upcoming renewals
+                {clientRenewals.length > 0 ? ` (${clientRenewals.length})` : ""}
+              </h2>
+              {clientRenewals.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No M365 licensing renewing in the next 90 days.
+                </p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {clientRenewals.map(({ r, win }) => (
+                    <li key={r.id} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate">{r.product ?? r.sku ?? "—"}</div>
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {r.sku ?? "—"} · qty {r.quantity}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                          win.bucket === 30
+                            ? "bg-danger/15 text-danger"
+                            : win.bucket === 60
+                              ? "bg-warning/15 text-warning"
+                              : "bg-accent text-accent-foreground"
+                        }`}
+                      >
+                        in {win.daysUntil}d
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card
+              className={
+                marginExRows.length > 0 ? "border-danger/40 bg-danger/5" : undefined
+              }
+            >
+              <h2 className="text-sm font-semibold">
+                Margin exceptions
+                {marginExRows.length > 0 ? ` (${marginExRows.length})` : ""}
+              </h2>
+              {marginExRows.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No M365 lines sold under cost.
+                </p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {marginExRows.map((r) => (
+                    <li key={r.id} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="truncate">{r.product ?? r.sku ?? "—"}</div>
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {r.sku ?? "—"} · qty {r.quantity}
+                        </div>
+                      </div>
+                      <span className="shrink-0 font-medium tabular-nums text-danger">
+                        {r.marginPerUnit != null
+                          ? formatCurrency(r.marginPerUnit, attentionCurrency)
+                          : "—"}
+                        <span className="ml-1 rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px]">
+                          below cost
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        )}
 
         {/* Client associations — compact summary; editing lives on its own page */}
         <Card>
