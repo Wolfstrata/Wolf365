@@ -261,6 +261,21 @@ export default async function SyncedDetailPage({
           </Card>
         )}
 
+        {source === "td-synnex" && subscriptions.length > 0 && (
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold">
+              Raw subscription payloads ({subscriptions.length})
+            </h2>
+            <p className="mb-2 text-xs text-muted-foreground">
+              The full TD SYNNEX response stored per subscription — used to map fields
+              like MSRP. Search this for a known MSRP value to find its key.
+            </p>
+            <pre className="max-h-[28rem] overflow-auto rounded-md bg-muted p-3 text-xs">
+              {JSON.stringify(subscriptions.map((s) => s.raw), null, 2)}
+            </pre>
+          </Card>
+        )}
+
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Raw synced payload</h2>
           {raw ? (
