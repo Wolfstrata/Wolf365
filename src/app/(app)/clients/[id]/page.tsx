@@ -7,7 +7,6 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
-import { extractMsrp } from "@/lib/licensing/msrp";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
   detectDiscrepancies,
@@ -149,17 +148,23 @@ export default async function ClientProfilePage({
     const customerPrice = s.customerPrice != null ? Number(s.customerPrice) : null;
     const oneTime =
       (s.commitmentTerm ?? s.billingFrequency ?? "").toLowerCase() === "one_time";
+    const rawObj =
+      s.raw && typeof s.raw === "object" && !Array.isArray(s.raw)
+        ? (s.raw as Record<string, unknown>)
+        : {};
+    const contractNo = rawObj.contractNo != null ? String(rawObj.contractNo) : null;
     return {
       id: s.id,
       sku: s.productSku,
       product: s.productName,
+      contractNo,
       billingType: billingTypeLabel(s.commitmentTerm, s.billingFrequency),
       oneTime,
       quantity: s.quantity,
       unitCost,
       extendedCost: unitCost != null ? round2(unitCost * s.quantity) : null,
-      msrp: extractMsrp(s.raw),
       customerPrice,
+      extendedPrice: customerPrice != null ? round2(customerPrice * s.quantity) : null,
       marginPerUnit:
         unitCost != null && customerPrice != null ? round2(customerPrice - unitCost) : null,
       underCost: unitCost != null && customerPrice != null && customerPrice < unitCost,

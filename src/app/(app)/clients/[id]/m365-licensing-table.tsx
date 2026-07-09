@@ -8,13 +8,14 @@ export interface M365LicensingRow {
   id: string;
   sku: string | null;
   product: string | null;
+  contractNo: string | null;
   billingType: string | null;
   oneTime: boolean;
   quantity: number;
   unitCost: number | null;
   extendedCost: number | null;
-  msrp: number | null;
   customerPrice: number | null;
+  extendedPrice: number | null;
   marginPerUnit: number | null;
   underCost: boolean;
   mrr: number;
@@ -33,12 +34,13 @@ const RENEWAL_BADGE: Record<RenewalBucket, string> = {
 
 type SortKey =
   | "product"
+  | "contractNo"
   | "billingType"
   | "quantity"
   | "unitCost"
   | "extendedCost"
-  | "msrp"
   | "customerPrice"
+  | "extendedPrice"
   | "marginPerUnit"
   | "mrr"
   | "renewalDate"
@@ -52,12 +54,13 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: "product", label: "SKU / Product" },
+  { key: "contractNo", label: "Contract #" },
   { key: "billingType", label: "Billing" },
   { key: "quantity", label: "Qty", numeric: true },
   { key: "unitCost", label: "Unit cost", numeric: true },
   { key: "extendedCost", label: "Ext. cost", numeric: true },
-  { key: "msrp", label: "MSRP", numeric: true },
-  { key: "customerPrice", label: "Cust. price", numeric: true },
+  { key: "customerPrice", label: "Cust. price / MSRP", numeric: true },
+  { key: "extendedPrice", label: "Ext. price", numeric: true },
   { key: "marginPerUnit", label: "Margin", numeric: true },
   { key: "mrr", label: "MRR / mo", numeric: true },
   { key: "renewalDate", label: "Renewal" },
@@ -152,6 +155,7 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                     <div className="font-mono text-xs text-muted-foreground">{r.sku ?? "—"}</div>
                     <div>{r.product ?? "—"}</div>
                   </td>
+                  <td className="py-1.5 pr-4 tabular-nums text-muted-foreground">{r.contractNo ?? "—"}</td>
                   <td className="py-1.5 pr-4">
                     {r.billingType ?? "—"}
                     {r.oneTime && (
@@ -168,10 +172,10 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                     {r.extendedCost != null ? formatCurrency(r.extendedCost, r.currency) : "—"}
                   </td>
                   <td className="py-1.5 pr-4 text-right tabular-nums">
-                    {r.msrp != null ? formatCurrency(r.msrp, r.currency) : "—"}
+                    {r.customerPrice != null ? formatCurrency(r.customerPrice, r.currency) : "—"}
                   </td>
                   <td className="py-1.5 pr-4 text-right tabular-nums">
-                    {r.customerPrice != null ? formatCurrency(r.customerPrice, r.currency) : "—"}
+                    {r.extendedPrice != null ? formatCurrency(r.extendedPrice, r.currency) : "—"}
                   </td>
                   <td className="py-1.5 pr-4 text-right tabular-nums">
                     {r.marginPerUnit != null ? (
