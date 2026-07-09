@@ -13,7 +13,12 @@ on:
     paths:
       - "prisma/**"
       - ".github/workflows/migrate.yml"
-  workflow_dispatch: {} # allow manual runs from the Actions tab
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "One-time P3005 fix on a pre-existing database: type BASELINE to mark the already-present migrations as applied before deploying. Leave blank for a normal deploy."
+        required: false
+        default: ""
 
 # Never let two migration runs overlap.
 concurrency:
@@ -33,6 +38,43 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # One-time baseline (manual dispatch only, when baseline == BASELINE).
+      # Marks the migrations whose schema is ALREADY present in the database as
+      # applied, so `migrate deploy` stops failing with P3005. Only writes to the
+      # _prisma_migrations history (no DDL). Deliberately excludes any migration
+      # whose objects are NOT yet in the DB (e.g. 20260709000000_m365_cost_snapshot)
+      # so `migrate deploy` still creates them below.
+      - name: Baseline pre-existing migrations
+        if: ${{ github.event.inputs.baseline == 'BASELINE' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          for m in \
+            0_init \
+            20260617120000_add_user_timezone \
+            20260618000000_superops_billing \
+            20260623000000_subscription_customer_price \
+            20260624000000_rate_limit \
+            20260624010000_three_role_model \
+            20260624020000_crm_opportunities \
+            20260624030000_crm_monthly_commission \
+            20260624040000_salesforce_connector \
+            20260624050000_user_created_audit \
+            20260625000000_crm_fix_annual_mrr \
+            20260625010000_crm_reclassify_by_name \
+            20260625020000_crm_mrr_from_tcv \
+            20260625030000_crm_local_edit_lock \
+            20260626000000_backups \
+            20260626010000_backup_restore \
+            20260626020000_sandbox_purge_audit \
+            20260626030000_opportunity_locked_fields \
+            20260626040000_client_hierarchy \
+            20260627000000_sales_quotas_leads ; do
+            echo "resolving $m"
+            npx --yes prisma@6.19.3 migrate resolve --applied "$m" || echo "  (already applied — skipping)"
+          done
 
       - name: Apply migrations
         env:
