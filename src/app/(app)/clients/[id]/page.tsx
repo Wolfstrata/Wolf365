@@ -7,11 +7,27 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
+import { extractMsrp } from "@/lib/licensing/msrp";
+import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
   detectDiscrepancies,
   type AddressLike,
   type Discrepancy,
 } from "@/lib/reconciliation/discrepancies";
+
+/** Human label for the TD SYNNEX billing/commitment type. */
+function billingTypeLabel(term: string | null, freq: string | null): string | null {
+  const t = (term ?? freq ?? "").toLowerCase();
+  if (t === "one_time") return "One-time";
+  if (t === "monthly" || t === "month") return "Monthly";
+  if (t === "annual" || t === "year") return "Annual";
+  if (t === "triennial") return "Triennial";
+  return term ?? freq ?? null;
+}
+
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
 
 const SEVERITY_STYLES: Record<Discrepancy["severity"], string> = {
   error: "border-danger/40 bg-danger/10 text-danger",
@@ -125,6 +141,36 @@ export default async function ClientProfilePage({
     : null;
   const recurringCurrency =
     td?.subscriptions.find((s) => s.currency)?.currency ?? "CAD";
+
+  // Rows for the enhanced, sortable/filterable M365 licensing table.
+  const m365Rows: M365LicensingRow[] = (td?.subscriptions ?? []).map((s) => {
+    const currency = s.currency ?? "CAD";
+    const unitCost = s.unitCost != null ? Number(s.unitCost) : null;
+    const customerPrice = s.customerPrice != null ? Number(s.customerPrice) : null;
+    const oneTime =
+      (s.commitmentTerm ?? s.billingFrequency ?? "").toLowerCase() === "one_time";
+    return {
+      id: s.id,
+      sku: s.productSku,
+      product: s.productName,
+      billingType: billingTypeLabel(s.commitmentTerm, s.billingFrequency),
+      oneTime,
+      quantity: s.quantity,
+      unitCost,
+      extendedCost: unitCost != null ? round2(unitCost * s.quantity) : null,
+      msrp: extractMsrp(s.raw),
+      customerPrice,
+      marginPerUnit:
+        unitCost != null && customerPrice != null ? round2(customerPrice - unitCost) : null,
+      underCost: unitCost != null && customerPrice != null && customerPrice < unitCost,
+      mrr: monthlyRevenue(toRecurringInput(s)),
+      term: s.commitmentTerm,
+      renewalDate: s.renewalDate ? s.renewalDate.toISOString() : null,
+      status: s.status,
+      reducible: s.reducible,
+      currency,
+    };
+  });
 
   const discrepancies = detectDiscrepancies({
     qbo: qbo
@@ -407,56 +453,7 @@ export default async function ClientProfilePage({
                 or this customer may have no active TD SYNNEX subscriptions.
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-xs uppercase text-muted-foreground">
-                    <tr>
-                      <th className="py-1 pr-4 font-medium">SKU</th>
-                      <th className="py-1 pr-4 font-medium">Product</th>
-                      <th className="py-1 pr-4 font-medium">Qty</th>
-                      <th className="py-1 pr-4 font-medium">Cost</th>
-                      <th className="py-1 pr-4 font-medium">Cust. price</th>
-                      <th className="py-1 pr-4 font-medium">MRR / mo</th>
-                      <th className="py-1 pr-4 font-medium">Term</th>
-                      <th className="py-1 pr-4 font-medium">Billing</th>
-                      <th className="py-1 pr-4 font-medium">Renewal</th>
-                      <th className="py-1 pr-4 font-medium">Status</th>
-                      <th className="py-1 pr-4 font-medium">Reducible</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {td.subscriptions.map((s) => (
-                      <tr key={s.id} className="border-t align-top">
-                        <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
-                        <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
-                        <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
-                        <td className="py-1.5 pr-4 tabular-nums">
-                          {s.unitCost != null ? formatCurrency(Number(s.unitCost), s.currency ?? "CAD") : "—"}
-                        </td>
-                        <td className="py-1.5 pr-4 tabular-nums">
-                          {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
-                        </td>
-                        <td className="py-1.5 pr-4 tabular-nums">
-                          {formatCurrency(monthlyRevenue(toRecurringInput(s)), s.currency ?? "CAD")}
-                        </td>
-                        <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
-                        <td className="py-1.5 pr-4">{s.billingFrequency ?? "—"}</td>
-                        <td className="py-1.5 pr-4">{formatDateTime(s.renewalDate)}</td>
-                        <td className="py-1.5 pr-4">{s.status ?? "—"}</td>
-                        <td className="py-1.5 pr-4">
-                          {s.reducible === false ? (
-                            <span className="text-warning">NCE locked</span>
-                          ) : s.reducible === true ? (
-                            "Yes"
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <M365LicensingTable rows={m365Rows} />
             )}
           </Card>
         )}
