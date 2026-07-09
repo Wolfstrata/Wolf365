@@ -13,10 +13,19 @@ export default async function NewBillingRunPage({
   await requirePermission("billing:edit");
   const { clientId } = await searchParams;
 
-  const clients = await prisma.client.findMany({
+  const rows = await prisma.client.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: {
+      id: true,
+      name: true,
+      tdSynnexCustomer: { select: { _count: { select: { subscriptions: true } } } },
+    },
   });
+  const clients = rows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    subs: c.tdSynnexCustomer?._count.subscriptions ?? 0,
+  }));
 
   return (
     <div>

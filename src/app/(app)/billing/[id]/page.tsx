@@ -5,8 +5,9 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
 import { transitionRunAction, pushRunAction } from "../actions";
+import { LinesCard, type EditableLine } from "./lines-card";
 
 const STATUS_STYLES: Record<string, string> = {
   DRAFT: "bg-muted text-muted-foreground",
@@ -59,14 +60,24 @@ export default async function BillingRunDetailPage({
         })
       : [];
 
-  const grandTotal = run.lines.reduce((a, l) => a + Number(l.total), 0);
-  const grandCost = run.lines.reduce(
-    (a, l) => a + (l.estimatedCost != null ? Number(l.estimatedCost) : 0),
-    0,
-  );
-  const margin = grandTotal - grandCost;
   const canApprove = can(user.role, "billing:approve");
-  const pushEligible = (qboItemId: string | null) => Boolean(qboItemId && qbo);
+  const editable = run.status === "DRAFT" && can(user.role, "billing:edit");
+  const lines: EditableLine[] = run.lines.map((l) => ({
+    id: l.id,
+    description: l.description,
+    quantity: Number(l.quantity),
+    unitPrice: Number(l.unitPrice),
+    prorationFactor: Number(l.prorationFactor),
+    proratedDays: l.proratedDays,
+    periodDays: l.periodDays,
+    discount: Number(l.discount),
+    adjustment: Number(l.adjustment),
+    estimatedCost: l.estimatedCost != null ? Number(l.estimatedCost) : null,
+    subtotal: Number(l.subtotal),
+    total: Number(l.total),
+    taxStatus: l.taxStatus,
+    qboItemId: l.qboItemId,
+  }));
 
   return (
     <div>
@@ -107,67 +118,8 @@ export default async function BillingRunDetailPage({
         </Card>
 
         {/* Line items */}
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="py-2 pr-4 font-medium">Description</th>
-                  <th className="py-2 pr-4 font-medium">Qty</th>
-                  <th className="py-2 pr-4 font-medium">Unit price</th>
-                  <th className="py-2 pr-4 font-medium">Proration</th>
-                  <th className="py-2 pr-4 font-medium">Disc / Adj</th>
-                  <th className="py-2 pr-4 font-medium">Subtotal</th>
-                  <th className="py-2 pr-4 font-medium">Tax</th>
-                  <th className="py-2 pr-4 font-medium">Total</th>
-                  <th className="py-2 pr-4 font-medium">Push eligibility</th>
-                </tr>
-              </thead>
-              <tbody>
-                {run.lines.map((l) => {
-                  const eligible = pushEligible(l.qboItemId);
-                  return (
-                    <tr key={l.id} className="border-t align-top">
-                      <td className="py-2 pr-4">{l.description}</td>
-                      <td className="py-2 pr-4 tabular-nums">{Number(l.quantity)}</td>
-                      <td className="py-2 pr-4 tabular-nums">{formatCurrency(Number(l.unitPrice))}</td>
-                      <td className="py-2 pr-4 tabular-nums text-muted-foreground">
-                        {l.proratedDays != null && l.periodDays != null
-                          ? `${l.proratedDays}/${l.periodDays} d (${Number(l.prorationFactor).toFixed(4)})`
-                          : "—"}
-                      </td>
-                      <td className="py-2 pr-4 tabular-nums">
-                        {formatCurrency(Number(l.discount))} / {formatCurrency(Number(l.adjustment))}
-                      </td>
-                      <td className="py-2 pr-4 tabular-nums">{formatCurrency(Number(l.subtotal))}</td>
-                      <td className="py-2 pr-4">{l.taxStatus ?? "—"}</td>
-                      <td className="py-2 pr-4 font-medium tabular-nums">{formatCurrency(Number(l.total))}</td>
-                      <td className="py-2 pr-4">
-                        {eligible ? (
-                          <span className="text-success">Eligible</span>
-                        ) : (
-                          <span className="text-danger">
-                            {qbo ? "No QBO item" : "No QBO customer"}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t font-medium">
-                  <td className="py-2 pr-4" colSpan={7}>
-                    Grand total
-                  </td>
-                  <td className="py-2 pr-4 tabular-nums" colSpan={2}>
-                    {formatCurrency(grandTotal)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          {run.lines.length === 0 && (
+        {run.lines.length === 0 ? (
+          <Card>
             <div className="space-y-2 py-6 text-sm">
               <p className="font-medium">No billable lines were generated.</p>
               {subCount === 0 ? (
@@ -203,11 +155,16 @@ export default async function BillingRunDetailPage({
                 </p>
               )}
             </div>
-          )}
-          <p className="mt-4 text-xs text-muted-foreground">
-            Estimated margin: {formatCurrency(margin)} (revenue {formatCurrency(grandTotal)} − est. cost {formatCurrency(grandCost)})
+          </Card>
+        ) : (
+          <LinesCard lines={lines} editable={editable} hasQbo={Boolean(qbo)} />
+        )}
+        {editable && (
+          <p className="text-xs text-muted-foreground">
+            This run is a draft — edit any line inline, then mark it reviewed. Edits are
+            recorded in the run&apos;s change history.
           </p>
-        </Card>
+        )}
 
         {/* Workflow actions */}
         {canApprove && (
