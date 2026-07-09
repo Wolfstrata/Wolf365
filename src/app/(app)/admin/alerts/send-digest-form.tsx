@@ -2,16 +2,51 @@
 
 import { useActionState } from "react";
 import { cn } from "@/lib/utils";
-import { sendTestDigestAction, type TestDigestResult } from "./actions";
+import {
+  sendTestDigestAction,
+  captureCostBaselineAction,
+  type TestDigestResult,
+  type SnapshotResult,
+} from "./actions";
 
 export function SendDigestForm() {
   const [state, action, pending] = useActionState<TestDigestResult | null, FormData>(
     sendTestDigestAction,
     null,
   );
+  const [snapState, snapAction, snapPending] = useActionState<SnapshotResult | null, FormData>(
+    captureCostBaselineAction,
+    null,
+  );
 
   return (
     <div className="max-w-2xl space-y-4">
+      <form action={snapAction} className="rounded-lg border bg-card p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold">Capture cost baseline now</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Snapshots current M365 costs and seeds a last-month baseline so
+              cost-change highlighting is active immediately. It flags nothing until a
+              cost actually changes from today&apos;s values (no false positives), and
+              can&apos;t recover changes from before today. Safe to run once.
+            </p>
+          </div>
+          <button
+            type="submit"
+            disabled={snapPending}
+            className="shrink-0 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent disabled:opacity-60"
+          >
+            {snapPending ? "Capturing…" : "Capture baseline"}
+          </button>
+        </div>
+        {snapState && (
+          <div className={cn("mt-4 rounded-md px-3 py-2 text-sm", snapState.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
+            {snapState.message}
+          </div>
+        )}
+      </form>
+
       <form action={action} className="rounded-lg border bg-card p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
