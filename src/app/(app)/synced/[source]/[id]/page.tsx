@@ -6,11 +6,24 @@ import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { isSourceSlug, SOURCE_LABELS } from "@/lib/connector-sources";
+import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 
 interface Field {
   label: string;
   value: string | number;
 }
+
+/** Renewal-window styling for the 30/60/90-day buckets. */
+const RENEWAL_BADGE: Record<RenewalBucket, string> = {
+  30: "bg-danger/15 text-danger",
+  60: "bg-warning/15 text-warning",
+  90: "bg-accent text-accent-foreground",
+};
+const RENEWAL_ROW: Record<RenewalBucket, string> = {
+  30: "bg-danger/5",
+  60: "bg-warning/5",
+  90: "",
+};
 
 function fmtAddr(addr: unknown): string {
   if (!addr || typeof addr !== "object") return "—";
@@ -102,6 +115,11 @@ export default async function SyncedDetailPage({
     ];
   }
 
+  const now = new Date();
+  const renewingSoon = subscriptions.filter(
+    (s) => renewalWindow(s.renewalDate, now) !== null,
+  ).length;
+
   return (
     <div>
       <PageHeader title={title} description={`Synced from ${SOURCE_LABELS[source]}`} />
@@ -133,8 +151,13 @@ export default async function SyncedDetailPage({
 
         {source === "td-synnex" && (
           <Card>
-            <h2 className="mb-3 text-sm font-semibold">
+            <h2 className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold">
               Microsoft 365 licensing ({subscriptions.length})
+              {renewingSoon > 0 && (
+                <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                  {renewingSoon} renewing ≤90d
+                </span>
+              )}
             </h2>
             {subscriptions.length === 0 ? (
               <p className="text-sm text-muted-foreground">No subscriptions synced.</p>
@@ -154,22 +177,39 @@ export default async function SyncedDetailPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {subscriptions.map((s) => (
-                      <tr key={s.id} className="border-t align-top">
-                        <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
-                        <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
-                        <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
-                        <td className="py-1.5 pr-4 tabular-nums">
-                          {s.unitCost != null ? formatCurrency(Number(s.unitCost), s.currency ?? "CAD") : "—"}
-                        </td>
-                        <td className="py-1.5 pr-4 tabular-nums">
-                          {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
-                        </td>
-                        <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
-                        <td className="py-1.5 pr-4">{formatDateTime(s.renewalDate, user.timezone)}</td>
-                        <td className="py-1.5 pr-4">{s.status ?? "—"}</td>
-                      </tr>
-                    ))}
+                    {subscriptions.map((s) => {
+                      const win = renewalWindow(s.renewalDate, now);
+                      return (
+                        <tr
+                          key={s.id}
+                          className={`border-t align-top ${win ? RENEWAL_ROW[win.bucket] : ""}`}
+                        >
+                          <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
+                          <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
+                          <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
+                          <td className="py-1.5 pr-4 tabular-nums">
+                            {s.unitCost != null ? formatCurrency(Number(s.unitCost), s.currency ?? "CAD") : "—"}
+                          </td>
+                          <td className="py-1.5 pr-4 tabular-nums">
+                            {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
+                          </td>
+                          <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
+                          <td className="py-1.5 pr-4 whitespace-nowrap">
+                            <span className={win ? "font-medium" : ""}>
+                              {formatDateTime(s.renewalDate, user.timezone)}
+                            </span>
+                            {win && (
+                              <span
+                                className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[win.bucket]}`}
+                              >
+                                in {win.daysUntil}d
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-4">{s.status ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
