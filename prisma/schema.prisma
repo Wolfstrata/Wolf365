@@ -26,6 +26,7 @@ datasource db {
 enum Role {
   ADMINISTRATOR // Full control — everything, incl. connector credentials, security, users
   POWER_USER // Operate billing & run syncs/tests, but cannot change connector credentials or admin settings
+  FINANCIAL_POWER_USER // Like Power User but Finance/CRM/Reconciliation/Connector-Data only — no Administration
   SALES // CRM only — manage opportunities and view the sales forecast
   REVIEWER // Read-only — view numbers, charts and reports; no changes, no billing, no syncs
 }

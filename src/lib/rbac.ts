@@ -78,6 +78,27 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "crm:write",
     "crm:manage",
   ],
+  // Financial Power User — the full billing pipeline and CRM, plus manual
+  // syncs, reconciliation (mappings/exceptions/reports) and the synced-client
+  // views. Deliberately has NO Administration access: no connector credentials
+  // or read, no debug logs, no audit log, no user/SSO/backup management. This
+  // is Power User minus the Administration-section permissions.
+  FINANCIAL_POWER_USER: [
+    "connectors:sync",
+    "clients:read",
+    "mappings:read",
+    "mappings:propose",
+    "mappings:approve",
+    "billing:read",
+    "billing:edit",
+    "billing:approve",
+    "billing:push",
+    "reports:read",
+    "reports:export",
+    "crm:read",
+    "crm:write",
+    "crm:manage",
+  ],
   // Sales — CRM only. Manage opportunities and view the sales forecast; no
   // access to billing, connectors, or admin settings.
   SALES: ["crm:read", "crm:write"],
@@ -117,6 +138,7 @@ export class ForbiddenError extends Error {
 export const ROLE_LABELS: Record<Role, string> = {
   ADMINISTRATOR: "Administrator",
   POWER_USER: "Power User",
+  FINANCIAL_POWER_USER: "Financial Power User",
   SALES: "Sales",
   REVIEWER: "Reviewer",
 };
@@ -127,6 +149,8 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
     "Full access to everything, including connector credentials, security, and user management.",
   POWER_USER:
     "Can run billing, approve/push invoices, and sync or test connectors — but cannot change connector credentials or admin settings.",
+  FINANCIAL_POWER_USER:
+    "Same as Power User (full billing pipeline, CRM, reconciliation, and manual syncs) but with no access to the Administration section — no connector credentials, debug logs, audit log, users, security, or backups.",
   SALES:
     "CRM only. Can create and manage sales opportunities and view the forecast. No access to billing, connectors, or admin settings.",
   REVIEWER:
@@ -137,6 +161,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
 export const ASSIGNABLE_ROLES: Role[] = [
   "ADMINISTRATOR",
   "POWER_USER",
+  "FINANCIAL_POWER_USER",
   "SALES",
   "REVIEWER",
 ];

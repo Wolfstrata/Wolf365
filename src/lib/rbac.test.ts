@@ -19,6 +19,25 @@ describe("RBAC three-role policy", () => {
     expect(can("POWER_USER", "users:manage")).toBe(false);
   });
 
+  it("Financial Power User has the finance pipeline and CRM but no Administration", () => {
+    // Full billing pipeline + CRM + reconciliation + manual sync.
+    expect(can("FINANCIAL_POWER_USER", "billing:edit")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "billing:approve")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "billing:push")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "connectors:sync")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "mappings:approve")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "reports:export")).toBe(true);
+    expect(can("FINANCIAL_POWER_USER", "crm:manage")).toBe(true);
+    // No Administration access whatsoever.
+    expect(can("FINANCIAL_POWER_USER", "connectors:read")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "connectors:configure")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "debuglogs:read")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "audit:read")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "users:manage")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "sso:configure")).toBe(false);
+    expect(can("FINANCIAL_POWER_USER", "backups:manage")).toBe(false);
+  });
+
   it("Reviewer is strictly read-only", () => {
     expect(can("REVIEWER", "clients:read")).toBe(true);
     expect(can("REVIEWER", "billing:read")).toBe(true);
