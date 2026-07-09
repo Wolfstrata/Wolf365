@@ -16,9 +16,10 @@ on:
   workflow_dispatch:
     inputs:
       baseline:
-        description: "One-time P3005 fix on a pre-existing database: type BASELINE to mark the already-present migrations as applied before deploying. Leave blank for a normal deploy."
+        description: "One-time P3005 fix: tick to mark the already-present migrations as applied before deploying. Leave unchecked for a normal deploy."
+        type: boolean
         required: false
-        default: ""
+        default: false
 
 # Never let two migration runs overlap.
 concurrency:
@@ -39,14 +40,14 @@ jobs:
         with:
           node-version: 20
 
-      # One-time baseline (manual dispatch only, when baseline == BASELINE).
+      # One-time baseline (manual dispatch only, when the baseline box is ticked).
       # Marks the migrations whose schema is ALREADY present in the database as
       # applied, so `migrate deploy` stops failing with P3005. Only writes to the
       # _prisma_migrations history (no DDL). Deliberately excludes any migration
       # whose objects are NOT yet in the DB (e.g. 20260709000000_m365_cost_snapshot)
       # so `migrate deploy` still creates them below.
       - name: Baseline pre-existing migrations
-        if: ${{ github.event.inputs.baseline == 'BASELINE' }}
+        if: ${{ inputs.baseline }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
