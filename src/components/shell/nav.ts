@@ -38,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Connectors", href: "/admin/connectors", icon: "Plug", section: "Administration", permission: "connectors:read" },
   { label: "Debug Logs", href: "/admin/debug-logs", icon: "Bug", section: "Administration", permission: "debuglogs:read" },
   { label: "API Probe", href: "/admin/probe", icon: "Plug", section: "Administration", permission: "connectors:configure" },
+  { label: "M365 Alerts", href: "/admin/alerts", icon: "BellRing", section: "Administration", permission: "connectors:configure" },
   { label: "Audit Log", href: "/admin/audit", icon: "ScrollText", section: "Administration", permission: "audit:read" },
   { label: "Users", href: "/admin/users", icon: "Users", section: "Administration", permission: "users:manage" },
   { label: "Security & SSO", href: "/admin/security", icon: "ShieldCheck", section: "Administration", permission: "sso:configure" },

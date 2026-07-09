@@ -27,6 +27,7 @@ import {
   Building,
   Inbox,
   Target,
+  BellRing,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -57,6 +58,7 @@ const ICONS: Record<string, LucideIcon> = {
   Building,
   Inbox,
   Target,
+  BellRing,
 };
 
 const SECTION_ORDER = [
