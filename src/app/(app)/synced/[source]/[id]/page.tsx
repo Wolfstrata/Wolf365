@@ -7,10 +7,25 @@ import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { isSourceSlug, SOURCE_LABELS } from "@/lib/connector-sources";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
+import { previousMonthCosts } from "@/lib/licensing/snapshot";
+import { costChanges, type CostChange } from "@/lib/licensing/cost-change";
 
 interface Field {
   label: string;
   value: string | number;
+}
+
+/** Small "changed vs last month" marker for a cost/price cell. */
+function CostBadge({ change }: { change?: CostChange }) {
+  if (!change) return null;
+  const sign = change.delta > 0 ? "+" : "";
+  return (
+    <span className="ml-2 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+      {change.direction === "up" ? "▲" : "▼"} {sign}
+      {change.delta}
+      {change.pct != null ? ` (${change.pct > 0 ? "+" : ""}${change.pct}%)` : ""} vs last mo
+    </span>
+  );
 }
 
 /** Renewal-window styling for the 30/60/90-day buckets. */
@@ -120,6 +135,27 @@ export default async function SyncedDetailPage({
     (s) => renewalWindow(s.renewalDate, now) !== null,
   ).length;
 
+  // Month-over-month cost/price changes (per subscription). Degrades to empty
+  // when the snapshot table isn't there yet or has no prior-month data.
+  const prevCosts =
+    source === "td-synnex"
+      ? await previousMonthCosts(subscriptions.map((s) => s.stellrSubscriptionId), now)
+      : new Map();
+  const subCostChanges = new Map<string, CostChange[]>();
+  for (const s of subscriptions) {
+    subCostChanges.set(
+      s.id,
+      costChanges(
+        {
+          unitCost: s.unitCost != null ? Number(s.unitCost) : null,
+          customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
+        },
+        prevCosts.get(s.stellrSubscriptionId) ?? null,
+      ),
+    );
+  }
+  const costChangedCount = [...subCostChanges.values()].filter((c) => c.length > 0).length;
+
   return (
     <div>
       <PageHeader title={title} description={`Synced from ${SOURCE_LABELS[source]}`} />
@@ -158,6 +194,11 @@ export default async function SyncedDetailPage({
                   {renewingSoon} renewing ≤90d
                 </span>
               )}
+              {costChangedCount > 0 && (
+                <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                  {costChangedCount} cost change{costChangedCount === 1 ? "" : "s"} vs last mo
+                </span>
+              )}
             </h2>
             {subscriptions.length === 0 ? (
               <p className="text-sm text-muted-foreground">No subscriptions synced.</p>
@@ -179,6 +220,7 @@ export default async function SyncedDetailPage({
                   <tbody>
                     {subscriptions.map((s) => {
                       const win = renewalWindow(s.renewalDate, now);
+                      const changes = subCostChanges.get(s.id) ?? [];
                       return (
                         <tr
                           key={s.id}
@@ -187,11 +229,13 @@ export default async function SyncedDetailPage({
                           <td className="py-1.5 pr-4 font-mono text-xs">{s.productSku ?? "—"}</td>
                           <td className="py-1.5 pr-4">{s.productName ?? "—"}</td>
                           <td className="py-1.5 pr-4 tabular-nums">{s.quantity}</td>
-                          <td className="py-1.5 pr-4 tabular-nums">
+                          <td className="py-1.5 pr-4 whitespace-nowrap tabular-nums">
                             {s.unitCost != null ? formatCurrency(Number(s.unitCost), s.currency ?? "CAD") : "—"}
+                            <CostBadge change={changes.find((c) => c.field === "unitCost")} />
                           </td>
-                          <td className="py-1.5 pr-4 tabular-nums">
+                          <td className="py-1.5 pr-4 whitespace-nowrap tabular-nums">
                             {s.customerPrice != null ? formatCurrency(Number(s.customerPrice), s.currency ?? "CAD") : "—"}
+                            <CostBadge change={changes.find((c) => c.field === "customerPrice")} />
                           </td>
                           <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
                           <td className="py-1.5 pr-4 whitespace-nowrap">

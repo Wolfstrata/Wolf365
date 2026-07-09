@@ -69,6 +69,14 @@ const serverSchema = z.object({
   // /api/leads. The endpoint refuses all requests until this is set.
   WOLF365_LEADS_TOKEN: z.string().optional(),
 
+  // Resend transactional email (M365 renewal + cost-change alert digest). When
+  // RESEND_API_KEY is unset, alert emails are skipped (the digest still computes
+  // and is reported in the cron result). Sender/recipients default to the shared
+  // Wolf365 mailbox and are comma-separated for multiple recipients.
+  RESEND_API_KEY: z.string().optional(),
+  ALERT_EMAIL_FROM: z.string().optional(),
+  ALERT_EMAIL_TO: z.string().optional(),
+
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),

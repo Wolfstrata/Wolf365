@@ -874,3 +874,25 @@ model Backup {
 
   @@index([createdAt])
 }
+
+/// Monthly per-subscription snapshot of M365 (TD SYNNEX) cost + customer price,
+/// so cost changes can be compared month-over-month. Written by the daily cron.
+/// Decoupled (no FK) so history survives subscription churn/resyncs.
+model M365CostSnapshot {
+  id                   String   @id @default(cuid())
+  /// First day of the month (UTC) this snapshot represents.
+  periodMonth          DateTime
+  stellrSubscriptionId String
+  customerId           String
+  productSku           String?
+  productName          String?
+  quantity             Int      @default(0)
+  unitCost             Decimal? @db.Decimal(18, 4)
+  customerPrice        Decimal? @db.Decimal(18, 4)
+  currency             String?
+  createdAt            DateTime @default(now())
+
+  @@unique([periodMonth, stellrSubscriptionId])
+  @@index([stellrSubscriptionId, periodMonth])
+  @@index([customerId, periodMonth])
+}

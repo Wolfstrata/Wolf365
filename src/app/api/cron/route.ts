@@ -7,6 +7,7 @@ import { purgeOldDebugLogs } from "@/lib/debug-log";
 import { safeErrorMessage } from "@/lib/redact";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { runNeonBackup, pruneExpiredBackups } from "@/lib/backup/service";
+import { snapshotCurrentMonth } from "@/lib/licensing/snapshot";
 
 // Cron jobs may run longer than the default; allow up to 5 minutes.
 export const maxDuration = 300;
@@ -84,11 +85,40 @@ export async function GET(request: Request) {
     backup = { ok: false, error: safeErrorMessage(err) };
   }
 
+  // M365 cost snapshot for the current month (baseline for cost-change
+  // detection). Best-effort; no-ops until the snapshot table exists.
+  let snapshot: unknown;
+  try {
+    const written = await snapshotCurrentMonth(new Date());
+    snapshot =
+      written == null ? { skipped: "snapshot table not present yet" } : { written };
+  } catch (err) {
+    snapshot = { ok: false, error: safeErrorMessage(err) };
+  }
+
+  // Weekly M365 alert digest (Mondays): renewals in 90/60/30-day windows +
+  // cost changes vs last month, emailed via Resend. Best-effort; only sends
+  // when RESEND_API_KEY is configured and there is something to report.
+  let alerts: unknown;
+  try {
+    const now = new Date();
+    if (now.getUTCDay() === 1) {
+      const { runM365AlertDigest } = await import("@/lib/licensing/alerts");
+      alerts = await runM365AlertDigest(now);
+    } else {
+      alerts = { skipped: "weekly digest runs on Mondays" };
+    }
+  } catch (err) {
+    alerts = { ok: false, error: safeErrorMessage(err) };
+  }
+
   return NextResponse.json({
     ok: true,
     synced: results,
     reconciled,
     debugLogsPurged: purged,
     backup,
+    snapshot,
+    alerts,
   });
 }
