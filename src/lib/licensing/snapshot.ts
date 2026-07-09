@@ -25,6 +25,41 @@ function isMissingTable(err: unknown): boolean {
   return (err as { code?: string })?.code === "P2021";
 }
 
+/**
+ * Idempotently ensure the M365CostSnapshot table exists **on the app's own
+ * database connection**. This repairs the "migration recorded as applied but
+ * table physically missing" drift that occurs when migrations were applied to a
+ * different database than the one DATABASE_URL points to. Mirrors the migration
+ * SQL exactly, so it never diverges from the Prisma model. Safe to call anytime.
+ */
+export async function ensureCostSnapshotTable(): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "M365CostSnapshot" (
+      "id" TEXT NOT NULL,
+      "periodMonth" TIMESTAMP(3) NOT NULL,
+      "stellrSubscriptionId" TEXT NOT NULL,
+      "customerId" TEXT NOT NULL,
+      "productSku" TEXT,
+      "productName" TEXT,
+      "quantity" INTEGER NOT NULL DEFAULT 0,
+      "unitCost" DECIMAL(18,4),
+      "customerPrice" DECIMAL(18,4),
+      "currency" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "M365CostSnapshot_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await prisma.$executeRawUnsafe(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "M365CostSnapshot_periodMonth_stellrSubscriptionId_key" ON "M365CostSnapshot" ("periodMonth", "stellrSubscriptionId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "M365CostSnapshot_stellrSubscriptionId_periodMonth_idx" ON "M365CostSnapshot" ("stellrSubscriptionId", "periodMonth")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "M365CostSnapshot_customerId_periodMonth_idx" ON "M365CostSnapshot" ("customerId", "periodMonth")`,
+  );
+}
+
 /** Upsert a snapshot of every synced subscription's current figures under the
  *  given period month. Shared by the cron and the manual baseline capture. */
 async function upsertSnapshotsForMonth(periodMonth: Date): Promise<number> {
@@ -95,6 +130,9 @@ export interface BaselineResult {
  */
 export async function captureBaselineNow(now: Date): Promise<BaselineResult | null> {
   try {
+    // Create the table on THIS (app) connection if it's missing, so capture
+    // works regardless of which database migrations were applied to.
+    await ensureCostSnapshotTable();
     const current = await upsertSnapshotsForMonth(monthStart(now));
     const prev = previousMonthStart(now);
     const existing = await prisma.m365CostSnapshot.count({ where: { periodMonth: prev } });

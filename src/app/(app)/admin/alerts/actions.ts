@@ -32,7 +32,7 @@ export async function captureCostBaselineAction(
     const { captureBaselineNow } = await import("@/lib/licensing/snapshot");
     const res = await captureBaselineNow(new Date());
     if (res === null) {
-      return { ok: false, message: "Cost-snapshot table not found — apply the migration first." };
+      return { ok: false, message: "Could not access the cost-snapshot table on the app database." };
     }
     await audit({
       action: "SYNC_RUN",
