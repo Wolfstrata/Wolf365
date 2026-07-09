@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { daysUntilRenewal, renewalWindow } from "@/lib/licensing/renewal";
+import { daysUntilRenewal, renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
 
 const now = new Date("2026-07-09T00:00:00.000Z");
 const inDays = (n: number) => new Date(now.getTime() + n * 24 * 60 * 60 * 1000);
@@ -38,5 +38,25 @@ describe("renewalWindow", () => {
 
   it("reports daysUntil alongside the bucket", () => {
     expect(renewalWindow(inDays(45), now)).toEqual({ daysUntil: 45, bucket: 60 });
+  });
+});
+
+describe("isMonthToMonth", () => {
+  it("is true for monthly commitment terms (case/label insensitive)", () => {
+    expect(isMonthToMonth("month", null)).toBe(true);
+    expect(isMonthToMonth("Monthly", null)).toBe(true);
+    expect(isMonthToMonth(null, "MONTH")).toBe(true);
+  });
+
+  it("is false for annual, triennial, one-time, or unknown terms", () => {
+    expect(isMonthToMonth("annual", null)).toBe(false);
+    expect(isMonthToMonth("triennial", null)).toBe(false);
+    expect(isMonthToMonth("one_time", null)).toBe(false);
+    expect(isMonthToMonth(null, null)).toBe(false);
+  });
+
+  it("prefers the commitment term over billing frequency", () => {
+    // Annual commitment billed monthly still renews annually.
+    expect(isMonthToMonth("annual", "monthly")).toBe(false);
   });
 });

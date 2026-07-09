@@ -11,6 +11,8 @@ export interface M365LicensingRow {
   contractNo: string | null;
   billingType: string | null;
   oneTime: boolean;
+  /** Month-to-month commitment — rolls over, so no renewal to flag. */
+  monthToMonth: boolean;
   quantity: number;
   unitCost: number | null;
   extendedCost: number | null;
@@ -149,7 +151,10 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
           </thead>
           <tbody>
             {view.map((r) => {
-              const win = r.renewalDate ? renewalWindow(new Date(r.renewalDate), now) : null;
+              const win =
+                r.renewalDate && !r.monthToMonth
+                  ? renewalWindow(new Date(r.renewalDate), now)
+                  : null;
               return (
                 <tr
                   key={r.id}
@@ -217,7 +222,13 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                     {formatCurrency(r.mrr, r.currency)}
                   </td>
                   <td className="py-1.5 pr-4 whitespace-nowrap">
-                    {r.renewalDate ? formatDateTime(new Date(r.renewalDate)) : "—"}
+                    {r.monthToMonth ? (
+                      <span className="text-muted-foreground">Monthly</span>
+                    ) : r.renewalDate ? (
+                      formatDateTime(new Date(r.renewalDate))
+                    ) : (
+                      "—"
+                    )}
                     {win && (
                       <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[win.bucket]}`}>
                         in {win.daysUntil}d

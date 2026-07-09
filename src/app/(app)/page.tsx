@@ -7,7 +7,7 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
-import { renewalWindow } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
 
 /**
  * Dashboard. Shows real counts from the database. With an empty database every
@@ -38,6 +38,7 @@ export default async function DashboardPage() {
                   unitCost: true,
                   quantity: true,
                   billingFrequency: true,
+                  commitmentTerm: true,
                   status: true,
                   currency: true,
                   renewalDate: true,
@@ -66,7 +67,11 @@ export default async function DashboardPage() {
   // Attention counts: subscriptions renewing within 90 days, and lines sold
   // under cost (suggested customer price below our cost).
   const now = new Date();
-  const upcomingRenewals = allSubs.filter((s) => renewalWindow(s.renewalDate, now) !== null).length;
+  const upcomingRenewals = allSubs.filter(
+    (s) =>
+      !isMonthToMonth(s.commitmentTerm, s.billingFrequency) &&
+      renewalWindow(s.renewalDate, now) !== null,
+  ).length;
   const marginExceptions = allSubs.filter(
     (s) =>
       s.unitCost != null &&

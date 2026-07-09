@@ -20,6 +20,20 @@ export interface RenewalWindow {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
+ * Whether a subscription is month-to-month. A monthly commitment simply rolls
+ * over every month, so it has no meaningful upcoming "renewal" to flag — only
+ * annual/triennial (and similar) commitments do. The commitment term wins, with
+ * billing frequency as the fallback, mirroring `billingTypeLabel`.
+ */
+export function isMonthToMonth(
+  commitmentTerm: string | null | undefined,
+  billingFrequency: string | null | undefined,
+): boolean {
+  const t = (commitmentTerm ?? billingFrequency ?? "").toLowerCase();
+  return t === "month" || t === "monthly";
+}
+
+/**
  * Whole days from `now` until `renewalDate` (rounded up, so a renewal later
  * today counts as 0 and any future instant counts as at least the calendar
  * days remaining). Null when there is no renewal date.

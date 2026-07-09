@@ -7,7 +7,7 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
-import { renewalWindow } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth } from "@/lib/licensing/renewal";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
@@ -160,6 +160,7 @@ export default async function ClientProfilePage({
     const customerPrice = s.customerPrice != null ? Number(s.customerPrice) : null;
     const oneTime =
       (s.commitmentTerm ?? s.billingFrequency ?? "").toLowerCase() === "one_time";
+    const monthToMonth = isMonthToMonth(s.commitmentTerm, s.billingFrequency);
     const rawObj =
       s.raw && typeof s.raw === "object" && !Array.isArray(s.raw)
         ? (s.raw as Record<string, unknown>)
@@ -188,6 +189,7 @@ export default async function ClientProfilePage({
       contractNo,
       billingType: billingTypeLabel(s.commitmentTerm, s.billingFrequency),
       oneTime,
+      monthToMonth,
       quantity: s.quantity,
       unitCost,
       extendedCost: unitCost != null ? round2(unitCost * s.quantity) : null,
@@ -208,7 +210,10 @@ export default async function ClientProfilePage({
 
   // Per-client attention summary: upcoming renewals + under-cost lines.
   const clientRenewals = m365Rows
-    .map((r) => ({ r, win: r.renewalDate ? renewalWindow(new Date(r.renewalDate), attentionNow) : null }))
+    .map((r) => ({
+      r,
+      win: r.renewalDate && !r.monthToMonth ? renewalWindow(new Date(r.renewalDate), attentionNow) : null,
+    }))
     .filter((x): x is { r: M365LicensingRow; win: NonNullable<ReturnType<typeof renewalWindow>> } => x.win !== null)
     .sort((a, b) => a.win.daysUntil - b.win.daysUntil);
   const marginExRows = m365Rows.filter((r) => r.underCost);

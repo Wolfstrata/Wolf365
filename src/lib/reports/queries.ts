@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
+import { renewalWindow, isMonthToMonth, type RenewalBucket } from "@/lib/licensing/renewal";
 
 /**
  * Report computations. Each returns plain row objects (column-keyed) so the
@@ -194,6 +194,8 @@ export async function getUpcomingRenewals(withinDays = 90): Promise<RenewalRepor
   });
   const rows: RenewalReportRow[] = [];
   for (const s of subs) {
+    // Month-to-month subscriptions just roll over — no renewal to flag.
+    if (isMonthToMonth(s.commitmentTerm, s.billingFrequency)) continue;
     const win = renewalWindow(s.renewalDate, now);
     if (!win) continue;
     rows.push({
