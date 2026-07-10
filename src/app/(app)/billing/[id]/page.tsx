@@ -79,6 +79,12 @@ export default async function BillingRunDetailPage({
     qboItemId: l.qboItemId,
   }));
 
+  // Push-eligibility summary: a line is pushable only when it has a mapped QBO
+  // item AND the client has a linked QBO customer. Unmapped lines are skipped at
+  // push (run → PARTIALLY_FAILED), so surface the split up front.
+  const eligibleCount = qbo ? lines.filter((l) => l.qboItemId).length : 0;
+  const notReadyCount = lines.length - eligibleCount;
+
   return (
     <div>
       <PageHeader
@@ -157,7 +163,32 @@ export default async function BillingRunDetailPage({
             </div>
           </Card>
         ) : (
-          <LinesCard lines={lines} editable={editable} hasQbo={Boolean(qbo)} />
+          <>
+            {notReadyCount > 0 ? (
+              <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+                <span className="text-warning">
+                  <strong>
+                    {eligibleCount} of {lines.length} line{lines.length === 1 ? "" : "s"} ready to push
+                  </strong>{" "}
+                  · {notReadyCount}{" "}
+                  {!qbo
+                    ? "can't be pushed — this client has no linked QuickBooks customer."
+                    : `need a QuickBooks item — map ${notReadyCount === 1 ? "it" : "them"} in `}
+                  {qbo && (
+                    <Link href="/mappings" className="font-medium underline">
+                      Mappings
+                    </Link>
+                  )}
+                  {qbo && ", then regenerate. Unmapped lines are skipped at push (run → partially failed)."}
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+                All {lines.length} line{lines.length === 1 ? "" : "s"} are mapped and ready to push.
+              </div>
+            )}
+            <LinesCard lines={lines} editable={editable} hasQbo={Boolean(qbo)} />
+          </>
         )}
         {editable && (
           <p className="text-xs text-muted-foreground">
