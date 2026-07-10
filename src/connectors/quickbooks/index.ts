@@ -190,11 +190,33 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       itemStart += pageSize;
     }
 
+    // --- Learn SKU → item mappings from invoice history --------------------
+    // The invoice history records which QBO item each product was billed under,
+    // so we auto-fill mappings for still-unmapped TD SYNNEX SKUs. Best-effort:
+    // a failure here must not fail a sync that already imported customers+items.
+    let mappingsFromInvoices: unknown = { created: 0, invoicesScanned: 0 };
+    try {
+      const { learnMappingsFromInvoices } = await import("@/lib/mapping/invoice-learn");
+      mappingsFromInvoices = await learnMappingsFromInvoices({
+        query: (statement) =>
+          qboGet(
+            ctx,
+            `/v3/company/${realmId}/query?query=${encodeURIComponent(statement)}`,
+            "sync_invoices",
+          ),
+      });
+    } catch (err) {
+      mappingsFromInvoices = {
+        ok: false,
+        error: err instanceof Error ? err.message : "unknown",
+      };
+    }
+
     return {
       imported,
       updated,
       skipped,
-      summary: { entity: "customers+items", realmId },
+      summary: { entity: "customers+items+invoices", realmId, mappingsFromInvoices },
     };
   },
 };
