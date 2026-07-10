@@ -80,16 +80,21 @@ describe("isExpired", () => {
 });
 
 describe("isActiveStatus", () => {
-  it("is true only for an 'active' status (case/space-insensitive)", () => {
+  it("is true for active, unknown, or missing statuses (null = active)", () => {
     expect(isActiveStatus("active")).toBe(true);
     expect(isActiveStatus("ACTIVE")).toBe(true);
     expect(isActiveStatus("  Active ")).toBe(true);
+    expect(isActiveStatus("provisioned")).toBe(true);
+    expect(isActiveStatus("")).toBe(true);
+    expect(isActiveStatus(null)).toBe(true);
+    expect(isActiveStatus(undefined)).toBe(true);
   });
 
-  it("is false for other or missing statuses", () => {
+  it("is false only for explicitly inactive statuses", () => {
     expect(isActiveStatus("expired")).toBe(false);
+    expect(isActiveStatus("cancelled")).toBe(false);
     expect(isActiveStatus("suspended")).toBe(false);
-    expect(isActiveStatus(null)).toBe(false);
-    expect(isActiveStatus(undefined)).toBe(false);
+    expect(isActiveStatus("inactive")).toBe(false);
+    expect(isActiveStatus("discontinued")).toBe(false);
   });
 });

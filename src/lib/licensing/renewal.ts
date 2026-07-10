@@ -7,6 +7,8 @@
  * the same definition. `now` is always passed in so the logic stays testable.
  */
 
+import { INACTIVE } from "@/lib/billing/recurring";
+
 /** The smallest day-threshold a renewal falls within. */
 export type RenewalBucket = 30 | 60 | 90;
 
@@ -47,12 +49,16 @@ export function daysUntilRenewal(
 }
 
 /**
- * Whether a subscription's status is "active" (case-insensitive). Used to decide
- * which clients have live M365 licensing worth showing in the billing-run
- * client picker. Deliberately status-only — expiry date is not considered.
+ * Whether a subscription's status counts as live, used to decide which clients
+ * have M365 licensing worth showing in the billing-run client picker. Mirrors
+ * `isRecurringActive` in `recurring.ts`: a subscription is active unless its
+ * status is explicitly inactive (expired/cancelled/inactive/suspended/
+ * discontinued). A null or blank status is treated as active — TD SYNNEX often
+ * leaves it unset — so the picker isn't emptied by missing status values.
+ * Deliberately status-only; expiry date is not considered.
  */
 export function isActiveStatus(status: string | null | undefined): boolean {
-  return (status ?? "").toLowerCase().trim() === "active";
+  return !INACTIVE.test((status ?? "").trim());
 }
 
 /**

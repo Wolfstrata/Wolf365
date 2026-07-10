@@ -36,7 +36,11 @@ export function toRecurringInput(row: {
   };
 }
 
-const INACTIVE = /expire|cancel|inactiv|suspend|discontinu/i;
+/**
+ * Statuses that mean a subscription is NOT live. Shared source of truth for
+ * "active vs inactive" across recurring totals and the billing-run picker.
+ */
+export const INACTIVE = /expire|cancel|inactiv|suspend|discontinu/i;
 
 /** Whether a subscription counts toward recurring totals. */
 export function isRecurringActive(sub: RecurringSubscriptionInput): boolean {

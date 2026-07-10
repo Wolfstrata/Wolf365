@@ -4,8 +4,6 @@ import { ArrowLeft, Download } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { formatCurrency } from "@/lib/utils";
-import { ArchiveToggle } from "@/components/licensing/archive-toggle";
 import {
   getMarginReport,
   getRevenueLeakage,
@@ -14,6 +12,14 @@ import {
   getMarginExceptions,
   getExpiredLicenses,
 } from "@/lib/reports/queries";
+import {
+  MarginTableView,
+  LeakageTableView,
+  OverbillingTableView,
+  RenewalsTableView,
+  MarginExceptionsTableView,
+  ExpiredTableView,
+} from "./report-tables";
 
 const META: Record<string, { title: string; description: string }> = {
   margin: {
@@ -44,12 +50,6 @@ const META: Record<string, { title: string; description: string }> = {
 
 /** Report types with a CSV export handler in /api/export. */
 const EXPORTABLE = new Set(["margin", "leakage", "overbilling"]);
-
-const RENEWAL_BADGE: Record<number, string> = {
-  30: "bg-danger/15 text-danger",
-  60: "bg-warning/15 text-warning",
-  90: "bg-accent text-accent-foreground",
-};
 
 export default async function ReportPage({
   params,
@@ -99,182 +99,37 @@ export default async function ReportPage({
 async function MarginTable() {
   const rows = await getMarginReport();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "Description", "Revenue", "Est. cost", "Margin", "Margin %"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
-          <Td>{r.client}</Td>
-          <Td>{r.description}</Td>
-          <Td num>{formatCurrency(r.revenue)}</Td>
-          <Td num>{formatCurrency(r.estimatedCost)}</Td>
-          <Td num>{formatCurrency(r.margin)}</Td>
-          <Td num>{r.marginPct}%</Td>
-        </tr>
-      ))}
-    </Table>
-  );
+  return <MarginTableView rows={rows} />;
 }
 
 async function LeakageTable() {
   const rows = await getRevenueLeakage();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "SKU", "Product", "Qty", "Est. monthly cost"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
-          <Td>{r.client}</Td>
-          <Td>{r.sku}</Td>
-          <Td>{r.product}</Td>
-          <Td num>{r.quantity}</Td>
-          <Td num>{formatCurrency(r.estimatedMonthlyCost)}</Td>
-        </tr>
-      ))}
-    </Table>
-  );
+  return <LeakageTableView rows={rows} />;
 }
 
 async function OverbillingTable() {
   const rows = await getOverbillingRisk();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "Description", "Total", "Reason"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
-          <Td>{r.client}</Td>
-          <Td>{r.description}</Td>
-          <Td num>{formatCurrency(r.total)}</Td>
-          <Td>{r.reason}</Td>
-        </tr>
-      ))}
-    </Table>
-  );
+  return <OverbillingTableView rows={rows} />;
 }
 
 async function RenewalsTable() {
   const rows = await getUpcomingRenewals();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "SKU", "Product", "Qty", "Renews", "In"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
-          <Td>
-            {r.clientId ? (
-              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
-                {r.client}
-              </Link>
-            ) : (
-              r.client
-            )}
-          </Td>
-          <Td>{r.sku}</Td>
-          <Td>{r.product}</Td>
-          <Td num>{r.quantity}</Td>
-          <Td>{r.renewalDate}</Td>
-          <Td>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${RENEWAL_BADGE[r.bucket]}`}>
-              {r.daysUntil}d
-            </span>
-          </Td>
-        </tr>
-      ))}
-    </Table>
-  );
+  return <RenewalsTableView rows={rows} />;
 }
 
 async function MarginExceptionsTable() {
   const rows = await getMarginExceptions();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "SKU", "Product", "Qty", "Unit cost", "Cust. price / MSRP", "Margin"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
-          <Td>
-            {r.clientId ? (
-              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
-                {r.client}
-              </Link>
-            ) : (
-              r.client
-            )}
-          </Td>
-          <Td>{r.sku}</Td>
-          <Td>{r.product}</Td>
-          <Td num>{r.quantity}</Td>
-          <Td num>{formatCurrency(r.unitCost)}</Td>
-          <Td num>{formatCurrency(r.customerPrice)}</Td>
-          <Td num>
-            <span className="font-medium text-danger">{formatCurrency(r.marginPerUnit)}</span>
-          </Td>
-        </tr>
-      ))}
-    </Table>
-  );
+  return <MarginExceptionsTableView rows={rows} />;
 }
 
 async function ExpiredTable({ canArchive }: { canArchive: boolean }) {
   const rows = await getExpiredLicenses();
   if (rows.length === 0) return <Empty />;
-  return (
-    <Table headers={["Client", "SKU", "Product", "Qty", "Expired", "Status", "Archive"]}>
-      {rows.map((r) => (
-        <tr key={r.subscriptionId} className="border-t">
-          <Td>
-            {r.clientId ? (
-              <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
-                {r.client}
-              </Link>
-            ) : (
-              r.client
-            )}
-          </Td>
-          <Td>{r.sku}</Td>
-          <Td>{r.product}</Td>
-          <Td num>{r.quantity}</Td>
-          <Td>
-            <span className="font-medium text-orange-600 dark:text-orange-400">
-              {r.expiryDate}
-              {r.daysAgo != null && (
-                <span className="ml-1 text-xs text-muted-foreground">
-                  ({r.daysAgo}d ago)
-                </span>
-              )}
-            </span>
-          </Td>
-          <Td>{r.status}</Td>
-          <Td>
-            <ArchiveToggle
-              subscriptionId={r.subscriptionId}
-              archived={false}
-              canArchive={canArchive}
-            />
-          </Td>
-        </tr>
-      ))}
-    </Table>
-  );
-}
-
-function Table({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase text-muted-foreground">
-          <tr>
-            {headers.map((h) => (
-              <th key={h} className="py-2 pr-4 font-medium">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function Td({ children, num }: { children: React.ReactNode; num?: boolean }) {
-  return <td className={`py-2 pr-4 ${num ? "tabular-nums" : ""}`}>{children}</td>;
+  return <ExpiredTableView rows={rows} canArchive={canArchive} />;
 }
 
 function Empty() {

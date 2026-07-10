@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { Building2, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/ui/primitives";
-import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
+import { ClientsTable, type ClientListRow } from "./clients-table";
 
 /** Master client list. Populated by connector syncs + mapping. */
 export default async function ClientsPage() {
@@ -33,19 +32,31 @@ export default async function ClientsPage() {
     take: 1000,
   });
 
-  // Per-client recurring margin from synced M365 licensing.
-  const rows = clients.map((c) => {
+  // Per-client recurring margin from synced M365 licensing → serializable rows.
+  const rows: ClientListRow[] = clients.map((c) => {
     const subs = c.tdSynnexCustomer?.subscriptions ?? [];
     const summary = recurringSummary(subs.map(toRecurringInput));
     const currency = subs.find((s) => s.currency)?.currency ?? "CAD";
-    return { client: c, subs, summary, currency };
+    const negative = summary.activeCount > 0 && summary.monthlyMargin < 0;
+    return {
+      id: c.id,
+      name: c.name,
+      hasTd: !!c.tdSynnexCustomer,
+      stellrId: c.tdSynnexCustomer?.stellrId ?? null,
+      subsCount: subs.length,
+      activeCount: summary.activeCount,
+      monthlyMargin: summary.monthlyMargin,
+      marginPct: summary.marginPct,
+      currency,
+      hasQbo: !!c.qboCustomer,
+      active: c.tdSynnexCustomer?.active !== false,
+      negative,
+    };
   });
 
-  const withTd = clients.filter((c) => c.tdSynnexCustomer).length;
-  const totalLicenses = rows.reduce((a, r) => a + r.subs.length, 0);
-  const negativeMargin = rows.filter(
-    (r) => r.summary.activeCount > 0 && r.summary.monthlyMargin < 0,
-  );
+  const withTd = rows.filter((r) => r.hasTd).length;
+  const totalLicenses = rows.reduce((a, r) => a + r.subsCount, 0);
+  const negativeMargin = rows.filter((r) => r.negative);
 
   return (
     <div>
@@ -61,7 +72,7 @@ export default async function ClientsPage() {
               {negativeMargin.length}{" "}
               {negativeMargin.length === 1 ? "client is" : "clients are"} billing
               below cost (negative margin):{" "}
-              {negativeMargin.map((r) => r.client.name).join(", ")}.
+              {negativeMargin.map((r) => r.name).join(", ")}.
             </span>
           </div>
         )}
@@ -73,76 +84,7 @@ export default async function ClientsPage() {
             description="Sync QuickBooks and TD SYNNEX, then run Mappings → auto-match to create client records."
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Client</th>
-                  <th className="px-4 py-2 font-medium">TD SYNNEX #</th>
-                  <th className="px-4 py-2 font-medium">Subscriptions</th>
-                  <th className="px-4 py-2 font-medium">Monthly margin</th>
-                  <th className="px-4 py-2 font-medium">QBO</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ client: c, subs, summary, currency }) => {
-                  const negative =
-                    summary.activeCount > 0 && summary.monthlyMargin < 0;
-                  return (
-                    <tr
-                      key={c.id}
-                      className={`border-t hover:bg-accent/40 ${negative ? "bg-danger/5" : ""}`}
-                    >
-                      <td className="px-4 py-2 font-medium">
-                        <Link
-                          href={`/clients/${c.id}`}
-                          className="flex items-center gap-1.5 hover:underline"
-                        >
-                          {negative && (
-                            <TriangleAlert className="h-4 w-4 shrink-0 text-danger" />
-                          )}
-                          {c.name}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                        {c.tdSynnexCustomer?.stellrId ?? "—"}
-                      </td>
-                      <td className="px-4 py-2 tabular-nums">
-                        {c.tdSynnexCustomer ? subs.length : "—"}
-                      </td>
-                      <td className="px-4 py-2 tabular-nums">
-                        {summary.activeCount > 0 ? (
-                          <span className={negative ? "font-medium text-danger" : ""}>
-                            {formatCurrency(summary.monthlyMargin, currency)}
-                            <span className="ml-1 text-xs text-muted-foreground">
-                              ({summary.marginPct}%)
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2">
-                        {c.qboCustomer ? (
-                          <span className="text-success">Linked</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2">
-                        {c.tdSynnexCustomer?.active === false ? (
-                          <span className="text-warning">Inactive</span>
-                        ) : (
-                          <span className="text-muted-foreground">Active</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ClientsTable rows={rows} />
         )}
       </div>
     </div>
