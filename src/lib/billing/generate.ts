@@ -86,15 +86,21 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
       continue;
     }
 
+    // Resolve the QBO item mapping. An unmapped SKU is still included as a line
+    // so the run shows the full invoice — it's flagged (qboItemId null → renders
+    // "No QBO item"), recorded as a reconciliation exception, and skipped at push
+    // (which sends the run to PARTIALLY_FAILED). Only a subscription with no price
+    // at all is dropped, since we can't put a number on the line.
     const mapping = input.mappings[sub.sku];
-    if (!mapping || !mapping.qboItemId) {
+    const qboItemId = mapping?.qboItemId ?? null;
+    const qboItemName = mapping?.qboItemName ?? null;
+    if (!qboItemId) {
       exceptions.push({
         type: "UNMAPPED_SKU",
         message: `SKU ${sub.sku} is not mapped to a QuickBooks item.`,
         sku: sub.sku,
         subscriptionId: sub.id,
       });
-      continue;
     }
 
     const price = resolveUnitPrice({
@@ -139,9 +145,8 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
 
     lines.push({
       tdSynnexSubscriptionId: sub.id,
-      qboItemId: mapping.qboItemId,
-      description:
-        sub.productName ?? mapping.qboItemName ?? `SKU ${sub.sku}`,
+      qboItemId,
+      description: sub.productName ?? qboItemName ?? `SKU ${sub.sku}`,
       quantity: sub.quantity,
       unitPrice,
       prorationFactor: proration.factor,

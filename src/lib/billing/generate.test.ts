@@ -48,9 +48,11 @@ describe("generateBillingLines", () => {
     expect(line.subtotal).toBeCloseTo(250 * (16 / 31), 2);
   });
 
-  it("raises UNMAPPED_SKU when no QBO item is mapped", () => {
+  it("includes an unmapped SKU as a flagged line (qboItemId null) and raises UNMAPPED_SKU", () => {
     const r = generateBillingLines({ ...base, mappings: {} });
-    expect(r.lines).toHaveLength(0);
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0]!.qboItemId).toBeNull();
+    expect(r.lines[0]!.total).toBe(250); // still priced via the markup rule
     expect(r.exceptions[0]!.type).toBe("UNMAPPED_SKU");
   });
 
