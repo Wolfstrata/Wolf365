@@ -3,6 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { DatePicker, MonthPicker } from "@/components/ui/date-picker";
 import {
   createBillingRunAction,
   createBulkBillingRunsAction,
@@ -84,21 +85,16 @@ function PeriodFields() {
         <input type="hidden" name="mode" value={mode} />
 
         {mode === "monthly" ? (
-          <input
-            type="month"
-            name="month"
-            required
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          />
+          <MonthPicker name="month" required />
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">Start</label>
-              <input type="date" name="start" required className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
+              <DatePicker name="start" required placeholder="Start date" />
             </div>
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">End (exclusive)</label>
-              <input type="date" name="end" required className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
+              <DatePicker name="end" required placeholder="End date" />
             </div>
           </div>
         )}
@@ -106,7 +102,7 @@ function PeriodFields() {
 
       <div>
         <label className="mb-1 block text-sm font-medium">Invoice date (optional)</label>
-        <input type="date" name="invoiceDate" className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
+        <DatePicker name="invoiceDate" placeholder="Defaults to period start" />
         <p className="mt-1 text-xs text-muted-foreground">Defaults to the period start date.</p>
       </div>
     </>
