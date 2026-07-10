@@ -47,6 +47,15 @@ export function daysUntilRenewal(
 }
 
 /**
+ * Whether a subscription's status is "active" (case-insensitive). Used to decide
+ * which clients have live M365 licensing worth showing in the billing-run
+ * client picker. Deliberately status-only — expiry date is not considered.
+ */
+export function isActiveStatus(status: string | null | undefined): boolean {
+  return (status ?? "").toLowerCase().trim() === "active";
+}
+
+/**
  * Whether a licensing subscription has expired. TD SYNNEX maps the term's
  * end/expiry date into `renewalDate`, so a renewal date in the past means the
  * term has lapsed. An explicit "expired" status counts too, even without a date.

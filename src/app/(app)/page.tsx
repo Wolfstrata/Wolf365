@@ -8,6 +8,7 @@ import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { DashboardSyncButtons } from "./sync-buttons";
 
 // On-demand connector syncs run inline; allow the same window as the cron.
@@ -25,6 +26,7 @@ export default async function DashboardPage() {
     redirect("/crm/forecast");
   }
 
+  await ensureArchiveColumn();
   const [clients, connectors, openExceptions, billingRuns, clientsWithSubs] =
     await Promise.all([
       prisma.client.count(),
@@ -46,6 +48,7 @@ export default async function DashboardPage() {
                   status: true,
                   currency: true,
                   renewalDate: true,
+                  archived: true,
                 },
               },
             },
@@ -56,13 +59,16 @@ export default async function DashboardPage() {
 
   // Recurring revenue / cost / margin from synced M365 licensing. Computed
   // per-client so we can also flag clients that bill below cost.
+  // Archived (filed-away) licenses are excluded everywhere on the dashboard.
   const allSubs = clientsWithSubs.flatMap(
-    (c) => c.tdSynnexCustomer?.subscriptions ?? [],
+    (c) => (c.tdSynnexCustomer?.subscriptions ?? []).filter((s) => !s.archived),
   );
   const recurring = recurringSummary(allSubs.map(toRecurringInput));
   const negativeMarginClients = clientsWithSubs.filter((c) => {
     const s = recurringSummary(
-      (c.tdSynnexCustomer?.subscriptions ?? []).map(toRecurringInput),
+      (c.tdSynnexCustomer?.subscriptions ?? [])
+        .filter((sub) => !sub.archived)
+        .map(toRecurringInput),
     );
     return s.activeCount > 0 && s.monthlyMargin < 0;
   }).length;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { daysUntilRenewal, renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
+import { daysUntilRenewal, renewalWindow, isMonthToMonth, isExpired, isActiveStatus } from "@/lib/licensing/renewal";
 
 const now = new Date("2026-07-09T00:00:00.000Z");
 const inDays = (n: number) => new Date(now.getTime() + n * 24 * 60 * 60 * 1000);
@@ -76,5 +76,20 @@ describe("isExpired", () => {
     expect(isExpired(inDays(30), null, now)).toBe(false);
     expect(isExpired(inDays(0), "active", now)).toBe(false);
     expect(isExpired(null, null, now)).toBe(false);
+  });
+});
+
+describe("isActiveStatus", () => {
+  it("is true only for an 'active' status (case/space-insensitive)", () => {
+    expect(isActiveStatus("active")).toBe(true);
+    expect(isActiveStatus("ACTIVE")).toBe(true);
+    expect(isActiveStatus("  Active ")).toBe(true);
+  });
+
+  it("is false for other or missing statuses", () => {
+    expect(isActiveStatus("expired")).toBe(false);
+    expect(isActiveStatus("suspended")).toBe(false);
+    expect(isActiveStatus(null)).toBe(false);
+    expect(isActiveStatus(undefined)).toBe(false);
   });
 });

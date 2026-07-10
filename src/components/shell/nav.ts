@@ -18,13 +18,14 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: "LayoutDashboard", section: "Finance Workspace" },
-  { label: "Clients", href: "/clients", icon: "Building2", section: "Finance Workspace", permission: "clients:read" },
+  { label: "M365 Dashboard", href: "/", icon: "LayoutDashboard", section: "Finance Workspace" },
+  { label: "M365 Clients", href: "/clients", icon: "Building2", section: "Finance Workspace", permission: "clients:read" },
+  { label: "M365 Archived Clients", href: "/archived-licensing", icon: "Archive", section: "Finance Workspace", permission: "clients:read" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },
   { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },
   { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
-  { label: "Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
+  { label: "QBO Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
   { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
   { label: "Managed Services", href: "/crm/managed-services", icon: "Wrench", section: "CRM", permission: "crm:read" },

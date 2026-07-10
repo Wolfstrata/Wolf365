@@ -3,6 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/ui/primitives";
+import { isActiveStatus } from "@/lib/licensing/renewal";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { NewRunForm } from "./new-run-form";
 
 export default async function NewBillingRunPage({
@@ -12,19 +14,28 @@ export default async function NewBillingRunPage({
 }) {
   await requirePermission("billing:edit");
   const { clientId } = await searchParams;
+  await ensureArchiveColumn();
 
   const rows = await prisma.client.findMany({
     orderBy: { name: "asc" },
     select: {
       id: true,
       name: true,
-      tdSynnexCustomer: { select: { _count: { select: { subscriptions: true } } } },
+      tdSynnexCustomer: {
+        select: {
+          subscriptions: { select: { status: true, archived: true } },
+        },
+      },
     },
   });
+  // "Active licenses" = subscriptions with status active (any expiry) that are
+  // not archived. The single-client picker only offers clients with ≥1.
   const clients = rows.map((c) => ({
     id: c.id,
     name: c.name,
-    subs: c.tdSynnexCustomer?._count.subscriptions ?? 0,
+    activeSubs: (c.tdSynnexCustomer?.subscriptions ?? []).filter(
+      (s) => !s.archived && isActiveStatus(s.status),
+    ).length,
   }));
 
   return (

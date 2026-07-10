@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
+import { ArchiveToggle } from "@/components/licensing/archive-toggle";
 import {
   getMarginReport,
   getRevenueLeakage,
@@ -60,6 +61,7 @@ export default async function ReportPage({
   const meta = META[type];
   if (!meta) notFound();
   const canExport = can(user.role, "reports:export");
+  const canArchive = can(user.role, "billing:edit");
 
   return (
     <div>
@@ -87,7 +89,7 @@ export default async function ReportPage({
           {type === "overbilling" && <OverbillingTable />}
           {type === "renewals" && <RenewalsTable />}
           {type === "margin-exceptions" && <MarginExceptionsTable />}
-          {type === "expired" && <ExpiredTable />}
+          {type === "expired" && <ExpiredTable canArchive={canArchive} />}
         </Card>
       </div>
     </div>
@@ -209,13 +211,13 @@ async function MarginExceptionsTable() {
   );
 }
 
-async function ExpiredTable() {
+async function ExpiredTable({ canArchive }: { canArchive: boolean }) {
   const rows = await getExpiredLicenses();
   if (rows.length === 0) return <Empty />;
   return (
-    <Table headers={["Client", "SKU", "Product", "Qty", "Expired", "Status"]}>
-      {rows.map((r, i) => (
-        <tr key={i} className="border-t">
+    <Table headers={["Client", "SKU", "Product", "Qty", "Expired", "Status", "Archive"]}>
+      {rows.map((r) => (
+        <tr key={r.subscriptionId} className="border-t">
           <Td>
             {r.clientId ? (
               <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
@@ -239,6 +241,13 @@ async function ExpiredTable() {
             </span>
           </Td>
           <Td>{r.status}</Td>
+          <Td>
+            <ArchiveToggle
+              subscriptionId={r.subscriptionId}
+              archived={false}
+              canArchive={canArchive}
+            />
+          </Td>
         </tr>
       ))}
     </Table>

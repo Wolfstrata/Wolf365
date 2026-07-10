@@ -14,8 +14,8 @@ import {
 interface Client {
   id: string;
   name: string;
-  /** Count of linked TD SYNNEX subscriptions (0 = nothing to bill). */
-  subs: number;
+  /** Count of linked TD SYNNEX subscriptions with active status (0 = hide from picker). */
+  activeSubs: number;
 }
 
 interface Props {
@@ -63,6 +63,8 @@ export function NewRunForm({ clients, defaultClientId }: Props) {
 /** Period picker shared by both forms; self-contained (owns its mode state). */
 function PeriodFields() {
   const [mode, setMode] = useState<"monthly" | "custom">("monthly");
+  // Default the monthly period to the current month; still overridable.
+  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
   return (
     <>
       <div>
@@ -85,7 +87,7 @@ function PeriodFields() {
         <input type="hidden" name="mode" value={mode} />
 
         {mode === "monthly" ? (
-          <MonthPicker name="month" required />
+          <MonthPicker name="month" required defaultValue={currentMonth} />
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -114,6 +116,8 @@ function SingleForm({ clients, defaultClientId }: Props) {
     createBillingRunAction,
     null,
   );
+  // Only offer clients that have at least one active M365 license.
+  const activeClients = useMemo(() => clients.filter((c) => c.activeSubs > 0), [clients]);
 
   return (
     <form action={action} className="space-y-5 rounded-lg border bg-card p-6">
@@ -126,13 +130,17 @@ function SingleForm({ clients, defaultClientId }: Props) {
           className="w-full rounded-md border bg-background px-3 py-2 text-sm"
         >
           <option value="">Select a client…</option>
-          {clients.map((c) => (
+          {activeClients.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
-              {c.subs === 0 ? " — no M365 subscriptions" : ""}
             </option>
           ))}
         </select>
+        {activeClients.length === 0 && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            No clients have active M365 licenses to bill.
+          </p>
+        )}
       </div>
 
       <PeriodFields />
@@ -159,7 +167,7 @@ function MultipleForm({ clients }: { clients: Client[] }) {
     null,
   );
 
-  const withSubs = useMemo(() => clients.filter((c) => c.subs > 0), [clients]);
+  const withSubs = useMemo(() => clients.filter((c) => c.activeSubs > 0), [clients]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -184,7 +192,7 @@ function MultipleForm({ clients }: { clients: Client[] }) {
               onClick={() => setSelected(new Set(withSubs.map((c) => c.id)))}
               className="rounded-md border px-2.5 py-1 font-medium transition hover:bg-accent"
             >
-              Select all with subscriptions
+              Select all with active licenses
             </button>
             <button
               type="button"
@@ -220,12 +228,12 @@ function MultipleForm({ clients }: { clients: Client[] }) {
               <span
                 className={cn(
                   "text-xs",
-                  c.subs > 0 ? "text-muted-foreground" : "text-warning",
+                  c.activeSubs > 0 ? "text-muted-foreground" : "text-warning",
                 )}
               >
-                {c.subs > 0
-                  ? `${c.subs} subscription${c.subs === 1 ? "" : "s"}`
-                  : "no M365"}
+                {c.activeSubs > 0
+                  ? `${c.activeSubs} active license${c.activeSubs === 1 ? "" : "s"}`
+                  : "no active M365"}
               </span>
             </label>
           ))}

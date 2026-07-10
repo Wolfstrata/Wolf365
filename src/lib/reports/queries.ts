@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { renewalWindow, isMonthToMonth, isExpired, type RenewalBucket } from "@/lib/licensing/renewal";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 
 /**
  * Report computations. Each returns plain row objects (column-keyed) so the
@@ -185,10 +186,11 @@ export interface RenewalReportRow {
 
 /** TD SYNNEX subscriptions renewing within the next `withinDays` days. */
 export async function getUpcomingRenewals(withinDays = 90): Promise<RenewalReportRow[]> {
+  await ensureArchiveColumn();
   const now = new Date();
   const horizon = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
   const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { renewalDate: { gte: now, lte: horizon } },
+    where: { renewalDate: { gte: now, lte: horizon }, archived: false },
     include: { customer: { include: { client: true } } },
     orderBy: { renewalDate: "asc" },
   });
@@ -225,7 +227,9 @@ export interface MarginExceptionRow {
 
 /** Synced M365 lines sold under cost (suggested customer price < our cost). */
 export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
+  await ensureArchiveColumn();
   const subs = await prisma.tdSynnexSubscription.findMany({
+    where: { archived: false },
     include: { customer: { include: { client: true } } },
   });
   const rows: MarginExceptionRow[] = [];
@@ -249,6 +253,7 @@ export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
 }
 
 export interface ExpiredLicenseRow {
+  subscriptionId: string;
   client: string;
   clientId: string | null;
   sku: string;
@@ -259,10 +264,16 @@ export interface ExpiredLicenseRow {
   status: string;
 }
 
-/** TD SYNNEX subscriptions whose term has lapsed (past end date or expired status). */
+/**
+ * TD SYNNEX subscriptions whose term has lapsed (past end date or expired
+ * status). Archived (filed-away) licenses are excluded — they live under
+ * "M365 Archived Clients".
+ */
 export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
+  await ensureArchiveColumn();
   const now = new Date();
   const subs = await prisma.tdSynnexSubscription.findMany({
+    where: { archived: false },
     include: { customer: { include: { client: true } } },
     orderBy: { renewalDate: "asc" },
   });
@@ -274,6 +285,7 @@ export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
         ? Math.floor((now.getTime() - s.renewalDate.getTime()) / (24 * 60 * 60 * 1000))
         : null;
     rows.push({
+      subscriptionId: s.id,
       client: s.customer.client?.name ?? s.customer.name,
       clientId: s.customer.clientId,
       sku: s.productSku ?? "—",
@@ -286,6 +298,42 @@ export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
   }
   // Most-recently-expired first; status-only expiries (null daysAgo) last.
   return rows.sort((a, b) => (a.daysAgo ?? Infinity) - (b.daysAgo ?? Infinity));
+}
+
+export interface ArchivedLicenseRow {
+  subscriptionId: string;
+  client: string;
+  clientId: string | null;
+  sku: string;
+  product: string;
+  quantity: number;
+  expiryDate: string; // YYYY-MM-DD or "—"
+  status: string;
+}
+
+/**
+ * Licenses a finance user has archived (filed away). Grouped-friendly: sorted by
+ * client then product. Shown only under "M365 Archived Clients".
+ */
+export async function getArchivedLicenses(): Promise<ArchivedLicenseRow[]> {
+  await ensureArchiveColumn();
+  const subs = await prisma.tdSynnexSubscription.findMany({
+    where: { archived: true },
+    include: { customer: { include: { client: true } } },
+  });
+  const rows: ArchivedLicenseRow[] = subs.map((s) => ({
+    subscriptionId: s.id,
+    client: s.customer.client?.name ?? s.customer.name,
+    clientId: s.customer.clientId,
+    sku: s.productSku ?? "—",
+    product: s.productName ?? "—",
+    quantity: s.quantity,
+    expiryDate: s.renewalDate ? s.renewalDate.toISOString().slice(0, 10) : "—",
+    status: s.status ?? "—",
+  }));
+  return rows.sort(
+    (a, b) => a.client.localeCompare(b.client) || a.product.localeCompare(b.product),
+  );
 }
 
 function round2(n: number): number {

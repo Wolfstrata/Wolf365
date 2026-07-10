@@ -9,6 +9,7 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
   detectDiscrepancies,
@@ -55,6 +56,7 @@ export default async function ClientProfilePage({
 }) {
   const user = await requirePermission("clients:read");
   const { id } = await params;
+  await ensureArchiveColumn();
 
   const client = await prisma.client.findUnique({
     where: { id },
@@ -79,6 +81,7 @@ export default async function ClientProfilePage({
     ? await prisma.tdSynnexSubscription.findMany({
         where: {
           customer: { client: { OR: [{ id: client.id }, { parentClientId: client.id }] } },
+          archived: false,
         },
         select: {
           productSku: true,
@@ -127,11 +130,14 @@ export default async function ClientProfilePage({
 
   const qbo = client.qboCustomer;
   const td = client.tdSynnexCustomer;
+  // Archived (filed-away) licenses are hidden from the client screen — they show
+  // only under "M365 Archived Clients" until restored.
+  const visibleSubs = (td?.subscriptions ?? []).filter((s) => !s.archived);
 
   // Per-client recurring totals from this customer's M365 licensing.
   const recurring = td
     ? recurringSummary(
-        td.subscriptions.map((s) => ({
+        visibleSubs.map((s) => ({
           customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
           unitCost: s.unitCost != null ? Number(s.unitCost) : null,
           quantity: s.quantity,
@@ -141,20 +147,20 @@ export default async function ClientProfilePage({
       )
     : null;
   const recurringCurrency =
-    td?.subscriptions.find((s) => s.currency)?.currency ?? "CAD";
+    visibleSubs.find((s) => s.currency)?.currency ?? "CAD";
 
   // Previous-month cost snapshot per subscription, to flag month-over-month
   // margin changes (degrades to empty when no snapshots exist yet).
   const attentionNow = new Date();
   const prevCosts = td
     ? await previousMonthCosts(
-        td.subscriptions.map((s) => s.stellrSubscriptionId),
+        visibleSubs.map((s) => s.stellrSubscriptionId),
         attentionNow,
       )
     : new Map();
 
   // Rows for the enhanced, sortable/filterable M365 licensing table.
-  const m365Rows: M365LicensingRow[] = (td?.subscriptions ?? []).map((s) => {
+  const m365Rows: M365LicensingRow[] = visibleSubs.map((s) => {
     const currency = s.currency ?? "CAD";
     const unitCost = s.unitCost != null ? Number(s.unitCost) : null;
     const customerPrice = s.customerPrice != null ? Number(s.customerPrice) : null;
@@ -314,7 +320,7 @@ export default async function ClientProfilePage({
                 <StatItem label="Domain" value={td.domain ?? "—"} />
                 <StatItem label="MS tenant ID" value={td.microsoftTenantId ?? "—"} />
                 <StatItem label="Service address" value={formatAddress(td.serviceAddress)} />
-                <StatItem label="Subscriptions" value={td.subscriptions.length} />
+                <StatItem label="Subscriptions" value={visibleSubs.length} />
                 <StatItem label="Status" value={td.active ? "Active" : "Inactive"} />
                 <StatItem label="Last TD SYNNEX sync" value={formatDateTime(td.lastSyncedAt)} />
               </div>
@@ -579,9 +585,9 @@ export default async function ClientProfilePage({
         {!isGroup && td && (
           <Card>
             <h2 className="mb-3 text-sm font-semibold">
-              Microsoft 365 licensing ({td.subscriptions.length})
+              Microsoft 365 licensing ({visibleSubs.length})
             </h2>
-            {td.subscriptions.length === 0 ? (
+            {visibleSubs.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No subscriptions synced for this customer. Run a TD SYNNEX sync,
                 or this customer may have no active TD SYNNEX subscriptions.

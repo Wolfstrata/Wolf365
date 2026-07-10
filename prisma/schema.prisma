@@ -263,6 +263,8 @@ enum AuditAction {
   QUOTA_SET
   LEAD_UPDATED
   LEADS_IMPORTED
+  LICENSE_ARCHIVED
+  LICENSE_UNARCHIVED
 }
 
 model AuditLog {
@@ -399,6 +401,10 @@ model TdSynnexSubscription {
   cancellationWindowEnds DateTime?
   reducible          Boolean? // false => NCE rules prevent seat reduction
   status             String?
+  // Finance-user "filed away" flag. Archived licenses are hidden from the
+  // expired report, dashboard counts, and the client profile, and appear only
+  // under "M365 Archived Clients". Not touched by the TD SYNNEX sync upsert.
+  archived           Boolean  @default(false)
   raw                Json?
   lastSyncedAt       DateTime @default(now())
 

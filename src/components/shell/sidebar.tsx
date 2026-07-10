@@ -28,6 +28,7 @@ import {
   Inbox,
   Target,
   BellRing,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,7 @@ const ICONS: Record<string, LucideIcon> = {
   Inbox,
   Target,
   BellRing,
+  Archive,
 };
 
 const SECTION_ORDER = [
