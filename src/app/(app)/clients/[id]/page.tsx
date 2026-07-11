@@ -74,6 +74,8 @@ export default async function ClientProfilePage({
 
   const canMap = can(user.role, "mappings:approve");
   const isGroup = client.subsidiaries.length > 0;
+  // Single "now" for expiry checks across recurring totals + the licensing table.
+  const attentionNow = new Date();
 
   // Group rollup: cumulative recurring across this client + all its
   // subsidiaries' M365 licensing. Each subscription belongs to exactly one
@@ -95,10 +97,14 @@ export default async function ClientProfilePage({
             billingFrequency: true,
             status: true,
             currency: true,
+            renewalDate: true,
           },
         })
       : []
-  ).filter(isM365Subscription); // M365 only — exclude Cisco et al.
+  ).filter(
+    // M365 only (exclude Cisco et al.) and exclude expired from recurring rollups.
+    (s) => isM365Subscription(s) && !isExpired(s.renewalDate, s.status, attentionNow),
+  );
   const groupSummary = groupSubs.length > 0 ? recurringSummary(groupSubs.map(toRecurringInput)) : null;
   const groupCurrency = groupSubs.find((s) => s.currency)?.currency ?? "CAD";
 
@@ -140,10 +146,13 @@ export default async function ClientProfilePage({
     (s) => !s.archived && isM365Subscription(s),
   );
 
-  // Per-client recurring totals from this customer's M365 licensing.
+  // Per-client recurring totals from this customer's M365 licensing. Expired
+  // licenses are excluded — a lapsed term is not recurring revenue.
   const recurring = td
     ? recurringSummary(
-        visibleSubs.map((s) => ({
+        visibleSubs
+          .filter((s) => !isExpired(s.renewalDate, s.status, attentionNow))
+          .map((s) => ({
           customerPrice: s.customerPrice != null ? Number(s.customerPrice) : null,
           unitCost: s.unitCost != null ? Number(s.unitCost) : null,
           quantity: s.quantity,
@@ -157,7 +166,6 @@ export default async function ClientProfilePage({
 
   // Previous-month cost snapshot per subscription, to flag month-over-month
   // margin changes (degrades to empty when no snapshots exist yet).
-  const attentionNow = new Date();
   const prevCosts = td
     ? await previousMonthCosts(
         visibleSubs.map((s) => s.stellrSubscriptionId),

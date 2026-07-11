@@ -52,7 +52,11 @@ export default async function ClientsPage() {
       const liveSubs = subs.filter(
         (s) => !s.archived && isActiveStatus(s.status) && !isExpired(s.renewalDate, s.status, now),
       );
-      const summary = recurringSummary(subs.filter((s) => !s.archived).map(toRecurringInput));
+      const summary = recurringSummary(
+        subs
+          .filter((s) => !s.archived && !isExpired(s.renewalDate, s.status, now))
+          .map(toRecurringInput),
+      );
       const currency = subs.find((s) => s.currency)?.currency ?? "CAD";
       const negative = summary.activeCount > 0 && summary.monthlyMargin < 0;
       return {

@@ -64,16 +64,25 @@ export default async function DashboardPage() {
   // Recurring revenue / cost / margin from synced M365 licensing. Computed
   // per-client so we can also flag clients that bill below cost.
   // Archived (filed-away) licenses are excluded everywhere on the dashboard.
+  const now = new Date();
   const allSubs = clientsWithSubs.flatMap((c) =>
     (c.tdSynnexCustomer?.subscriptions ?? []).filter(
       (s) => !s.archived && isM365Subscription(s),
     ),
   );
-  const recurring = recurringSummary(allSubs.map(toRecurringInput));
+  // Recurring revenue/cost/margin exclude expired licenses — a lapsed term is
+  // not recurring revenue. (Expired lines still feed the "expired" card below.)
+  const recurringSubs = allSubs.filter((s) => !isExpired(s.renewalDate, s.status, now));
+  const recurring = recurringSummary(recurringSubs.map(toRecurringInput));
   const negativeMarginClients = clientsWithSubs.filter((c) => {
     const s = recurringSummary(
       (c.tdSynnexCustomer?.subscriptions ?? [])
-        .filter((sub) => !sub.archived && isM365Subscription(sub))
+        .filter(
+          (sub) =>
+            !sub.archived &&
+            isM365Subscription(sub) &&
+            !isExpired(sub.renewalDate, sub.status, now),
+        )
         .map(toRecurringInput),
     );
     return s.activeCount > 0 && s.monthlyMargin < 0;
@@ -82,7 +91,6 @@ export default async function DashboardPage() {
 
   // Attention counts: subscriptions renewing within 90 days, and lines sold
   // under cost (suggested customer price below our cost).
-  const now = new Date();
   const upcomingRenewals = allSubs.filter(
     (s) =>
       !isMonthToMonth(s.commitmentTerm, s.billingFrequency) &&
