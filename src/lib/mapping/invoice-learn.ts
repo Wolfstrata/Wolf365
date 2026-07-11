@@ -135,7 +135,9 @@ export async function learnMappingsFromInvoices(params: {
       qboItemId: m.qboItemId,
       qboItemName: m.qboItemName,
       confidence: m.confidence,
-      method: m.method,
+      // Tag the source as the invoice-history learner (the pure matcher's
+      // deterministic/fuzzy call still drives `status`).
+      method: "INVOICE_HISTORY" as const,
       status: m.status,
       reviewedAt: m.status === "CONFIRMED" ? now : null,
     })),

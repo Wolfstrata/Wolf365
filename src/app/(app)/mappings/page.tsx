@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GitMerge, ExternalLink } from "lucide-react";
+import { GitMerge, ExternalLink, FileText } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -36,7 +36,7 @@ export default async function MappingsPage() {
   const canApprove = can(user.role, "mappings:approve");
   const canPropose = can(user.role, "mappings:propose");
 
-  const [clientProposals, productMappings, links] = await Promise.all([
+  const [clientProposals, productMappings, links, invoiceMappedCount] = await Promise.all([
     prisma.clientMatchProposal.findMany({
       where: { status: "PROPOSED" },
       orderBy: { confidence: "desc" },
@@ -58,6 +58,8 @@ export default async function MappingsPage() {
         },
       },
     }),
+    // How many mappings were learned automatically from QBO invoice history.
+    prisma.productMapping.count({ where: { method: "INVOICE_HISTORY" } }),
   ]);
 
   // Human-readable product name per SKU, so reviewers aren't decoding raw codes.
@@ -250,8 +252,16 @@ export default async function MappingsPage() {
 
         {/* SKU mapping */}
         <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">SKU → QuickBooks item mappings</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold">SKU → QuickBooks item mappings</h2>
+              {invoiceMappedCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">
+                  <FileText className="h-3 w-3" />
+                  {invoiceMappedCount} auto-mapped from invoice history
+                </span>
+              )}
+            </div>
             {canPropose && <AutoMatchButton action={autoMatchSkusAction} />}
           </div>
           {productMappings.length === 0 ? (
@@ -317,6 +327,11 @@ export default async function MappingsPage() {
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <span className="text-xs text-muted-foreground">
                         Confidence <ConfidenceBadge value={m.confidence} /> · {m.status}
+                        {m.method === "INVOICE_HISTORY" && (
+                          <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground">
+                            <FileText className="h-2.5 w-2.5" /> from invoice
+                          </span>
+                        )}
                       </span>
                       {canApprove && m.status === "PROPOSED" && (
                         <div className="flex gap-2">
