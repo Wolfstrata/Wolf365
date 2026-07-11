@@ -64,7 +64,7 @@ export default async function ClientsPage() {
         title="Clients"
         description={`${clients.length} clients · ${withTd} with TD SYNNEX · ${totalLicenses} M365 subscriptions. Click a client to drill into records and licensing.`}
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {negativeMargin.length > 0 && (
           <div className="mb-4 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />

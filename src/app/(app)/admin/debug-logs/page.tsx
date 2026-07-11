@@ -22,7 +22,7 @@ export default async function DebugLogsPage() {
         title="Connector Debug Logs"
         description="Redacted per-call diagnostics for QuickBooks, TD SYNNEX, and other connectors. Secrets are never logged."
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {logs.length === 0 ? (
           <EmptyState
             icon={<Bug className="h-8 w-8" />}

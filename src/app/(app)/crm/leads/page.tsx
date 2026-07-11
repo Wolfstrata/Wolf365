@@ -36,7 +36,7 @@ export default async function LeadsPage() {
         title="Leads"
         description={`Inbound leads from external sources like ZoomInfo. ${leads.length} total · ${newCount} new.`}
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         {leads.length === 0 ? (
           <EmptyState
             icon={<Inbox className="h-8 w-8" />}

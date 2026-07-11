@@ -16,7 +16,7 @@ export default async function ConnectorsPage() {
         title="Connectors"
         description="Configure and monitor integrations. Test Connection and Sync perform real API calls."
       />
-      <div className="space-y-3 p-8">
+      <div className="space-y-3 p-4 sm:p-8">
         {connectors.map((c) => (
           <Link key={c.type} href={`/admin/connectors/${c.type}`}>
             <Card className="flex items-center justify-between transition hover:border-primary/40">

@@ -14,7 +14,7 @@ export default async function AlertsPage() {
         title="M365 Alerts"
         description="Renewal and cost-change alerts for Microsoft 365 licensing, delivered by email via Resend."
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <SendDigestForm />
       </div>
     </div>

@@ -99,7 +99,7 @@ export default async function SalesManagementPage({
         title="Sales Management"
         description="Salespeople from your opportunities, their quota targets by quarter or year, and attainment against closed-won contract value."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         {/* Year selector */}
         <form method="get" className="flex items-end gap-3">
           <label className="block text-xs font-medium text-muted-foreground">

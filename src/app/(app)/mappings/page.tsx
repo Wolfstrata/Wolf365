@@ -123,7 +123,7 @@ export default async function MappingsPage() {
         title="Mappings"
         description="AI-assisted client and SKU mapping. Exact matches auto-confirm; uncertain ones need review."
       />
-      <div className="space-y-8 p-8">
+      <div className="space-y-8 p-4 sm:p-8">
         {/* Full customer linkages — every client and its QBO ↔ TD SYNNEX links */}
         <section>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

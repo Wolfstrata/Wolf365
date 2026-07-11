@@ -44,7 +44,7 @@ export default async function NewBillingRunPage({
         title="New billing run"
         description="Generate a prorated draft invoice from synced TD SYNNEX subscriptions."
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Link
           href="/billing"
           className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

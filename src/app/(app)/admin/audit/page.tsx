@@ -18,7 +18,7 @@ export default async function AuditPage() {
         title="Audit Log"
         description="Logins, connector and SSO changes, syncs, mappings, billing edits, approvals, pushes, and exports."
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {logs.length === 0 ? (
           <EmptyState
             icon={<ScrollText className="h-8 w-8" />}

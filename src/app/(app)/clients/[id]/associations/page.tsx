@@ -35,7 +35,7 @@ export default async function ClientAssociationsPage({
         title={`Associations — ${client.name}`}
         description="Select the clients that are subsidiaries of this one. Selecting a client already under another parent moves it here."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Link
           href={`/clients/${client.id}`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

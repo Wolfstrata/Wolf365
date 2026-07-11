@@ -43,7 +43,7 @@ export default async function BackupPage() {
         title="Backups"
         description="Snapshot the entire database to Neon, on demand or daily, and download a sanitized data export."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Card className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

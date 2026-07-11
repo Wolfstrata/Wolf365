@@ -127,7 +127,7 @@ export default async function CrmLinePage({
           ) : undefined
         }
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <CrmFilterBar />
 
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

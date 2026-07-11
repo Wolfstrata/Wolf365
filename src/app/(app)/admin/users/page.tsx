@@ -49,7 +49,7 @@ export default async function UsersPage() {
         title="Users"
         description="Invite-only: create a user here before they can sign in with Microsoft 365. Assign roles and manage access."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <CreateUserForm />
 
         <UsersTable

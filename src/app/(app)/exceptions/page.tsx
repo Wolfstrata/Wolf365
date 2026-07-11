@@ -48,7 +48,7 @@ export default async function ExceptionsPage() {
           </div>
         }
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {exceptions.length === 0 ? (
           <EmptyState
             icon={<CheckCircle2 className="h-8 w-8 text-success" />}

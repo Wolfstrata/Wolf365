@@ -49,7 +49,7 @@ export default async function BillingPage() {
           ) : null
         }
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {runs.length === 0 ? (
           <EmptyState
             icon={<Receipt className="h-8 w-8" />}

@@ -119,7 +119,7 @@ export default async function SyncedSourcePage({
   return (
     <div>
       <PageHeader title={SOURCE_LABELS[source]} description={SOURCE_BLURB[source]} />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {rows.length === 0 ? (
           <EmptyState
             icon={<Database className="h-8 w-8" />}

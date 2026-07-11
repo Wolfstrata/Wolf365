@@ -42,7 +42,7 @@ export default async function SuperOpsBillingPage() {
         description="Import SuperOps invoices, review them, and push to QuickBooks Online — separate from M365 agreement billing."
         actions={can(user.role, "connectors:sync") ? <SyncSuperOpsButton /> : null}
       />
-      <div className="space-y-3 p-8">
+      <div className="space-y-3 p-4 sm:p-8">
         {invoices.length === 0 ? (
           <EmptyState
             icon={<Receipt className="h-8 w-8" />}

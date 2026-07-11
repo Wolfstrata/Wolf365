@@ -22,7 +22,7 @@ export default async function ArchivedLicensingPage() {
         title="M365 Archived Clients"
         description="Expired M365 licenses you've filed away. They're hidden from the expired report, the dashboard, and the client profile — restore one to bring it back."
       />
-      <div className="space-y-4 p-8">
+      <div className="space-y-4 p-4 sm:p-8">
         {rows.length === 0 ? (
           <Card>
             <EmptyState

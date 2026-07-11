@@ -53,7 +53,7 @@ export default async function ReportsPage() {
         title="Reports"
         description="Reconciliation and revenue-integrity reports with CSV/Excel export."
       />
-      <div className="grid grid-cols-1 gap-4 p-8 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 p-4 sm:p-8 sm:grid-cols-2">
         {REPORTS.map((r) => (
           <Link key={r.href} href={r.href}>
             <Card className="flex items-center justify-between transition hover:border-primary/40">

@@ -14,7 +14,7 @@ export default async function ApiProbePage() {
         title="API Probe"
         description="Send a real authenticated GET to a connector endpoint and inspect the raw response. Useful for finding the correct resource path."
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <ProbeForm />
       </div>
     </div>

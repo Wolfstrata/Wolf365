@@ -15,7 +15,7 @@ export default async function SettingsPage() {
         title="Settings"
         description="Personal preferences for your Wolf365 account."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Card>
           <h2 className="text-sm font-semibold">Display timezone</h2>
           <p className="mt-1 text-sm text-muted-foreground">

@@ -266,7 +266,7 @@ export default async function ClientProfilePage({
           </Link>
         }
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Link
           href="/clients"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

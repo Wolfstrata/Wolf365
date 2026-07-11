@@ -67,7 +67,7 @@ export default async function ConnectorConfigPage({
         description={view.description}
         actions={<HealthBadge health={view.health} />}
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <Link
           href="/admin/connectors"
           className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

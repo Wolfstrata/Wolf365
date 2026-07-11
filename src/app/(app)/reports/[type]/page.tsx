@@ -79,7 +79,7 @@ export default async function ReportPage({
           ) : null
         }
       />
-      <div className="space-y-4 p-8">
+      <div className="space-y-4 p-4 sm:p-8">
         <Link href="/reports" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> All reports
         </Link>

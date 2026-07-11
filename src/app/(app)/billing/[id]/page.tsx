@@ -106,7 +106,7 @@ export default async function BillingRunDetailPage({
           </div>
         }
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Link href="/billing" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Billing runs
         </Link>

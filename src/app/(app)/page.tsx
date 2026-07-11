@@ -105,7 +105,7 @@ export default async function DashboardPage() {
         description="Microsoft 365 billing reconciliation workspace"
         actions={can(user.role, "connectors:sync") ? <DashboardSyncButtons /> : undefined}
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {/* Recurring revenue / cost / margin from synced M365 licensing */}
         <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Card>

@@ -34,7 +34,7 @@ export default async function SecurityPage() {
         title="Security & SSO"
         description="Configure Microsoft Entra ID single sign-on, allowed domains, and group-to-role mapping."
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 sm:p-8">
         <Card>
           <h2 className="text-sm font-semibold">Current sign-in source</h2>
           <p className="mt-1 text-sm text-muted-foreground">
