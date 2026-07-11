@@ -8,6 +8,7 @@ import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
@@ -77,24 +78,27 @@ export default async function ClientProfilePage({
   // Group rollup: cumulative recurring across this client + all its
   // subsidiaries' M365 licensing. Each subscription belongs to exactly one
   // client, so this query counts each once (no double-counting).
-  const groupSubs = isGroup
-    ? await prisma.tdSynnexSubscription.findMany({
-        where: {
-          customer: { client: { OR: [{ id: client.id }, { parentClientId: client.id }] } },
-          archived: false,
-        },
-        select: {
-          productSku: true,
-          productName: true,
-          customerPrice: true,
-          unitCost: true,
-          quantity: true,
-          billingFrequency: true,
-          status: true,
-          currency: true,
-        },
-      })
-    : [];
+  const groupSubs = (
+    isGroup
+      ? await prisma.tdSynnexSubscription.findMany({
+          where: {
+            customer: { client: { OR: [{ id: client.id }, { parentClientId: client.id }] } },
+            archived: false,
+          },
+          select: {
+            productSku: true,
+            productName: true,
+            vendor: true,
+            customerPrice: true,
+            unitCost: true,
+            quantity: true,
+            billingFrequency: true,
+            status: true,
+            currency: true,
+          },
+        })
+      : []
+  ).filter(isM365Subscription); // M365 only — exclude Cisco et al.
   const groupSummary = groupSubs.length > 0 ? recurringSummary(groupSubs.map(toRecurringInput)) : null;
   const groupCurrency = groupSubs.find((s) => s.currency)?.currency ?? "CAD";
 
@@ -132,7 +136,9 @@ export default async function ClientProfilePage({
   const td = client.tdSynnexCustomer;
   // Archived (filed-away) licenses are hidden from the client screen — they show
   // only under "M365 Archived Clients" until restored.
-  const visibleSubs = (td?.subscriptions ?? []).filter((s) => !s.archived);
+  const visibleSubs = (td?.subscriptions ?? []).filter(
+    (s) => !s.archived && isM365Subscription(s),
+  );
 
   // Per-client recurring totals from this customer's M365 licensing.
   const recurring = td

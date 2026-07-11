@@ -18,5 +18,10 @@ export async function ensureArchiveColumn(): Promise<void> {
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "TdSynnexSubscription" ADD COLUMN IF NOT EXISTS "archived" BOOLEAN NOT NULL DEFAULT false`,
   );
+  // `vendor` is queried alongside `archived` to keep the app M365-only; ensure it
+  // exists on the same paths so reads never 500 before the migration deploys.
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "TdSynnexSubscription" ADD COLUMN IF NOT EXISTS "vendor" TEXT`,
+  );
   ensured = true;
 }

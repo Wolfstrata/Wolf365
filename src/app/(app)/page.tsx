@@ -8,6 +8,7 @@ import { PageHeader, Card } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { DashboardSyncButtons } from "./sync-buttons";
 
@@ -49,6 +50,9 @@ export default async function DashboardPage() {
                   currency: true,
                   renewalDate: true,
                   archived: true,
+                  vendor: true,
+                  productName: true,
+                  productSku: true,
                 },
               },
             },
@@ -60,14 +64,16 @@ export default async function DashboardPage() {
   // Recurring revenue / cost / margin from synced M365 licensing. Computed
   // per-client so we can also flag clients that bill below cost.
   // Archived (filed-away) licenses are excluded everywhere on the dashboard.
-  const allSubs = clientsWithSubs.flatMap(
-    (c) => (c.tdSynnexCustomer?.subscriptions ?? []).filter((s) => !s.archived),
+  const allSubs = clientsWithSubs.flatMap((c) =>
+    (c.tdSynnexCustomer?.subscriptions ?? []).filter(
+      (s) => !s.archived && isM365Subscription(s),
+    ),
   );
   const recurring = recurringSummary(allSubs.map(toRecurringInput));
   const negativeMarginClients = clientsWithSubs.filter((c) => {
     const s = recurringSummary(
       (c.tdSynnexCustomer?.subscriptions ?? [])
-        .filter((sub) => !sub.archived)
+        .filter((sub) => !sub.archived && isM365Subscription(sub))
         .map(toRecurringInput),
     );
     return s.activeCount > 0 && s.monthlyMargin < 0;

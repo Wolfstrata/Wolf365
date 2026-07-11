@@ -4,11 +4,14 @@ import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/ui/primitives";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 import { isActiveStatus, isExpired } from "@/lib/licensing/renewal";
+import { isM365Subscription } from "@/lib/licensing/vendor";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { ClientsTable, type ClientListRow } from "./clients-table";
 
 /** Master client list. Populated by connector syncs + mapping. */
 export default async function ClientsPage() {
   await requirePermission("clients:read");
+  await ensureArchiveColumn();
   const clients = await prisma.client.findMany({
     orderBy: { name: "asc" },
     include: {
@@ -27,6 +30,9 @@ export default async function ClientsPage() {
               currency: true,
               renewalDate: true,
               archived: true,
+              vendor: true,
+              productName: true,
+              productSku: true,
             },
           },
         },
@@ -41,7 +47,8 @@ export default async function ClientsPage() {
   const now = new Date();
   const rows: ClientListRow[] = clients
     .map((c) => {
-      const subs = c.tdSynnexCustomer?.subscriptions ?? [];
+      // M365 only — exclude other vendors (e.g. Cisco) that TD SYNNEX resells.
+      const subs = (c.tdSynnexCustomer?.subscriptions ?? []).filter(isM365Subscription);
       const liveSubs = subs.filter(
         (s) => !s.archived && isActiveStatus(s.status) && !isExpired(s.renewalDate, s.status, now),
       );

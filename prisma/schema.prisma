@@ -387,6 +387,9 @@ model TdSynnexSubscription {
   stellrSubscriptionId String @unique
   productSku         String?
   productName        String?
+  // Vendor/publisher (e.g. Microsoft, Cisco). Used to keep this M365 app focused
+  // on Microsoft 365 licensing and exclude other vendors TD SYNNEX also resells.
+  vendor             String?
   quantity           Int     @default(0)
   unitCost           Decimal? @db.Decimal(18, 4)
   // TD SYNNEX suggested price to bill the end customer (vs unitCost = our cost).

@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { renewalWindow, isMonthToMonth, isExpired, type RenewalBucket } from "@/lib/licensing/renewal";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 
 /**
@@ -196,6 +197,7 @@ export async function getUpcomingRenewals(withinDays = 90): Promise<RenewalRepor
   });
   const rows: RenewalReportRow[] = [];
   for (const s of subs) {
+    if (!isM365Subscription(s)) continue; // M365 only — ignore Cisco et al.
     // Month-to-month subscriptions just roll over — no renewal to flag.
     if (isMonthToMonth(s.commitmentTerm, s.billingFrequency)) continue;
     const win = renewalWindow(s.renewalDate, now);
@@ -234,6 +236,7 @@ export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
   });
   const rows: MarginExceptionRow[] = [];
   for (const s of subs) {
+    if (!isM365Subscription(s)) continue; // M365 only — ignore Cisco et al.
     if (s.unitCost == null || s.customerPrice == null) continue;
     const unitCost = Number(s.unitCost);
     const customerPrice = Number(s.customerPrice);
@@ -279,6 +282,7 @@ export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
   });
   const rows: ExpiredLicenseRow[] = [];
   for (const s of subs) {
+    if (!isM365Subscription(s)) continue; // M365 only — ignore Cisco et al.
     if (!isExpired(s.renewalDate, s.status, now)) continue;
     const daysAgo =
       s.renewalDate && s.renewalDate.getTime() < now.getTime()

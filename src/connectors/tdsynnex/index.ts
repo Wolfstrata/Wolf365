@@ -514,6 +514,14 @@ async function upsertTdSubscription(
       "partNumber",
     ]),
     productName,
+    vendor: pick(raw, [
+      "vendorName",
+      "vendor",
+      "publisher",
+      "manufacturer",
+      "mfrName",
+      "brand",
+    ]),
     quantity: pickNumber(raw, ["quantity", "seats", "qty"]) ?? 0,
     // unitPrice is our reseller cost; customerPrice is the suggested sell price.
     unitCost: pickNumber(raw, ["unitCost", "cost", "unitPrice", "price"]),
