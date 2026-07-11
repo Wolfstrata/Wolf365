@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/ui/primitives";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
+import { isActiveStatus, isExpired } from "@/lib/licensing/renewal";
 import { ClientsTable, type ClientListRow } from "./clients-table";
 
 /** Master client list. Populated by connector syncs + mapping. */
@@ -24,6 +25,8 @@ export default async function ClientsPage() {
               billingFrequency: true,
               status: true,
               currency: true,
+              renewalDate: true,
+              archived: true,
             },
           },
         },
@@ -32,29 +35,37 @@ export default async function ClientsPage() {
     take: 1000,
   });
 
-  // Per-client recurring margin from synced M365 licensing → serializable rows.
-  const rows: ClientListRow[] = clients.map((c) => {
-    const subs = c.tdSynnexCustomer?.subscriptions ?? [];
-    const summary = recurringSummary(subs.map(toRecurringInput));
-    const currency = subs.find((s) => s.currency)?.currency ?? "CAD";
-    const negative = summary.activeCount > 0 && summary.monthlyMargin < 0;
-    return {
-      id: c.id,
-      name: c.name,
-      hasTd: !!c.tdSynnexCustomer,
-      stellrId: c.tdSynnexCustomer?.stellrId ?? null,
-      subsCount: subs.length,
-      activeCount: summary.activeCount,
-      monthlyMargin: summary.monthlyMargin,
-      marginPct: summary.marginPct,
-      currency,
-      hasQbo: !!c.qboCustomer,
-      active: c.tdSynnexCustomer?.active !== false,
-      negative,
-    };
-  });
+  // A live subscription = linked to TD SYNNEX, not archived, active status, and
+  // not expired. Only clients with at least one show on this screen — QBO-only
+  // clients and clients whose M365 is all expired/inactive are excluded.
+  const now = new Date();
+  const rows: ClientListRow[] = clients
+    .map((c) => {
+      const subs = c.tdSynnexCustomer?.subscriptions ?? [];
+      const liveSubs = subs.filter(
+        (s) => !s.archived && isActiveStatus(s.status) && !isExpired(s.renewalDate, s.status, now),
+      );
+      const summary = recurringSummary(subs.filter((s) => !s.archived).map(toRecurringInput));
+      const currency = subs.find((s) => s.currency)?.currency ?? "CAD";
+      const negative = summary.activeCount > 0 && summary.monthlyMargin < 0;
+      return {
+        id: c.id,
+        name: c.name,
+        hasTd: !!c.tdSynnexCustomer,
+        liveCount: liveSubs.length,
+        stellrId: c.tdSynnexCustomer?.stellrId ?? null,
+        subsCount: liveSubs.length,
+        activeCount: summary.activeCount,
+        monthlyMargin: summary.monthlyMargin,
+        marginPct: summary.marginPct,
+        currency,
+        hasQbo: !!c.qboCustomer,
+        active: c.tdSynnexCustomer?.active !== false,
+        negative,
+      };
+    })
+    .filter((r) => r.hasTd && r.liveCount > 0);
 
-  const withTd = rows.filter((r) => r.hasTd).length;
   const totalLicenses = rows.reduce((a, r) => a + r.subsCount, 0);
   const negativeMargin = rows.filter((r) => r.negative);
 
@@ -62,7 +73,7 @@ export default async function ClientsPage() {
     <div>
       <PageHeader
         title="Clients"
-        description={`${clients.length} clients · ${withTd} with TD SYNNEX · ${totalLicenses} M365 subscriptions. Click a client to drill into records and licensing.`}
+        description={`${rows.length} client${rows.length === 1 ? "" : "s"} with active Microsoft 365 licensing · ${totalLicenses} active subscription${totalLicenses === 1 ? "" : "s"}. Click a client to drill into records and licensing.`}
       />
       <div className="p-4 sm:p-8">
         {negativeMargin.length > 0 && (
@@ -77,11 +88,11 @@ export default async function ClientsPage() {
           </div>
         )}
 
-        {clients.length === 0 ? (
+        {rows.length === 0 ? (
           <EmptyState
             icon={<Building2 className="h-8 w-8" />}
-            title="No clients yet"
-            description="Sync QuickBooks and TD SYNNEX, then run Mappings → auto-match to create client records."
+            title="No clients with active M365 licensing"
+            description="This list shows clients linked to TD SYNNEX with at least one active (non-expired) subscription. Sync TD SYNNEX and run Mappings → auto-match, or check that subscriptions aren't all expired or archived."
           />
         ) : (
           <ClientsTable rows={rows} />

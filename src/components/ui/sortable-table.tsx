@@ -87,7 +87,7 @@ export function SortableTable<Row>({
               return (
                 <th
                   key={c.key}
-                  className={cn("px-4 py-2 font-medium", c.numeric && "text-right")}
+                  className={cn("px-3 py-2 font-medium", c.numeric && "text-right")}
                 >
                   {sortable ? (
                     <button
@@ -121,7 +121,7 @@ export function SortableTable<Row>({
             sorted.map((row, i) => (
               <tr key={rowKey(row, i)} className={cn("border-t hover:bg-accent/40", rowClassName?.(row))}>
                 {columns.map((c) => (
-                  <td key={c.key} className={cn("px-4 py-2 align-top", c.numeric && "text-right tabular-nums")}>
+                  <td key={c.key} className={cn("px-3 py-2 align-top", c.numeric && "text-right tabular-nums")}>
                     {c.render(row)}
                   </td>
                 ))}

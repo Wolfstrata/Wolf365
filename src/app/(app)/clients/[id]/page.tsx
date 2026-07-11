@@ -593,7 +593,7 @@ export default async function ClientProfilePage({
                 or this customer may have no active TD SYNNEX subscriptions.
               </p>
             ) : (
-              <M365LicensingTable rows={m365Rows} />
+              <M365LicensingTable rows={m365Rows} canArchive={can(user.role, "billing:edit")} />
             )}
           </Card>
         )}

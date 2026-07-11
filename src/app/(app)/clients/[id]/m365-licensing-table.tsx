@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
+import { ArchiveToggle } from "@/components/licensing/archive-toggle";
 
 export interface M365LicensingRow {
   id: string;
@@ -85,7 +86,13 @@ function cmp(a: M365LicensingRow, b: M365LicensingRow, key: SortKey): number {
   return String(av).localeCompare(String(bv));
 }
 
-export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
+export function M365LicensingTable({
+  rows,
+  canArchive = false,
+}: {
+  rows: M365LicensingRow[];
+  canArchive?: boolean;
+}) {
   const [hideOneTime, setHideOneTime] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -138,6 +145,7 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
         <table className="w-full text-sm">
           <thead className="text-left text-xs uppercase text-muted-foreground">
             <tr>
+              <th className="py-1 pr-3 font-medium">Archive</th>
               {COLUMNS.map((c) => (
                 <th
                   key={c.label}
@@ -170,6 +178,13 @@ export function M365LicensingTable({ rows }: { rows: M365LicensingRow[] }) {
                           : ""
                   }`}
                 >
+                  <td className="py-1.5 pr-3">
+                    {r.expired ? (
+                      <ArchiveToggle subscriptionId={r.id} archived={false} canArchive={canArchive} />
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </td>
                   <td className="py-1.5 pr-4">
                     <div className="font-mono text-xs text-muted-foreground">{r.sku ?? "—"}</div>
                     <div>{r.product ?? "—"}</div>

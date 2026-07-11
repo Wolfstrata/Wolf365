@@ -111,6 +111,14 @@ export function ExpiredTableView({
   canArchive: boolean;
 }) {
   const columns: SortColumn<ExpiredLicenseRow>[] = [
+    {
+      key: "archive",
+      label: "Archive",
+      sortable: false,
+      render: (r) => (
+        <ArchiveToggle subscriptionId={r.subscriptionId} archived={false} canArchive={canArchive} />
+      ),
+    },
     { key: "client", label: "Client", sortValue: (r) => r.client.toLowerCase(), render: (r) => clientCell(r.client, r.clientId) },
     { key: "sku", label: "SKU", sortValue: (r) => r.sku, render: (r) => r.sku },
     { key: "product", label: "Product", sortValue: (r) => r.product.toLowerCase(), render: (r) => r.product },
@@ -129,14 +137,6 @@ export function ExpiredTableView({
       ),
     },
     { key: "status", label: "Status", sortValue: (r) => r.status.toLowerCase(), render: (r) => r.status },
-    {
-      key: "archive",
-      label: "Archive",
-      sortable: false,
-      render: (r) => (
-        <ArchiveToggle subscriptionId={r.subscriptionId} archived={false} canArchive={canArchive} />
-      ),
-    },
   ];
   return <SortableTable columns={columns} rows={rows} rowKey={(r) => r.subscriptionId} />;
 }

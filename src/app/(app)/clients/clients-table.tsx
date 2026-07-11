@@ -9,6 +9,8 @@ export interface ClientListRow {
   id: string;
   name: string;
   hasTd: boolean;
+  /** Non-archived, active-status, non-expired subscriptions. */
+  liveCount: number;
   stellrId: string | null;
   subsCount: number;
   activeCount: number;
