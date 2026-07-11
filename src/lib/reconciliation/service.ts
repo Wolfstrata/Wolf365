@@ -28,12 +28,50 @@ const DISCREPANCY_TYPES: ExceptionType[] = [
 export async function reconcileAllClients(actor: {
   id: string | null;
   email: string;
-}): Promise<{ scanned: number; flagged: number }> {
+}): Promise<{ scanned: number; flagged: number; suppressed: number }> {
   const clients = await prisma.client.findMany({
     include: { qboCustomer: true, tdSynnexCustomer: true },
   });
 
-  let flagged = 0;
+  // Group awareness: a client can be a parent or a subsidiary. When a client is
+  // missing one source (e.g. no TD SYNNEX) but a related company in the same
+  // group HAS it, the licensing legitimately flows through the group — so don't
+  // flag "only in QBO"/"only in TD SYNNEX" as a discrepancy.
+  const hasQbo = new Map<string, boolean>();
+  const hasTd = new Map<string, boolean>();
+  const childrenOf = new Map<string, string[]>();
+  for (const c of clients) {
+    hasQbo.set(c.id, !!c.qboCustomer);
+    hasTd.set(c.id, !!c.tdSynnexCustomer);
+    if (c.parentClientId) {
+      const arr = childrenOf.get(c.parentClientId) ?? [];
+      arr.push(c.id);
+      childrenOf.set(c.parentClientId, arr);
+    }
+  }
+  const groupHas = (
+    clientId: string,
+    parentClientId: string | null,
+    map: Map<string, boolean>,
+  ): boolean => {
+    const root = parentClientId ?? clientId; // parent + its subsidiaries form the group
+    if (map.get(root)) return true;
+    for (const child of childrenOf.get(root) ?? []) {
+      if (child !== clientId && map.get(child)) return true;
+    }
+    return false;
+  };
+
+  // Respect manual decisions: a discrepancy the user acknowledged or resolved is
+  // not recreated on the next run (keyed by client + type).
+  const dismissed = await prisma.exception.findMany({
+    where: { type: { in: DISCREPANCY_TYPES }, status: { in: ["ACKNOWLEDGED", "RESOLVED"] } },
+    select: { clientId: true, type: true },
+  });
+  const dismissedKey = new Set(dismissed.map((d) => `${d.clientId}:${d.type}`));
+
+  const toCreate: Prisma.ExceptionCreateManyInput[] = [];
+  let suppressed = 0;
 
   for (const client of clients) {
     const qbo = client.qboCustomer;
@@ -62,34 +100,41 @@ export async function reconcileAllClients(actor: {
         : null,
     });
 
-    await prisma.$transaction([
-      prisma.exception.deleteMany({
-        where: {
-          clientId: client.id,
-          status: "OPEN",
-          type: { in: DISCREPANCY_TYPES },
-        },
-      }),
-      prisma.exception.createMany({
-        data: discrepancies.map((d) => ({
-          type: d.type,
-          severity: d.severity,
-          clientId: client.id,
-          message: d.message,
-          details: {} as Prisma.InputJsonValue,
-        })),
-      }),
-    ]);
-    flagged += discrepancies.length;
+    for (const d of discrepancies) {
+      if (
+        (d.type === "CLIENT_ONLY_IN_QBO" && groupHas(client.id, client.parentClientId, hasTd)) ||
+        (d.type === "CLIENT_ONLY_IN_TDSYNNEX" && groupHas(client.id, client.parentClientId, hasQbo))
+      ) {
+        suppressed += 1;
+        continue;
+      }
+      if (dismissedKey.has(`${client.id}:${d.type}`)) continue;
+      toCreate.push({
+        type: d.type,
+        severity: d.severity,
+        clientId: client.id,
+        message: d.message,
+        details: {} as Prisma.InputJsonValue,
+      });
+    }
   }
+
+  // One delete + one insert instead of a transaction per client — fast enough to
+  // finish well within the function budget even for thousands of clients.
+  await prisma.$transaction([
+    prisma.exception.deleteMany({
+      where: { status: "OPEN", type: { in: DISCREPANCY_TYPES } },
+    }),
+    prisma.exception.createMany({ data: toCreate }),
+  ]);
 
   await audit({
     action: "MAPPING_CHANGED",
     actorId: actor.id,
     actorEmail: actor.email,
     target: "reconciliation:run",
-    metadata: { scanned: clients.length, flagged },
+    metadata: { scanned: clients.length, flagged: toCreate.length, suppressed },
   });
 
-  return { scanned: clients.length, flagged };
+  return { scanned: clients.length, flagged: toCreate.length, suppressed };
 }
