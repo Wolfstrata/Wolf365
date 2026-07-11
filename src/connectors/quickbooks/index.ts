@@ -197,6 +197,7 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
     let mappingsFromInvoices: unknown = { created: 0, invoicesScanned: 0 };
     try {
       const { learnMappingsFromInvoices } = await import("@/lib/mapping/invoice-learn");
+      const { resolveMappedSkuExceptions } = await import("@/lib/mapping/service");
       mappingsFromInvoices = await learnMappingsFromInvoices({
         query: (statement) =>
           qboGet(
@@ -205,6 +206,9 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
             "sync_invoices",
           ),
       });
+      // Clear UNMAPPED_SKU exceptions for every SKU that now has a mapping
+      // (whether just learned, auto-matched, or mapped by hand earlier).
+      await resolveMappedSkuExceptions();
     } catch (err) {
       mappingsFromInvoices = {
         ok: false,

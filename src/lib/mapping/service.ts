@@ -340,6 +340,25 @@ export async function rejectClientMatch(
   });
 }
 
+/**
+ * Resolve UNMAPPED_SKU exceptions for SKUs that now have a usable QBO-item
+ * mapping (non-rejected, with an item). Once a SKU is mapped it no longer
+ * belongs in the exception queue. Idempotent — safe to call after any mapping
+ * change. Returns the number of exceptions resolved.
+ */
+export async function resolveMappedSkuExceptions(): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE "Exception"
+    SET "status" = 'RESOLVED', "resolvedAt" = now()
+    WHERE "type" = 'UNMAPPED_SKU'
+      AND "status" <> 'RESOLVED'
+      AND ("details"->>'sku') IN (
+        SELECT "tdSynnexSku" FROM "ProductMapping"
+        WHERE "qboItemId" IS NOT NULL AND "status" <> 'REJECTED'
+      )
+  `;
+}
+
 /** Propose SKU -> QBO item mappings from synced subscriptions and items. */
 export async function proposeSkuMatches(actor: {
   id: string;
@@ -391,6 +410,8 @@ export async function proposeSkuMatches(actor: {
     else proposed += 1;
   }
 
+  await resolveMappedSkuExceptions();
+
   await audit({
     action: "MAPPING_CHANGED",
     actorId: actor.id,
@@ -432,6 +453,7 @@ export async function setProductMappingItem(
       reviewedAt: new Date(),
     },
   });
+  await resolveMappedSkuExceptions();
   await audit({
     action: "MAPPING_CHANGED",
     actorId: actor.id,
@@ -450,6 +472,8 @@ export async function setProductMappingStatus(
     where: { tdSynnexSku: sku },
     data: { status, reviewedById: actor.id, reviewedAt: new Date() },
   });
+  // Mapping confirmed → clear its exception; rejected → leave it (still unmapped).
+  if (status === "CONFIRMED") await resolveMappedSkuExceptions();
   await audit({
     action: "MAPPING_CHANGED",
     actorId: actor.id,
