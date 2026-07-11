@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { proposeMatches, type Candidate } from "@/lib/matching/similarity";
 import { normalizeName } from "@/lib/reconciliation/discrepancies";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 
 /**
  * Materialize a Wolf365 Client for every synced source customer, so all
@@ -366,13 +367,13 @@ export async function proposeSkuMatches(actor: {
 }): Promise<{ proposed: number; autoConfirmed: number }> {
   const subs = await prisma.tdSynnexSubscription.findMany({
     where: { productSku: { not: null } },
-    select: { productSku: true, productName: true },
+    select: { productSku: true, productName: true, vendor: true },
     distinct: ["productSku"],
   });
   const items = await prisma.qboItem.findMany({ where: { active: true } });
 
   const sources: Candidate[] = subs
-    .filter((s) => s.productSku)
+    .filter((s) => s.productSku && isM365Subscription(s)) // M365 SKUs only
     .map((s) => ({ id: s.productSku!, name: s.productName ?? s.productSku! }));
   const targets: Candidate[] = items.map((i) => ({
     id: i.qboId,

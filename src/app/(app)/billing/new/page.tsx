@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, EmptyState } from "@/components/ui/primitives";
 import { isActiveStatus } from "@/lib/licensing/renewal";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { NewRunForm } from "./new-run-form";
 
@@ -23,18 +24,27 @@ export default async function NewBillingRunPage({
       name: true,
       tdSynnexCustomer: {
         select: {
-          subscriptions: { select: { status: true, archived: true } },
+          subscriptions: {
+            select: {
+              status: true,
+              archived: true,
+              vendor: true,
+              productName: true,
+              productSku: true,
+            },
+          },
         },
       },
     },
   });
-  // "Active licenses" = subscriptions with status active (any expiry) that are
-  // not archived. The single-client picker only offers clients with ≥1.
+  // "Active licenses" = Microsoft 365 subscriptions with status active (any
+  // expiry) that are not archived. The single-client picker only offers clients
+  // with ≥1. Non-M365 (e.g. Cisco) lines are ignored entirely.
   const clients = rows.map((c) => ({
     id: c.id,
     name: c.name,
     activeSubs: (c.tdSynnexCustomer?.subscriptions ?? []).filter(
-      (s) => !s.archived && isActiveStatus(s.status),
+      (s) => !s.archived && isM365Subscription(s) && isActiveStatus(s.status),
     ).length,
   }));
 

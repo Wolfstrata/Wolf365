@@ -9,6 +9,7 @@ import {
   type SubscriptionInput,
 } from "@/lib/billing/generate";
 import type { PriceRuleLike } from "@/lib/billing/pricing";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 
 /**
  * Server-only billing service: turns synced subscription data into a saved,
@@ -34,7 +35,9 @@ export async function generateAndSaveBillingRun(
     },
   });
 
-  const subs = client.tdSynnexCustomer?.subscriptions ?? [];
+  // Bill Microsoft 365 licensing only — TD SYNNEX also resells other vendors
+  // (e.g. Cisco), which never belong on an M365 invoice.
+  const subs = (client.tdSynnexCustomer?.subscriptions ?? []).filter(isM365Subscription);
   const subscriptions: SubscriptionInput[] = subs.map((s) => ({
     id: s.id,
     sku: s.productSku,

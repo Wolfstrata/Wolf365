@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { learnSkuMappings, type InvoiceLineLite } from "@/lib/mapping/invoice-match";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 
 /**
  * Learn SKU → QuickBooks-item mappings from a client's historical QBO invoices,
@@ -52,7 +53,11 @@ export async function learnMappingsFromInvoices(params: {
     select: {
       qboCustomer: { select: { qboId: true } },
       tdSynnexCustomer: {
-        select: { subscriptions: { select: { productSku: true, productName: true } } },
+        select: {
+          subscriptions: {
+            select: { productSku: true, productName: true, vendor: true },
+          },
+        },
       },
     },
   });
@@ -63,6 +68,7 @@ export async function learnMappingsFromInvoices(params: {
     if (!qboId) continue;
     for (const s of c.tdSynnexCustomer?.subscriptions ?? []) {
       if (!s.productSku || mappedSkus.has(s.productSku)) continue;
+      if (!isM365Subscription(s)) continue; // never learn non-M365 (e.g. Cisco) SKUs
       let m = subsByCustomer.get(qboId);
       if (!m) {
         m = new Map();

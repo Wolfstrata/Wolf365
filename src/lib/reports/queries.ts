@@ -78,7 +78,7 @@ export async function getRevenueLeakage(): Promise<LeakageRow[]> {
   const billedIds = new Set(billed.map((b) => b.tdSynnexSubscriptionId));
 
   return subs
-    .filter((s) => !billedIds.has(s.id))
+    .filter((s) => !billedIds.has(s.id) && isM365Subscription(s))
     .map((s) => ({
       client: s.customer.client?.name ?? s.customer.name,
       sku: s.productSku ?? "—",
@@ -321,10 +321,12 @@ export interface ArchivedLicenseRow {
  */
 export async function getArchivedLicenses(): Promise<ArchivedLicenseRow[]> {
   await ensureArchiveColumn();
-  const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { archived: true },
-    include: { customer: { include: { client: true } } },
-  });
+  const subs = (
+    await prisma.tdSynnexSubscription.findMany({
+      where: { archived: true },
+      include: { customer: { include: { client: true } } },
+    })
+  ).filter(isM365Subscription); // M365 only
   const rows: ArchivedLicenseRow[] = subs.map((s) => ({
     subscriptionId: s.id,
     client: s.customer.client?.name ?? s.customer.name,
