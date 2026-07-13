@@ -5,6 +5,7 @@ import { can, ROLE_LABELS } from "@/lib/rbac";
 import { NAV_ITEMS } from "@/components/shell/nav";
 import { AppShell } from "@/components/shell/app-shell";
 import { ConnectorStatusBadge } from "@/components/shell/connector-status";
+import { TimeZoneProvider } from "@/components/ui/local-time";
 
 /**
  * Authenticated application shell.
@@ -62,8 +63,10 @@ export default async function AppLayout({
   );
 
   return (
-    <AppShell items={visibleItems} footer={footer}>
-      {children}
-    </AppShell>
+    <TimeZoneProvider timeZone={user.timezone}>
+      <AppShell items={visibleItems} footer={footer}>
+        {children}
+      </AppShell>
+    </TimeZoneProvider>
   );
 }

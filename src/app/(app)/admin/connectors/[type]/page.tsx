@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { getConnectorView } from "@/lib/connectors/service";
 import { PageHeader, HealthBadge, StatItem } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { ConnectorConfigForm } from "./config-form";
 import { SandboxCleanup } from "../sandbox-cleanup";
 import {
@@ -77,8 +77,8 @@ export default async function ConnectorConfigPage({
 
         {/* Sync telemetry */}
         <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border bg-card p-5 sm:grid-cols-3 lg:grid-cols-6">
-          <StatItem label="Last success" value={formatDateTime(view.lastSuccessfulSyncAt)} />
-          <StatItem label="Last failure" value={formatDateTime(view.lastFailedSyncAt)} />
+          <StatItem label="Last success" value={<LocalTime value={view.lastSuccessfulSyncAt} />} />
+          <StatItem label="Last failure" value={<LocalTime value={view.lastFailedSyncAt} />} />
           <StatItem
             label="Duration"
             value={view.lastSyncDurationMs != null ? `${view.lastSyncDurationMs} ms` : "—"}

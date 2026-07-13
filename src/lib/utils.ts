@@ -51,6 +51,38 @@ export function formatDateTime(
   }
 }
 
+/**
+ * Lexically-sortable, timezone-aware timestamp ("2026-06-26 05:30"). Used by
+ * table columns that both display and sort on a timestamp string. Pass the
+ * user's IANA `timeZone`; falls back to UTC when it's missing or invalid.
+ */
+export function formatSortableDateTime(
+  value: Date | string | null | undefined,
+  timeZone?: string | null,
+): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "—";
+  const opts: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  };
+  const format = (tz: string) => {
+    const parts = new Intl.DateTimeFormat("en-CA", { ...opts, timeZone: tz }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+  };
+  try {
+    return format(timeZone || "UTC");
+  } catch {
+    return format("UTC");
+  }
+}
+
 /** Date-only formatting (no time) for due/close dates. Rendered in UTC so a
  *  date-only value isn't shifted across midnight by the server's timezone. */
 export function formatDate(value: Date | string | null | undefined): string {

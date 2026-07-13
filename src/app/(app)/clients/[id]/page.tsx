@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
@@ -318,7 +319,7 @@ export default async function ClientProfilePage({
                 <StatItem label="Payment terms" value={qbo.paymentTerms ?? "—"} />
                 <StatItem label="Tax status" value={qbo.taxStatus ?? (qbo.taxable == null ? "Unknown" : qbo.taxable ? "Taxable" : "Non-taxable")} />
                 <StatItem label="Status" value={qbo.active ? "Active" : "Inactive"} />
-                <StatItem label="Last QBO sync" value={formatDateTime(qbo.lastSyncedAt)} />
+                <StatItem label="Last QBO sync" value={<LocalTime value={qbo.lastSyncedAt} />} />
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No linked QuickBooks customer.</p>
@@ -336,7 +337,7 @@ export default async function ClientProfilePage({
                 <StatItem label="Service address" value={formatAddress(td.serviceAddress)} />
                 <StatItem label="Subscriptions" value={visibleSubs.length} />
                 <StatItem label="Status" value={td.active ? "Active" : "Inactive"} />
-                <StatItem label="Last TD SYNNEX sync" value={formatDateTime(td.lastSyncedAt)} />
+                <StatItem label="Last TD SYNNEX sync" value={<LocalTime value={td.lastSyncedAt} />} />
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No linked TD SYNNEX customer.</p>

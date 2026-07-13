@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDateTime, formatCurrency } from "@/lib/utils";
+import { formatDateTime, formatCurrency, formatSortableDateTime } from "@/lib/utils";
 
 const d = new Date("2026-06-17T17:48:00.000Z");
 
@@ -27,6 +27,27 @@ describe("formatDateTime", () => {
   it("handles null/undefined", () => {
     expect(formatDateTime(null)).toBe("Never");
     expect(formatDateTime(undefined)).toBe("Never");
+  });
+});
+
+describe("formatSortableDateTime", () => {
+  it("produces a lexically-sortable UTC timestamp by default", () => {
+    expect(formatSortableDateTime(d)).toBe("2026-06-17 17:48");
+  });
+
+  it("respects an explicit IANA timezone", () => {
+    // 17:48 UTC = 13:48 EDT
+    expect(formatSortableDateTime(d, "America/Toronto")).toBe("2026-06-17 13:48");
+  });
+
+  it("falls back to UTC for an invalid timezone instead of throwing", () => {
+    expect(() => formatSortableDateTime(d, "Not/AZone")).not.toThrow();
+    expect(formatSortableDateTime(d, "Not/AZone")).toBe("2026-06-17 17:48");
+  });
+
+  it("handles null/undefined", () => {
+    expect(formatSortableDateTime(null)).toBe("—");
+    expect(formatSortableDateTime(undefined)).toBe("—");
   });
 });
 

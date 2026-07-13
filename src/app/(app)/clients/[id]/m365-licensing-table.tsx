@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 import { ArchiveToggle } from "@/components/licensing/archive-toggle";
 
@@ -243,7 +244,7 @@ export function M365LicensingTable({
                   <td className="py-1.5 pr-4 whitespace-nowrap">
                     {r.expired ? (
                       <span className="font-semibold text-orange-600 dark:text-orange-400">
-                        {r.renewalDate ? formatDateTime(new Date(r.renewalDate)) : "—"}
+                        {r.renewalDate ? <LocalTime value={r.renewalDate} dateOnly /> : "—"}
                         <span className="ml-2 rounded-full bg-orange-500 px-2 py-0.5 text-xs font-medium text-white">
                           Expired
                         </span>
@@ -253,7 +254,7 @@ export function M365LicensingTable({
                         {r.monthToMonth ? (
                           <span className="text-muted-foreground">Monthly</span>
                         ) : r.renewalDate ? (
-                          formatDateTime(new Date(r.renewalDate))
+                          <LocalTime value={r.renewalDate} dateOnly />
                         ) : (
                           "—"
                         )}

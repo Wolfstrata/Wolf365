@@ -4,6 +4,7 @@ import { getEnv } from "@/env";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { formatSortableDateTime } from "@/lib/utils";
 import { LeadsTable, type LeadRow } from "./leads-table";
 
 export default async function LeadsPage() {
@@ -25,7 +26,7 @@ export default async function LeadsPage() {
     phone: l.phone ?? "",
     source: l.source,
     status: l.status,
-    created: l.createdAt.toISOString().slice(0, 16).replace("T", " "),
+    created: formatSortableDateTime(l.createdAt, user.timezone),
   }));
 
   const newCount = leads.filter((l) => l.status === "NEW").length;

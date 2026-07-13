@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { getConnectorViews } from "@/lib/connectors/service";
 import { PageHeader, Card, HealthBadge } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 
 /** Admin connector overview. Lists all connectors with health and last sync. */
 export default async function ConnectorsPage() {
@@ -34,7 +34,7 @@ export default async function ConnectorsPage() {
                   {c.description}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Last successful sync: {formatDateTime(c.lastSuccessfulSyncAt)}
+                  Last successful sync: <LocalTime value={c.lastSuccessfulSyncAt} />
                   {c.lastError ? ` · Last error: ${c.lastError}` : ""}
                 </p>
               </div>

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { transitionRunAction, pushRunAction } from "../actions";
 import { LinesCard, type EditableLine } from "./lines-card";
 
@@ -116,8 +116,16 @@ export default async function BillingRunDetailPage({
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
             <StatItem label="Client" value={run.client?.name ?? "—"} />
             <StatItem label="Matched QBO customer" value={qbo?.displayName ?? "Not matched"} />
-            <StatItem label="Invoice date" value={formatDateTime(run.invoiceDate)} />
-            <StatItem label="Period" value={`${formatDateTime(run.periodStart)} – ${formatDateTime(run.periodEnd)}`} />
+            <StatItem label="Invoice date" value={<LocalTime value={run.invoiceDate} dateOnly />} />
+            <StatItem
+              label="Period"
+              value={
+                <>
+                  <LocalTime value={run.periodStart} dateOnly /> –{" "}
+                  <LocalTime value={run.periodEnd} dateOnly />
+                </>
+              }
+            />
             <StatItem label="Lines" value={run.lines.length} />
             <StatItem label="Version" value={`v${run.version}`} />
           </div>

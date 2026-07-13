@@ -4,7 +4,7 @@ import { ArrowLeft, LinkIcon } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime, formatDate } from "@/lib/utils";
 import { isSourceSlug, SOURCE_LABELS } from "@/lib/connector-sources";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
@@ -240,7 +240,7 @@ export default async function SyncedDetailPage({
                           <td className="py-1.5 pr-4">{s.commitmentTerm ?? "—"}</td>
                           <td className="py-1.5 pr-4 whitespace-nowrap">
                             <span className={win ? "font-medium" : ""}>
-                              {formatDateTime(s.renewalDate, user.timezone)}
+                              {formatDate(s.renewalDate)}
                             </span>
                             {win && (
                               <span

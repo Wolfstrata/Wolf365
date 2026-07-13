@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { setExceptionStatusAction } from "./actions";
 import { ReconcileButton } from "./reconcile-button";
 
@@ -79,7 +79,7 @@ export default async function ExceptionsPage() {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {formatDateTime(e.createdAt)}
+                    <LocalTime value={e.createdAt} />
                   </span>
                   {canPropose && (
                     <div className="flex gap-2">

@@ -9,15 +9,14 @@ import {
   type DataRow,
 } from "@/components/ui/data-table";
 import { isSourceSlug, SOURCE_LABELS, SOURCE_BLURB } from "@/lib/connector-sources";
-
-/** A readable, lexically-sortable timestamp ("2026-06-26 05:30"). */
-function synced(date: Date): string {
-  return date.toISOString().slice(0, 16).replace("T", " ");
-}
+import { formatSortableDateTime } from "@/lib/utils";
 
 async function loadSource(
   source: string,
+  timeZone: string | null | undefined,
 ): Promise<{ columns: DataColumn[]; rows: DataRow[] }> {
+  /** Zone-aware, lexically-sortable timestamp for the "Last synced" column. */
+  const synced = (date: Date) => formatSortableDateTime(date, timeZone);
   switch (source) {
     case "td-synnex": {
       const list = await prisma.tdSynnexCustomer.findMany({
@@ -110,11 +109,11 @@ export default async function SyncedSourcePage({
 }: {
   params: Promise<{ source: string }>;
 }) {
-  await requirePermission("clients:read");
+  const user = await requirePermission("clients:read");
   const { source } = await params;
   if (!isSourceSlug(source)) notFound();
 
-  const { columns, rows } = await loadSource(source);
+  const { columns, rows } = await loadSource(source, user.timezone);
 
   return (
     <div>

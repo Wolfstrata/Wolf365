@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
-import { formatDateTime } from "@/lib/utils";
+import { LocalTime } from "@/components/ui/local-time";
 import { ClearRunsButton } from "./clear-runs-button";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -66,7 +66,7 @@ export default async function BillingPage() {
                     {r.client?.name ?? "Bulk run"} · v{r.version}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Period {formatDateTime(r.periodStart)} – {formatDateTime(r.periodEnd)} ·{" "}
+                    Period <LocalTime value={r.periodStart} dateOnly /> – <LocalTime value={r.periodEnd} dateOnly /> ·{" "}
                     {r._count.lines} lines
                   </p>
                 </div>

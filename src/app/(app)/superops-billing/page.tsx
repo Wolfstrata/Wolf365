@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { SyncSuperOpsButton } from "./sync-button";
 import { reviewInvoiceAction, pushInvoiceAction } from "./actions";
 
@@ -81,7 +81,7 @@ export default async function SuperOpsBillingPage() {
                       ) : (
                         <span className="text-danger">No QBO customer</span>
                       )}
-                      {inv.invoiceDate ? ` · ${formatDateTime(inv.invoiceDate, user.timezone)}` : ""}
+                      {inv.invoiceDate ? ` · ${formatDate(inv.invoiceDate)}` : ""}
                     </p>
                   </div>
                   <div className="text-right">
