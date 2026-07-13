@@ -5,6 +5,7 @@ import { can, ROLE_LABELS } from "@/lib/rbac";
 import { NAV_ITEMS } from "@/components/shell/nav";
 import { AppShell } from "@/components/shell/app-shell";
 import { ConnectorStatusBadge } from "@/components/shell/connector-status";
+import { ViewAsControl, ViewAsBanner } from "@/components/shell/view-as";
 import { TimeZoneProvider } from "@/components/ui/local-time";
 
 /**
@@ -59,12 +60,15 @@ export default async function AppLayout({
           </button>
         </form>
       </div>
+      {/* Administrators can preview the app as any role. */}
+      {user.realRole === "ADMINISTRATOR" && <ViewAsControl effectiveRole={user.role} />}
     </div>
   );
 
   return (
     <TimeZoneProvider timeZone={user.timezone}>
       <AppShell items={visibleItems} footer={footer}>
+        {user.viewingAs && <ViewAsBanner role={user.viewingAs} />}
         {children}
       </AppShell>
     </TimeZoneProvider>
