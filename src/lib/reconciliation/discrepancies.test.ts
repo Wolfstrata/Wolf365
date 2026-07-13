@@ -30,13 +30,60 @@ describe("detectDiscrepancies", () => {
     expect(d).toHaveLength(0);
   });
 
-  it("detects QBO-only and TD-only presence", () => {
-    expect(types(detectDiscrepancies({ qbo: { taxable: true, billingEmail: "a@b.com" } }))).toContain(
-      "CLIENT_ONLY_IN_QBO",
-    );
+  it("does NOT flag a QBO-only customer, but flags TD-only", () => {
+    // A QuickBooks customer with no M365 is normal, not an exception.
+    expect(
+      types(detectDiscrepancies({ qbo: { taxable: true, billingEmail: "a@b.com" } })),
+    ).not.toContain("CLIENT_ONLY_IN_QBO");
+    // Licensing with nowhere to bill it is worth flagging.
     expect(types(detectDiscrepancies({ td: { name: "X" } }))).toContain(
       "CLIENT_ONLY_IN_TDSYNNEX",
     );
+  });
+
+  it("tolerates a name typo (same customer)", () => {
+    const t = types(
+      detectDiscrepancies({
+        qbo: {
+          companyName: "Manitoba Cardiac Institute (Reh-Fit) Inc.",
+          billingEmail: "a@b.com",
+          taxable: true,
+          active: true,
+        },
+        td: { name: "Manitoba Cardiac Institue (Reh-Fit) Inc.", active: true },
+      }),
+    );
+    expect(t).not.toContain("NAME_MISMATCH");
+  });
+
+  it("tolerates postal-code spacing and street/province abbreviations", () => {
+    const t = types(
+      detectDiscrepancies({
+        qbo: {
+          companyName: "Reh-Fit",
+          billingEmail: "a@b.com",
+          taxable: true,
+          active: true,
+          billingAddress: {
+            Line1: "1390 Taylor Avenue",
+            City: "Winnipeg",
+            CountrySubDivisionCode: "Manitoba",
+            PostalCode: "R3M 3V8",
+          },
+        },
+        td: {
+          name: "Reh-Fit",
+          active: true,
+          serviceAddress: {
+            line1: "1390 Taylor Ave",
+            city: "WINNIPEG",
+            region: "MB",
+            postalCode: "R3M3V8",
+          },
+        },
+      }),
+    );
+    expect(t).not.toContain("ADDRESS_MISMATCH");
   });
 
   it("detects missing billing email and unknown tax status", () => {
