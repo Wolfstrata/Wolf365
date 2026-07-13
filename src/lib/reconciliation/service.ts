@@ -20,6 +20,19 @@ const DISCREPANCY_TYPES: ExceptionType[] = [
 ];
 
 /**
+ * Discrepancy types the user has chosen to auto-clear: they are too noisy to be
+ * actionable in the queue (missing billing email, and fuzzy name/address
+ * mismatches). They are still detected — so they can show inline on a client's
+ * profile — but never surfaced as open exceptions, and any lingering open ones
+ * are purged on every reconciliation run.
+ */
+const AUTO_CLEARED_TYPES: ExceptionType[] = [
+  "MISSING_BILLING_EMAIL",
+  "NAME_MISMATCH",
+  "ADDRESS_MISMATCH",
+];
+
+/**
  * Scan every client with at least one source record, run discrepancy detection,
  * and refresh the open discrepancy exceptions in the queue. Existing open
  * discrepancy exceptions are cleared first so resolved issues disappear and the
@@ -101,6 +114,11 @@ export async function reconcileAllClients(actor: {
     });
 
     for (const d of discrepancies) {
+      // Auto-cleared types never enter the queue (see AUTO_CLEARED_TYPES).
+      if (AUTO_CLEARED_TYPES.includes(d.type)) {
+        suppressed += 1;
+        continue;
+      }
       if (
         (d.type === "CLIENT_ONLY_IN_QBO" && groupHas(client.id, client.parentClientId, hasTd)) ||
         (d.type === "CLIENT_ONLY_IN_TDSYNNEX" && groupHas(client.id, client.parentClientId, hasQbo))
@@ -124,6 +142,11 @@ export async function reconcileAllClients(actor: {
   await prisma.$transaction([
     prisma.exception.deleteMany({
       where: { status: "OPEN", type: { in: DISCREPANCY_TYPES } },
+    }),
+    // Auto-cleared types: purge any non-resolved rows (incl. acknowledged) so
+    // they disappear from the queue entirely and stay gone.
+    prisma.exception.deleteMany({
+      where: { type: { in: AUTO_CLEARED_TYPES }, status: { not: "RESOLVED" } },
     }),
     prisma.exception.createMany({ data: toCreate }),
   ]);
