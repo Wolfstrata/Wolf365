@@ -158,7 +158,11 @@ export default async function CrmLinePage({
             }
           />
         ) : (
-          <OpportunitiesTable rows={rows} canWrite={canWrite} />
+          <OpportunitiesTable
+            rows={rows}
+            canWrite={canWrite}
+            variant={line === "PRODUCTS" ? "products" : "default"}
+          />
         )}
       </div>
     </div>

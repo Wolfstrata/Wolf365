@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronUp, ChevronDown, ChevronsUpDown, Lock, LockOpen } from "lucide-react";
@@ -54,28 +54,67 @@ interface Column {
   numeric?: boolean;
   /** Value used for sorting. */
   sort: (r: OpportunityRow) => number | string;
+  /** Cell contents. */
+  render: (r: OpportunityRow) => ReactNode;
 }
 
-const COLUMNS: Column[] = [
-  { key: "name", label: "Opportunity", sort: (r) => r.name.toLowerCase() },
-  { key: "account", label: "Account", sort: (r) => r.account.toLowerCase() },
-  { key: "stageOrder", label: "Stage", sort: (r) => r.stageOrder },
-  { key: "tcv", label: "TCV", numeric: true, sort: (r) => r.tcv ?? -1 },
-  { key: "mrr", label: "MRR / mo", numeric: true, sort: (r) => r.mrr ?? -1 },
-  { key: "marginPct", label: "Margin", numeric: true, sort: (r) => r.marginPct ?? -1 },
-  { key: "termYears", label: "Term", numeric: true, sort: (r) => r.termYears },
-  { key: "closeDate", label: "Close", sort: (r) => r.closeDate },
-  { key: "probability", label: "Prob.", numeric: true, sort: (r) => r.probability },
-  { key: "createdAt", label: "Created", sort: (r) => r.createdAt },
+// Shared cell renderers so the two layouts stay consistent.
+const CELL = {
+  name: (r: OpportunityRow) => (
+    <>
+      <Link href={`/crm/edit/${r.id}`} className="hover:underline">
+        {r.name}
+      </Link>
+      <div className="text-xs text-muted-foreground">{r.owner}</div>
+    </>
+  ),
+  account: (r: OpportunityRow) => r.account,
+  stage: (r: OpportunityRow) => (
+    <span className={STAGE_STYLES[r.stage] ?? ""}>{r.stageLabel}</span>
+  ),
+  money: (v: number | null) => (v != null ? formatCurrency(v) : "—"),
+  marginPct: (r: OpportunityRow) =>
+    r.marginPct != null ? `${r.marginPct.toFixed(1)}%` : "—",
+  term: (r: OpportunityRow) => `${r.termYears} yr${r.termYears > 1 ? "s" : ""}`,
+  date: (v: string) => formatDate(v),
+  prob: (r: OpportunityRow) => (r.isOpen ? `${r.probability}%` : "—"),
+};
+
+const DEFAULT_COLUMNS: Column[] = [
+  { key: "name", label: "Opportunity", sort: (r) => r.name.toLowerCase(), render: CELL.name },
+  { key: "account", label: "Account", sort: (r) => r.account.toLowerCase(), render: CELL.account },
+  { key: "stageOrder", label: "Stage", sort: (r) => r.stageOrder, render: CELL.stage },
+  { key: "tcv", label: "TCV", numeric: true, sort: (r) => r.tcv ?? -1, render: (r) => CELL.money(r.tcv) },
+  { key: "mrr", label: "MRR / mo", numeric: true, sort: (r) => r.mrr ?? -1, render: (r) => CELL.money(r.mrr) },
+  { key: "marginPct", label: "Margin", numeric: true, sort: (r) => r.marginPct ?? -1, render: CELL.marginPct },
+  { key: "termYears", label: "Term", numeric: true, sort: (r) => r.termYears, render: CELL.term },
+  { key: "closeDate", label: "Close", sort: (r) => r.closeDate, render: (r) => CELL.date(r.closeDate) },
+  { key: "probability", label: "Prob.", numeric: true, sort: (r) => r.probability, render: CELL.prob },
+  { key: "createdAt", label: "Created", sort: (r) => r.createdAt, render: (r) => CELL.date(r.createdAt) },
+];
+
+// Products layout: Opportunity, Account, Stage, Price, Margin, Close, Prob, Created.
+const PRODUCT_COLUMNS: Column[] = [
+  { key: "name", label: "Opportunity", sort: (r) => r.name.toLowerCase(), render: CELL.name },
+  { key: "account", label: "Account", sort: (r) => r.account.toLowerCase(), render: CELL.account },
+  { key: "stageOrder", label: "Stage", sort: (r) => r.stageOrder, render: CELL.stage },
+  { key: "tcv", label: "Price", numeric: true, sort: (r) => r.tcv ?? -1, render: (r) => CELL.money(r.tcv) },
+  { key: "marginPct", label: "Margin", numeric: true, sort: (r) => r.marginPct ?? -1, render: CELL.marginPct },
+  { key: "closeDate", label: "Close", sort: (r) => r.closeDate, render: (r) => CELL.date(r.closeDate) },
+  { key: "probability", label: "Prob.", numeric: true, sort: (r) => r.probability, render: CELL.prob },
+  { key: "createdAt", label: "Created", sort: (r) => r.createdAt, render: (r) => CELL.date(r.createdAt) },
 ];
 
 export function OpportunitiesTable({
   rows,
   canWrite,
+  variant = "default",
 }: {
   rows: OpportunityRow[];
   canWrite: boolean;
+  variant?: "default" | "products";
 }) {
+  const columns = variant === "products" ? PRODUCT_COLUMNS : DEFAULT_COLUMNS;
   // Default: newest opportunity first.
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [dir, setDir] = useState<Dir>("desc");
@@ -98,13 +137,13 @@ export function OpportunitiesTable({
     } else {
       setSortKey(key);
       // Text columns default A→Z; numeric/date default high→recent first.
-      const col = COLUMNS.find((c) => c.key === key);
+      const col = columns.find((c) => c.key === key);
       setDir(col && !col.numeric && key !== "closeDate" && key !== "createdAt" ? "asc" : "desc");
     }
   }
 
   const sorted = [...rows].sort((a, b) => {
-    const col = COLUMNS.find((c) => c.key === sortKey)!;
+    const col = columns.find((c) => c.key === sortKey) ?? columns[0]!;
     const av = col.sort(a);
     const bv = col.sort(b);
     let cmp: number;
@@ -119,7 +158,7 @@ export function OpportunitiesTable({
         <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
           <tr>
             <th className="px-3 py-2 font-medium" aria-label="Sync lock" />
-            {COLUMNS.map((c) => {
+            {columns.map((c) => {
               const active = c.key === sortKey;
               const Icon = !active ? ChevronsUpDown : dir === "asc" ? ChevronUp : ChevronDown;
               return (
@@ -148,53 +187,39 @@ export function OpportunitiesTable({
               ? "Locked — Salesforce won't overwrite this. Click to allow sync."
               : "Unlocked — Salesforce can update this. Click to lock.";
             return (
-            <tr key={o.id} className="border-t hover:bg-accent/40">
-              <td className="px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => toggleLock(o.id, o.locked)}
-                  disabled={!canWrite || busy}
-                  title={title}
-                  aria-label={title}
-                  aria-pressed={o.locked}
-                  className={cn(
-                    "inline-flex items-center justify-center rounded p-1 transition",
-                    o.locked ? "text-warning" : "text-muted-foreground",
-                    canWrite ? "hover:bg-accent hover:text-foreground" : "cursor-default",
-                    busy && "opacity-50",
-                  )}
-                >
-                  <LockIcon className="h-4 w-4" />
-                </button>
-              </td>
-              <td className="px-4 py-2 font-medium">
-                <Link href={`/crm/edit/${o.id}`} className="hover:underline">
-                  {o.name}
-                </Link>
-                <div className="text-xs text-muted-foreground">{o.owner}</div>
-              </td>
-              <td className="px-4 py-2">{o.account}</td>
-              <td className="px-4 py-2">
-                <span className={STAGE_STYLES[o.stage] ?? ""}>{o.stageLabel}</span>
-              </td>
-              <td className="px-4 py-2 tabular-nums">
-                {o.tcv != null ? formatCurrency(o.tcv) : "—"}
-              </td>
-              <td className="px-4 py-2 tabular-nums">
-                {o.mrr != null ? formatCurrency(o.mrr) : "—"}
-              </td>
-              <td className="px-4 py-2 tabular-nums">
-                {o.marginPct != null ? `${o.marginPct.toFixed(1)}%` : "—"}
-              </td>
-              <td className="px-4 py-2 tabular-nums">
-                {o.termYears} yr{o.termYears > 1 ? "s" : ""}
-              </td>
-              <td className="px-4 py-2 whitespace-nowrap">{formatDate(o.closeDate)}</td>
-              <td className="px-4 py-2 tabular-nums">
-                {o.isOpen ? `${o.probability}%` : "—"}
-              </td>
-              <td className="px-4 py-2 whitespace-nowrap">{formatDate(o.createdAt)}</td>
-            </tr>
+              <tr key={o.id} className="border-t hover:bg-accent/40">
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleLock(o.id, o.locked)}
+                    disabled={!canWrite || busy}
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={o.locked}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded p-1 transition",
+                      o.locked ? "text-warning" : "text-muted-foreground",
+                      canWrite ? "hover:bg-accent hover:text-foreground" : "cursor-default",
+                      busy && "opacity-50",
+                    )}
+                  >
+                    <LockIcon className="h-4 w-4" />
+                  </button>
+                </td>
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    className={cn(
+                      "px-4 py-2",
+                      c.numeric && "tabular-nums",
+                      c.key === "name" && "font-medium",
+                      (c.key === "closeDate" || c.key === "createdAt") && "whitespace-nowrap",
+                    )}
+                  >
+                    {c.render(o)}
+                  </td>
+                ))}
+              </tr>
             );
           })}
         </tbody>

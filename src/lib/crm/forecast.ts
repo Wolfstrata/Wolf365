@@ -1,5 +1,10 @@
 import type { CrmLine, CrmStage } from "@prisma/client";
-import { isOpenStage, COMMIT_THRESHOLD, BEST_CASE_THRESHOLD } from "./constants";
+import {
+  isOpenStage,
+  COMMIT_THRESHOLD,
+  BEST_CASE_THRESHOLD,
+  CRM_LINE_ORDER,
+} from "./constants";
 
 /**
  * Pure sales-forecast math. Dependency-free and unit-tested. Callers map Prisma
@@ -109,7 +114,7 @@ export function computeForecast(
     "CLOSED_WON",
     "CLOSED_LOST",
   ];
-  const LINES: CrmLine[] = ["MANAGED_SERVICES", "MANAGED_NOC", "M365"];
+  const LINES: CrmLine[] = CRM_LINE_ORDER;
 
   return {
     openCount,

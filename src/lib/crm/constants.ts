@@ -22,6 +22,13 @@ export interface LineConfig {
 }
 
 export const CRM_LINES: Record<CrmLine, LineConfig> = {
+  PRODUCTS: {
+    slug: "products",
+    label: "Products",
+    billing: "MONTHLY_OR_YEARLY",
+    blurb:
+      "Product opportunities synced from Salesforce — anything that isn't Managed Services, Managed NOC, or Microsoft 365.",
+  },
   MANAGED_SERVICES: {
     slug: "managed-services",
     label: "Managed Services",
@@ -45,6 +52,7 @@ export const CRM_LINES: Record<CrmLine, LineConfig> = {
 
 /** Order lines appear in nav and on the forecast. */
 export const CRM_LINE_ORDER: CrmLine[] = [
+  "PRODUCTS",
   "MANAGED_SERVICES",
   "MANAGED_NOC",
   "M365",
@@ -61,17 +69,21 @@ export function lineFromSlug(slug: string): CrmLine | null {
 
 /**
  * Route an opportunity to a line by keyword in its name: "365"/"m365"/
- * "microsoft 365" → M365; "NOC" → Managed NOC; otherwise the fallback. 365 wins
- * when both appear. Used on import (e.g. Salesforce) for automatic categorization.
+ * "microsoft 365" → M365; "NOC" → Managed NOC; "managed service(s)" → Managed
+ * Services; anything else → Products (the catch-all for Salesforce product
+ * opportunities). 365 wins when several appear. Used on import for automatic
+ * categorization. The fallback is used only when the name is blank.
  */
 export function lineFromName(
   name: string | null | undefined,
-  fallback: CrmLine = "MANAGED_SERVICES",
+  fallback: CrmLine = "PRODUCTS",
 ): CrmLine {
-  const n = (name ?? "").toLowerCase();
+  const n = (name ?? "").trim().toLowerCase();
+  if (!n) return fallback;
   if (n.includes("365")) return "M365";
   if (n.includes("noc")) return "MANAGED_NOC";
-  return fallback;
+  if (n.includes("managed service")) return "MANAGED_SERVICES";
+  return "PRODUCTS";
 }
 
 /**

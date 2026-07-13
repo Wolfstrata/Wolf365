@@ -725,6 +725,7 @@ enum CrmLine {
   MANAGED_SERVICES
   MANAGED_NOC
   M365
+  PRODUCTS
 }
 
 enum CrmStage {
