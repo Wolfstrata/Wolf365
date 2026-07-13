@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { renewalWindow, isMonthToMonth, isExpired, type RenewalBucket } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
+import { isMarginException, marginPercent } from "@/lib/licensing/margin";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 
 /**
@@ -225,9 +226,13 @@ export interface MarginExceptionRow {
   unitCost: number;
   customerPrice: number;
   marginPerUnit: number;
+  marginPct: number;
 }
 
-/** Synced M365 lines sold under cost (suggested customer price < our cost). */
+/**
+ * Synced M365 lines at or below MARGIN_EXCEPTION_PCT margin — both under-cost
+ * lines and razor-thin ones (≤ 3% margin on the suggested customer price).
+ */
 export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
   await ensureArchiveColumn();
   const subs = await prisma.tdSynnexSubscription.findMany({
@@ -240,7 +245,7 @@ export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
     if (s.unitCost == null || s.customerPrice == null) continue;
     const unitCost = Number(s.unitCost);
     const customerPrice = Number(s.customerPrice);
-    if (customerPrice >= unitCost) continue; // only under-cost lines
+    if (!isMarginException(unitCost, customerPrice)) continue; // only low-margin lines
     rows.push({
       client: s.customer.client?.name ?? s.customer.name,
       clientId: s.customer.clientId,
@@ -250,9 +255,10 @@ export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
       unitCost: round2(unitCost),
       customerPrice: round2(customerPrice),
       marginPerUnit: round2(customerPrice - unitCost),
+      marginPct: Math.round((marginPercent(unitCost, customerPrice) ?? 0) * 10) / 10,
     });
   }
-  return rows.sort((a, b) => a.marginPerUnit - b.marginPerUnit);
+  return rows.sort((a, b) => a.marginPct - b.marginPct);
 }
 
 export interface ExpiredLicenseRow {

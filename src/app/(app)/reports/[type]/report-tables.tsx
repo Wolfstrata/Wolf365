@@ -99,8 +99,15 @@ export function MarginExceptionsTableView({ rows }: { rows: MarginExceptionRow[]
       sortValue: (r) => r.marginPerUnit,
       render: (r) => <span className="font-medium text-danger">{formatCurrency(r.marginPerUnit)}</span>,
     },
+    {
+      key: "marginPct",
+      label: "Margin %",
+      numeric: true,
+      sortValue: (r) => r.marginPct,
+      render: (r) => <span className="font-medium text-danger">{r.marginPct}%</span>,
+    },
   ];
-  return <SortableTable columns={columns} rows={rows} rowKey={(_, i) => String(i)} initialSort={{ key: "marginPerUnit", dir: "asc" }} />;
+  return <SortableTable columns={columns} rows={rows} rowKey={(_, i) => String(i)} initialSort={{ key: "marginPct", dir: "asc" }} />;
 }
 
 export function ExpiredTableView({

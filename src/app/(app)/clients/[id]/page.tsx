@@ -10,6 +10,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
+import { isMarginException } from "@/lib/licensing/margin";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
@@ -191,6 +192,7 @@ export default async function ClientProfilePage({
     const marginPerUnit =
       unitCost != null && customerPrice != null ? round2(customerPrice - unitCost) : null;
     const underCost = unitCost != null && customerPrice != null && customerPrice < unitCost;
+    const marginException = isMarginException(unitCost, customerPrice);
 
     // Month-over-month margin change (current margin vs last month's snapshot).
     const prev = prevCosts.get(s.stellrSubscriptionId) ?? null;
@@ -201,7 +203,7 @@ export default async function ClientProfilePage({
     const marginDelta =
       marginPerUnit != null && prevMargin != null ? round2(marginPerUnit - prevMargin) : null;
     let attention: "good" | "bad" | null = null;
-    if (underCost || (marginDelta != null && marginDelta < 0)) attention = "bad";
+    if (marginException || (marginDelta != null && marginDelta < 0)) attention = "bad";
     else if (marginDelta != null && marginDelta > 0) attention = "good";
 
     return {
@@ -220,6 +222,7 @@ export default async function ClientProfilePage({
       extendedPrice: customerPrice != null ? round2(customerPrice * s.quantity) : null,
       marginPerUnit,
       underCost,
+      marginException,
       marginDelta,
       attention,
       mrr: monthlyRevenue(toRecurringInput(s)),
@@ -242,7 +245,7 @@ export default async function ClientProfilePage({
     }))
     .filter((x): x is { r: M365LicensingRow; win: NonNullable<ReturnType<typeof renewalWindow>> } => x.win !== null)
     .sort((a, b) => a.win.daysUntil - b.win.daysUntil);
-  const marginExRows = m365Rows.filter((r) => r.underCost);
+  const marginExRows = m365Rows.filter((r) => r.marginException);
   const attentionCurrency = m365Rows.find((r) => r.currency)?.currency ?? "CAD";
 
   const discrepancies = detectDiscrepancies({
@@ -399,7 +402,7 @@ export default async function ClientProfilePage({
               </h2>
               {marginExRows.length === 0 ? (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  No M365 lines sold under cost.
+                  No M365 lines at or below 3% margin.
                 </p>
               ) : (
                 <ul className="mt-3 space-y-2">

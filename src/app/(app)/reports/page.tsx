@@ -16,7 +16,7 @@ const REPORTS = [
   {
     href: "/reports/margin-exceptions",
     title: "Margin exceptions",
-    description: "Synced M365 lines sold under cost (suggested price below cost).",
+    description: "Synced M365 lines at or below 3% margin (under cost or razor-thin).",
   },
   {
     href: "/reports/expired",

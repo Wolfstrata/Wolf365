@@ -40,7 +40,7 @@ const META: Record<string, { title: string; description: string }> = {
   },
   "margin-exceptions": {
     title: "Margin exceptions",
-    description: "Synced M365 lines sold under cost — suggested price below our cost.",
+    description: "Synced M365 lines at or below 3% margin — sold under cost or razor-thin.",
   },
   expired: {
     title: "Expired licenses",

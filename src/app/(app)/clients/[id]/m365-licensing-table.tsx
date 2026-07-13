@@ -23,10 +23,13 @@ export interface M365LicensingRow {
   customerPrice: number | null;
   extendedPrice: number | null;
   marginPerUnit: number | null;
+  /** Sold below our cost (negative margin). */
   underCost: boolean;
+  /** Margin at or below the 3% exception threshold (includes under-cost). */
+  marginException: boolean;
   /** Margin change vs last month (per unit); null when no prior snapshot. */
   marginDelta: number | null;
-  /** "bad" = under cost or margin dropped; "good" = margin improved. */
+  /** "bad" = margin exception or margin dropped; "good" = margin improved. */
   attention: "good" | "bad" | null;
   mrr: number;
   term: string | null;

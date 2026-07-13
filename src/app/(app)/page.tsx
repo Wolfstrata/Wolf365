@@ -9,6 +9,7 @@ import { formatCurrency } from "@/lib/utils";
 import { recurringSummary, toRecurringInput } from "@/lib/billing/recurring";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
+import { isMarginException } from "@/lib/licensing/margin";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { DashboardSyncButtons } from "./sync-buttons";
 
@@ -89,8 +90,8 @@ export default async function DashboardPage() {
   }).length;
   const currency = allSubs.find((s) => s.currency)?.currency ?? "USD";
 
-  // Attention counts: subscriptions renewing within 90 days, and lines sold
-  // under cost (suggested customer price below our cost).
+  // Attention counts: subscriptions renewing within 90 days, and lines at or
+  // below 3% margin (under cost or razor-thin).
   const upcomingRenewals = allSubs.filter(
     (s) =>
       !isMonthToMonth(s.commitmentTerm, s.billingFrequency) &&
@@ -101,7 +102,7 @@ export default async function DashboardPage() {
     (s) =>
       s.unitCost != null &&
       s.customerPrice != null &&
-      Number(s.customerPrice) < Number(s.unitCost),
+      isMarginException(Number(s.unitCost), Number(s.customerPrice)),
   ).length;
   const expiredLicenses = allSubs.filter((s) => isExpired(s.renewalDate, s.status, now)).length;
 
