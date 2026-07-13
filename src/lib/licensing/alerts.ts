@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 import { costChanges } from "@/lib/licensing/cost-change";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { sendEmail, type SendEmailResult } from "@/lib/email/resend";
@@ -46,8 +47,10 @@ function isoDate(d: Date | null | undefined): string {
 }
 
 export async function runM365AlertDigest(now: Date): Promise<AlertSummary> {
+  await ensureArchiveColumn();
   const subs = (
     await prisma.tdSynnexSubscription.findMany({
+      where: { NOT: { customer: { client: { archived: true } } } }, // skip archived clients
       include: { customer: { select: { name: true } } },
       orderBy: [{ renewalDate: "asc" }],
     })

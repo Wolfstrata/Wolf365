@@ -18,6 +18,7 @@ export default async function NewBillingRunPage({
   await ensureArchiveColumn();
 
   const rows = await prisma.client.findMany({
+    where: { archived: false },
     orderBy: { name: "asc" },
     select: {
       id: true,

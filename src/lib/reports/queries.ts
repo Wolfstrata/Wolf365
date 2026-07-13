@@ -64,8 +64,10 @@ export interface LeakageRow {
 
 /** Active TD SYNNEX subscriptions not represented in any non-cancelled run. */
 export async function getRevenueLeakage(): Promise<LeakageRow[]> {
+  await ensureArchiveColumn();
   const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { customer: { clientId: { not: null } } },
+    // Linked to a client, and that client is not archived.
+    where: { customer: { clientId: { not: null }, client: { archived: false } } },
     include: { customer: { include: { client: true } } },
   });
 
@@ -192,7 +194,11 @@ export async function getUpcomingRenewals(withinDays = 90): Promise<RenewalRepor
   const now = new Date();
   const horizon = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
   const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { renewalDate: { gte: now, lte: horizon }, archived: false },
+    where: {
+      renewalDate: { gte: now, lte: horizon },
+      archived: false,
+      NOT: { customer: { client: { archived: true } } }, // exclude archived clients
+    },
     include: { customer: { include: { client: true } } },
     orderBy: { renewalDate: "asc" },
   });
@@ -236,7 +242,10 @@ export interface MarginExceptionRow {
 export async function getMarginExceptions(): Promise<MarginExceptionRow[]> {
   await ensureArchiveColumn();
   const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { archived: false },
+    where: {
+      archived: false,
+      NOT: { customer: { client: { archived: true } } }, // exclude archived clients
+    },
     include: { customer: { include: { client: true } } },
   });
   const rows: MarginExceptionRow[] = [];
@@ -282,7 +291,10 @@ export async function getExpiredLicenses(): Promise<ExpiredLicenseRow[]> {
   await ensureArchiveColumn();
   const now = new Date();
   const subs = await prisma.tdSynnexSubscription.findMany({
-    where: { archived: false },
+    where: {
+      archived: false,
+      NOT: { customer: { client: { archived: true } } }, // exclude archived clients
+    },
     include: { customer: { include: { client: true } } },
     orderBy: { renewalDate: "asc" },
   });

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Archive, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -13,6 +13,7 @@ import { isM365Subscription } from "@/lib/licensing/vendor";
 import { isMarginException } from "@/lib/licensing/margin";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { ensureArchiveColumn } from "@/lib/licensing/archive";
+import { ClientArchiveToggle } from "@/components/clients/client-archive-toggle";
 import { M365LicensingTable, type M365LicensingRow } from "./m365-licensing-table";
 import {
   detectDiscrepancies,
@@ -274,14 +275,31 @@ export default async function ClientProfilePage({
     <div>
       <PageHeader
         title={client.name}
-        description={client.active ? "Active client" : "Inactive client"}
+        description={
+          client.archived
+            ? "Archived client"
+            : client.active
+              ? "Active client"
+              : "Inactive client"
+        }
         actions={
-          <Link
-            href={`/billing/new?clientId=${client.id}`}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-          >
-            Generate billing run
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <ClientArchiveToggle
+              clientId={client.id}
+              clientName={client.name}
+              archived={client.archived}
+              canArchive={can(user.role, "billing:edit")}
+              variant="full"
+            />
+            {!client.archived && (
+              <Link
+                href={`/billing/new?clientId=${client.id}`}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                Generate billing run
+              </Link>
+            )}
+          </div>
         }
       />
       <div className="space-y-6 p-4 sm:p-8">
@@ -291,6 +309,16 @@ export default async function ClientProfilePage({
         >
           <ArrowLeft className="h-4 w-4" /> All clients
         </Link>
+
+        {client.archived && (
+          <div className="flex items-start gap-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-3 py-2 text-sm text-orange-700 dark:text-orange-400">
+            <Archive className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              This client is archived — hidden from the clients list, dashboard,
+              reports, and billing. Restore it to bring it back.
+            </span>
+          </div>
+        )}
 
         {/* Discrepancies */}
         {discrepancies.length > 0 && (

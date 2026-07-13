@@ -4,10 +4,12 @@ import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { SortableTable, type SortColumn } from "@/components/ui/sortable-table";
+import { ClientArchiveToggle } from "@/components/clients/client-archive-toggle";
 
 export interface ClientListRow {
   id: string;
   name: string;
+  archived: boolean;
   hasTd: boolean;
   /** Non-archived, active-status, non-expired subscriptions. */
   liveCount: number;
@@ -22,7 +24,13 @@ export interface ClientListRow {
   negative: boolean;
 }
 
-export function ClientsTable({ rows }: { rows: ClientListRow[] }) {
+export function ClientsTable({
+  rows,
+  canArchive,
+}: {
+  rows: ClientListRow[];
+  canArchive: boolean;
+}) {
   const columns: SortColumn<ClientListRow>[] = [
     {
       key: "name",
@@ -88,6 +96,22 @@ export function ClientsTable({ rows }: { rows: ClientListRow[] }) {
         ),
     },
   ];
+
+  if (canArchive) {
+    columns.push({
+      key: "archive",
+      label: "Archive",
+      sortable: false,
+      render: (r) => (
+        <ClientArchiveToggle
+          clientId={r.id}
+          clientName={r.name}
+          archived={r.archived}
+          canArchive
+        />
+      ),
+    });
+  }
 
   return (
     <SortableTable

@@ -31,12 +31,12 @@ export default async function DashboardPage() {
   await ensureArchiveColumn();
   const [clients, connectors, openExceptions, billingRuns, clientsWithSubs] =
     await Promise.all([
-      prisma.client.count(),
+      prisma.client.count({ where: { archived: false } }),
       prisma.connector.count({ where: { enabled: true } }),
       prisma.exception.count({ where: { status: "OPEN" } }),
       prisma.billingRun.count(),
       prisma.client.findMany({
-        where: { tdSynnexCustomer: { isNot: null } },
+        where: { tdSynnexCustomer: { isNot: null }, archived: false },
         select: {
           tdSynnexCustomer: {
             select: {

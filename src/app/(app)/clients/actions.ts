@@ -5,10 +5,53 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
+import { ensureArchiveColumn } from "@/lib/licensing/archive";
 
 export interface SubsidiaryActionResult {
   ok: boolean;
   message: string;
+}
+
+export interface ClientArchiveResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Archive or restore an entire client. Archiving files the whole client away —
+ * it disappears from the M365 clients list, dashboard math, reports, and the
+ * billing client picker; restoring returns it everywhere. Individual line
+ * (subscription) archiving is separate and untouched by this. Gated by
+ * billing:edit and audited.
+ */
+export async function setClientArchivedAction(
+  clientId: string,
+  archived: boolean,
+): Promise<ClientArchiveResult> {
+  const actor = await requirePermission("billing:edit");
+  try {
+    await ensureArchiveColumn();
+    // Guard against a bad id so we never silently no-op yet report success.
+    const existing = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true },
+    });
+    if (!existing) return { ok: false, message: "Client not found." };
+
+    await prisma.client.update({ where: { id: clientId }, data: { archived } });
+    await audit({
+      action: archived ? "CLIENT_ARCHIVED" : "CLIENT_UNARCHIVED",
+      actorId: actor.id,
+      actorEmail: actor.email,
+      target: `client:${clientId}`,
+    });
+    revalidatePath("/clients");
+    revalidatePath(`/clients/${clientId}`);
+    revalidatePath("/");
+    return { ok: true, message: archived ? "Client archived." : "Client restored." };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }
 
 /**

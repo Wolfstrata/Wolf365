@@ -23,5 +23,10 @@ export async function ensureArchiveColumn(): Promise<void> {
   await prisma.$executeRawUnsafe(
     `ALTER TABLE "TdSynnexSubscription" ADD COLUMN IF NOT EXISTS "vendor" TEXT`,
   );
+  // Whole-client archive flag, queried on the same read paths (clients list,
+  // dashboard, reports, billing picker) — ensure it too so those never 500.
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "archived" BOOLEAN NOT NULL DEFAULT false`,
+  );
   ensured = true;
 }

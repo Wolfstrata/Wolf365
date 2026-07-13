@@ -265,6 +265,8 @@ enum AuditAction {
   LEADS_IMPORTED
   LICENSE_ARCHIVED
   LICENSE_UNARCHIVED
+  CLIENT_ARCHIVED
+  CLIENT_UNARCHIVED
 }
 
 model AuditLog {
@@ -293,6 +295,10 @@ model Client {
   name        String
   notes       String? @db.Text
   active      Boolean @default(true)
+  // Finance-user "filed away" flag for an entire client. Archived clients are
+  // hidden from the M365 clients list, dashboard math, reports, and the billing
+  // client picker, and are managed from the clients list's Archived view.
+  archived    Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
