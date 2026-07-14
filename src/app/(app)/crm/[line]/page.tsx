@@ -62,23 +62,28 @@ export default async function CrmLinePage({
     include: { owner: { select: { name: true, email: true } } },
   });
 
-  // Total MRR per forecast category over the filtered set.
-  const mrrByCategory: Record<CrmForecastCategory, number> = {
+  const isProducts = line === "PRODUCTS";
+
+  // Per forecast category over the filtered set: MRR (recurring lines), plus
+  // gross revenue (from Price = TCV) and gross margin (Price × margin %) for the
+  // Products view, which sells one-off product deals rather than recurring MRR.
+  const zeroByCategory = (): Record<CrmForecastCategory, number> => ({
     CLOSED: 0,
     COMMIT: 0,
     BEST_CASE: 0,
     PIPELINE: 0,
     OMITTED: 0,
-  };
-  const countByCategory: Record<CrmForecastCategory, number> = {
-    CLOSED: 0,
-    COMMIT: 0,
-    BEST_CASE: 0,
-    PIPELINE: 0,
-    OMITTED: 0,
-  };
+  });
+  const mrrByCategory = zeroByCategory();
+  const revenueByCategory = zeroByCategory();
+  const marginByCategory = zeroByCategory();
+  const countByCategory = zeroByCategory();
   for (const o of opps) {
+    const price = o.amount != null ? Number(o.amount) : 0;
+    const marginPct = o.marginPercentage != null ? Number(o.marginPercentage) : 0;
     mrrByCategory[o.forecastCategory] += o.monthlyAmount ? Number(o.monthlyAmount) : 0;
+    revenueByCategory[o.forecastCategory] += price;
+    marginByCategory[o.forecastCategory] += price * (marginPct / 100);
     countByCategory[o.forecastCategory] += 1;
   }
 
@@ -87,6 +92,14 @@ export default async function CrmLinePage({
     { label: "MRR — Commit", category: "COMMIT" },
     { label: "MRR — Best Case", category: "BEST_CASE" },
     { label: "MRR — Open", category: "PIPELINE" },
+  ];
+
+  // Category columns for the Products revenue/margin card rows.
+  const productCategories: { label: string; category: CrmForecastCategory }[] = [
+    { label: "Closed", category: "CLOSED" },
+    { label: "Commit", category: "COMMIT" },
+    { label: "Best Case", category: "BEST_CASE" },
+    { label: "Open", category: "PIPELINE" },
   ];
 
   const rows: OpportunityRow[] = opps.map((o) => ({
@@ -130,20 +143,57 @@ export default async function CrmLinePage({
       <div className="space-y-6 p-4 sm:p-8">
         <CrmFilterBar />
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {cards.map((c) => (
-            <Card key={c.category}>
-              <p className="text-sm text-muted-foreground">{c.label}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">
-                {formatCurrency(mrrByCategory[c.category])}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {countByCategory[c.category]}{" "}
-                {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
-              </p>
-            </Card>
-          ))}
-        </div>
+        {isProducts ? (
+          <div className="space-y-4">
+            {/* Gross revenue (from Price) per forecast category. */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {productCategories.map((c) => (
+                <Card key={c.category}>
+                  <p className="text-sm text-muted-foreground">Gross Revenue — {c.label}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {formatCurrency(revenueByCategory[c.category])}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {countByCategory[c.category]}{" "}
+                    {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
+                  </p>
+                </Card>
+              ))}
+            </div>
+            {/* Gross margin (Price × margin %) per forecast category. */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {productCategories.map((c) => {
+                const rev = revenueByCategory[c.category];
+                const mgn = marginByCategory[c.category];
+                const pct = rev > 0 ? Math.round((mgn / rev) * 1000) / 10 : 0;
+                return (
+                  <Card key={c.category}>
+                    <p className="text-sm text-muted-foreground">Gross Margin — {c.label}</p>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">
+                      {formatCurrency(mgn)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{pct}% margin</p>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {cards.map((c) => (
+              <Card key={c.category}>
+                <p className="text-sm text-muted-foreground">{c.label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums">
+                  {formatCurrency(mrrByCategory[c.category])}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {countByCategory[c.category]}{" "}
+                  {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
+                </p>
+              </Card>
+            ))}
+          </div>
+        )}
 
         {opps.length === 0 ? (
           <EmptyState
