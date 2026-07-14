@@ -81,10 +81,10 @@ export const salesforceConnector: ConnectorDefinition<
       type: "textarea",
       required: false,
       secret: false,
-      placeholder: "Revenue_Type__c = 'Managed Services'",
-      default: "Revenue_Type__c = 'Managed Services'",
+      placeholder: "Revenue_Type__c IN ('Managed Services', 'Product Income')",
+      default: "Revenue_Type__c IN ('Managed Services', 'Product Income')",
       helpText:
-        "SOQL WHERE clause selecting which opportunities to import (no 'WHERE' keyword). Pre-filled to match by Revenue Type = Managed Services — adjust the custom field's API name if yours differs (check Setup → Object Manager → Opportunity → Fields). Leave blank to import all.",
+        "SOQL WHERE clause selecting which opportunities to import (no 'WHERE' keyword). This one connector imports across revenue types and routes each opportunity to a CRM line by its Revenue Type — 'Product Income' → Products; everything else → the default line below (or M365/Managed NOC by name). To see Products, the filter MUST include Product Income (as pre-filled). Adjust the custom field's API name if yours differs (Setup → Object Manager → Opportunity → Fields), or leave blank to import all opportunities.",
     },
     {
       key: "revenueTypeField",
