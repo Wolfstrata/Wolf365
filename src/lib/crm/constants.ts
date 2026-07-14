@@ -69,21 +69,33 @@ export function lineFromSlug(slug: string): CrmLine | null {
 
 /**
  * Route an opportunity to a line by keyword in its name: "365"/"m365"/
- * "microsoft 365" → M365; "NOC" → Managed NOC; "managed service(s)" → Managed
- * Services; anything else → Products (the catch-all for Salesforce product
- * opportunities). 365 wins when several appear. Used on import for automatic
- * categorization. The fallback is used only when the name is blank.
+ * "microsoft 365" → M365; "NOC" → Managed NOC; otherwise the fallback. 365 wins
+ * when both appear. Used on import (e.g. Salesforce) for automatic categorization.
+ *
+ * NOTE: this is a NAME-based heuristic only. The Products line is driven by the
+ * Salesforce "Revenue Type" field (see {@link isProductIncomeRevenueType}), not
+ * by the name, so it is never returned here.
  */
 export function lineFromName(
   name: string | null | undefined,
-  fallback: CrmLine = "PRODUCTS",
+  fallback: CrmLine = "MANAGED_SERVICES",
 ): CrmLine {
-  const n = (name ?? "").trim().toLowerCase();
-  if (!n) return fallback;
+  const n = (name ?? "").toLowerCase();
   if (n.includes("365")) return "M365";
   if (n.includes("noc")) return "MANAGED_NOC";
-  if (n.includes("managed service")) return "MANAGED_SERVICES";
-  return "PRODUCTS";
+  return fallback;
+}
+
+/**
+ * Whether a Salesforce "Revenue Type" value denotes product income — the sole
+ * criterion for the Products line. Matches "Product Income" case-insensitively
+ * (and tolerates surrounding text), and deliberately does NOT match Managed
+ * Services or Professional Services.
+ */
+export function isProductIncomeRevenueType(
+  value: string | null | undefined,
+): boolean {
+  return (value ?? "").trim().toLowerCase().includes("product income");
 }
 
 /**

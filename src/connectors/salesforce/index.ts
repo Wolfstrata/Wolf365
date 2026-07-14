@@ -8,7 +8,12 @@ import type {
   ConnectorSyncResult,
   ConnectorTestResult,
 } from "@/connectors/types";
-import { CRM_LINES, forecastCategoryForProbability, lineFromName } from "@/lib/crm/constants";
+import {
+  CRM_LINES,
+  forecastCategoryForProbability,
+  lineFromName,
+  isProductIncomeRevenueType,
+} from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import { commissionAmount } from "@/lib/crm/pricing";
 import {
@@ -65,8 +70,10 @@ export const salesforceConnector: ConnectorDefinition<
         { value: "MANAGED_SERVICES", label: "Managed Services" },
         { value: "MANAGED_NOC", label: "Managed NOC" },
         { value: "M365", label: "Microsoft 365" },
+        { value: "PRODUCTS", label: "Products" },
       ],
-      helpText: "Imported opportunities are added to this line of business.",
+      helpText:
+        "Default line for imported opportunities. Opportunities whose Revenue Type is 'Product Income' always go to Products regardless of this setting.",
     },
     {
       key: "soqlFilter",
@@ -78,6 +85,17 @@ export const salesforceConnector: ConnectorDefinition<
       default: "Revenue_Type__c = 'Managed Services'",
       helpText:
         "SOQL WHERE clause selecting which opportunities to import (no 'WHERE' keyword). Pre-filled to match by Revenue Type = Managed Services — adjust the custom field's API name if yours differs (check Setup → Object Manager → Opportunity → Fields). Leave blank to import all.",
+    },
+    {
+      key: "revenueTypeField",
+      label: "Revenue Type field",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "Revenue_Type__c",
+      default: "Revenue_Type__c",
+      helpText:
+        "Salesforce field holding the opportunity's Revenue Type. Opportunities whose value is 'Product Income' are routed to the Products line (Managed Services / Professional Services are not). Leave blank to disable Product Income routing.",
     },
     {
       key: "defaultOwnerEmail",
@@ -201,6 +219,9 @@ export const salesforceConnector: ConnectorDefinition<
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
     const marginField = (ctx.config.marginField ?? "").trim();
     const termField = (ctx.config.termField ?? "").trim();
+    // Default the Revenue Type field (used to route Product Income → Products)
+    // when unset; an explicit empty value disables that routing.
+    const revenueTypeField = (ctx.config.revenueTypeField ?? "Revenue_Type__c").trim();
     const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
     const where = (ctx.config.soqlFilter ?? "").trim();
 
@@ -209,6 +230,7 @@ export const salesforceConnector: ConnectorDefinition<
     assertFieldName(amountField, "Amount field");
     if (marginField) assertFieldName(marginField, "Margin field");
     if (termField) assertFieldName(termField, "Term field");
+    if (revenueTypeField) assertFieldName(revenueTypeField, "Revenue Type field");
     if (where) assertSoqlFilter(where);
 
     // Standard fields + any configured custom fields (deduped).
@@ -229,6 +251,7 @@ export const salesforceConnector: ConnectorDefinition<
       amountField,
       ...(marginField ? [marginField] : []),
       ...(termField ? [termField] : []),
+      ...(revenueTypeField ? [revenueTypeField] : []),
     ];
     const soql =
       `SELECT ${[...new Set(fields)].join(", ")} FROM Opportunity` +
@@ -253,10 +276,16 @@ export const salesforceConnector: ConnectorDefinition<
         ? clampTerm(Number(getNum(r, termField) ?? defaultTerm))
         : defaultTerm;
 
-      // Auto-route to a line by opportunity name (NOC / 365 keywords), falling
-      // back to the connector's configured line.
+      // Route to a line. "Product Income" (by Revenue Type) always goes to
+      // Products; everything else routes by name keyword (NOC / 365), falling
+      // back to the connector's configured line. Products is reserved for
+      // Product Income only, so a non-product opportunity never lands there
+      // (even when the configured default line is Products).
       const name = getStr(r, "Name") ?? "(Untitled opportunity)";
-      const recordLine = lineFromName(name, line);
+      const revenueType = revenueTypeField ? getStr(r, revenueTypeField) : null;
+      const isProductIncome = isProductIncomeRevenueType(revenueType);
+      let recordLine: CrmLine = isProductIncome ? "PRODUCTS" : lineFromName(name, line);
+      if (recordLine === "PRODUCTS" && !isProductIncome) recordLine = "MANAGED_SERVICES";
 
       // The Salesforce Amount IS the total contract value; MRR is TCV ÷ 12.
       // Margin is likewise the total margin, with monthly margin = margin ÷ 12.

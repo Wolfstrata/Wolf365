@@ -1,28 +1,42 @@
 import { describe, it, expect } from "vitest";
-import { lineFromName, lineFromSlug, CRM_LINES } from "@/lib/crm/constants";
+import {
+  lineFromName,
+  lineFromSlug,
+  isProductIncomeRevenueType,
+  CRM_LINES,
+} from "@/lib/crm/constants";
 
 describe("lineFromName", () => {
-  it("routes by keyword", () => {
+  it("routes by name keyword", () => {
     expect(lineFromName("Contoso Microsoft 365 E3")).toBe("M365");
     expect(lineFromName("Acme 365 renewal")).toBe("M365");
     expect(lineFromName("Globex Managed NOC")).toBe("MANAGED_NOC");
-    expect(lineFromName("Initech Managed Services")).toBe("MANAGED_SERVICES");
-    expect(lineFromName("Managed Service - Umbrella")).toBe("MANAGED_SERVICES");
-  });
-
-  it("routes anything else to Products (the catch-all)", () => {
-    expect(lineFromName("Firewall hardware bundle")).toBe("PRODUCTS");
-    expect(lineFromName("Cisco switches")).toBe("PRODUCTS");
-    expect(lineFromName("Backup appliance")).toBe("PRODUCTS");
   });
 
   it("365 wins when several keywords appear", () => {
     expect(lineFromName("Managed NOC + Microsoft 365")).toBe("M365");
   });
 
-  it("uses the fallback only for a blank name", () => {
-    expect(lineFromName("", "MANAGED_SERVICES")).toBe("MANAGED_SERVICES");
-    expect(lineFromName(null)).toBe("PRODUCTS");
+  it("uses the fallback for keyword-less names (Products is not name-driven)", () => {
+    expect(lineFromName("Firewall hardware bundle")).toBe("MANAGED_SERVICES");
+    expect(lineFromName("Firewall hardware bundle", "M365")).toBe("M365");
+    expect(lineFromName(null)).toBe("MANAGED_SERVICES");
+  });
+});
+
+describe("isProductIncomeRevenueType", () => {
+  it("matches Product Income (case/space tolerant)", () => {
+    expect(isProductIncomeRevenueType("Product Income")).toBe(true);
+    expect(isProductIncomeRevenueType("  product income  ")).toBe(true);
+    expect(isProductIncomeRevenueType("PRODUCT INCOME")).toBe(true);
+  });
+
+  it("does not match other revenue types", () => {
+    expect(isProductIncomeRevenueType("Managed Services")).toBe(false);
+    expect(isProductIncomeRevenueType("Professional Services")).toBe(false);
+    expect(isProductIncomeRevenueType("")).toBe(false);
+    expect(isProductIncomeRevenueType(null)).toBe(false);
+    expect(isProductIncomeRevenueType(undefined)).toBe(false);
   });
 });
 
