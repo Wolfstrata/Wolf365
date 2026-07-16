@@ -247,3 +247,24 @@ export const OPPORTUNITY_TYPE_LABELS: Record<CrmOpportunityType, string> = {
 };
 
 export const TERM_YEARS_OPTIONS = [1, 2, 3] as const;
+
+/** Month (1–12) the fiscal year starts on. October → fiscal year Oct 1 – Sep 30. */
+export const FISCAL_YEAR_START_MONTH = 10;
+
+/**
+ * The fiscal year that CONTAINS `ref`. The fiscal year runs from
+ * {@link FISCAL_YEAR_START_MONTH} 1 through the day before that month a year
+ * later (e.g. Oct 1 → Sep 30). Returns UTC [start, end] datetime bounds
+ * (end is inclusive, at 23:59:59.999) plus a label named by the ENDING year —
+ * e.g. Oct 1 2025 – Sep 30 2026 is "FY2026". Computed dynamically so it advances
+ * automatically each October.
+ */
+export function fiscalYearFor(ref: Date): { start: Date; end: Date; label: string } {
+  const startMonthIndex = FISCAL_YEAR_START_MONTH - 1; // 0-based
+  const y = ref.getUTCFullYear();
+  const startYear = ref.getUTCMonth() >= startMonthIndex ? y : y - 1;
+  const start = new Date(Date.UTC(startYear, startMonthIndex, 1, 0, 0, 0, 0));
+  // One millisecond before the next fiscal year begins.
+  const end = new Date(Date.UTC(startYear + 1, startMonthIndex, 1, 0, 0, 0, 0) - 1);
+  return { start, end, label: `FY${startYear + 1}` };
+}

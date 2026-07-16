@@ -3,6 +3,7 @@ import {
   lineFromName,
   lineFromSlug,
   isProductIncomeRevenueType,
+  fiscalYearFor,
   CRM_LINES,
 } from "@/lib/crm/constants";
 
@@ -37,6 +38,28 @@ describe("isProductIncomeRevenueType", () => {
     expect(isProductIncomeRevenueType("")).toBe(false);
     expect(isProductIncomeRevenueType(null)).toBe(false);
     expect(isProductIncomeRevenueType(undefined)).toBe(false);
+  });
+});
+
+describe("fiscalYearFor", () => {
+  it("maps a mid-year date to the Oct 1 – Sep 30 window (named by end year)", () => {
+    const fy = fiscalYearFor(new Date("2026-07-16T12:00:00Z"));
+    expect(fy.start.toISOString()).toBe("2025-10-01T00:00:00.000Z");
+    expect(fy.end.toISOString()).toBe("2026-09-30T23:59:59.999Z");
+    expect(fy.label).toBe("FY2026");
+  });
+
+  it("Oct 1 begins a new fiscal year", () => {
+    const fy = fiscalYearFor(new Date("2025-10-01T00:00:00Z"));
+    expect(fy.start.toISOString()).toBe("2025-10-01T00:00:00.000Z");
+    expect(fy.label).toBe("FY2026");
+  });
+
+  it("Sep 30 still belongs to the prior fiscal year", () => {
+    const fy = fiscalYearFor(new Date("2025-09-30T23:00:00Z"));
+    expect(fy.start.toISOString()).toBe("2024-10-01T00:00:00.000Z");
+    expect(fy.end.toISOString()).toBe("2025-09-30T23:59:59.999Z");
+    expect(fy.label).toBe("FY2025");
   });
 });
 

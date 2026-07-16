@@ -5,7 +5,7 @@ import type { CrmStage, CrmForecastCategory, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { can } from "@/lib/rbac";
 import {
   CRM_LINES,
@@ -14,6 +14,7 @@ import {
   STAGE_ORDER,
   BILLING_FREQUENCY_LABELS,
   isOpenStage,
+  fiscalYearFor,
 } from "@/lib/crm/constants";
 import { OpportunitiesTable, type OpportunityRow } from "./opportunities-table";
 import { CrmFilterBar } from "./filter-bar";
@@ -39,12 +40,18 @@ export default async function CrmLinePage({
   const config = CRM_LINES[line];
   const canWrite = can(user.role, "crm:write");
 
+  // The Products dashboard is scoped to the current fiscal year (Oct 1 – Sep 30)
+  // by close date, unless the user narrows it further with the date filter.
+  const isProducts = line === "PRODUCTS";
+  const fy = isProducts ? fiscalYearFor(new Date()) : null;
+
   const sp = await searchParams;
   const stage = STAGE_ORDER.includes(sp.stage as CrmStage)
     ? (sp.stage as CrmStage)
     : undefined;
-  const fromDate = parseDay(sp.from);
-  const toDate = sp.to ? parseDay(`${sp.to}T23:59:59.999`) : undefined;
+  // User-supplied bounds override the fiscal-year default per side.
+  const fromDate = parseDay(sp.from) ?? fy?.start;
+  const toDate = (sp.to ? parseDay(`${sp.to}T23:59:59.999`) : undefined) ?? fy?.end;
 
   const where: Prisma.CrmOpportunityWhereInput = { line };
   if (stage) where.stage = stage;
@@ -61,8 +68,6 @@ export default async function CrmLinePage({
     orderBy: [{ createdAt: "desc" }],
     include: { owner: { select: { name: true, email: true } } },
   });
-
-  const isProducts = line === "PRODUCTS";
 
   // Per forecast category over the filtered set: MRR (recurring lines), plus
   // gross revenue (from Price = TCV) and gross margin (Price × margin %) for the
@@ -122,13 +127,19 @@ export default async function CrmLinePage({
     locked: o.lockedFields.length > 0,
   }));
 
-  const filtered = Boolean(stage || fromDate || toDate);
+  // "Filtered" for the empty-state copy reflects USER filters, not the implicit
+  // fiscal-year scoping applied to Products.
+  const filtered = Boolean(stage || sp.from || sp.to);
 
   return (
     <div>
       <PageHeader
         title={config.label}
-        description={config.blurb}
+        description={
+          isProducts && fy
+            ? `${config.blurb} Fiscal year ${fy.label}: ${formatDate(fy.start)} – ${formatDate(fy.end)}.`
+            : config.blurb
+        }
         actions={
           canWrite ? (
             <Link
