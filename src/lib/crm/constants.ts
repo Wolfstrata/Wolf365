@@ -105,13 +105,20 @@ export function parseProductRevenueTypes(
  * Whether a Revenue Type value maps to the Products line, given the configured
  * set of product Revenue Type values (exact, case-insensitive match). Managed
  * Services / Professional Services values are not in the set, so they don't match.
+ *
+ * A blank/unset Revenue Type (Salesforce's "None") matches when the configured
+ * set contains "none" (or "(none)"/"(blank)") — some orgs leave product deals'
+ * Revenue Type empty.
  */
 export function isProductRevenueType(
   value: string | null | undefined,
   productTypes: Set<string>,
 ): boolean {
   const v = (value ?? "").trim().toLowerCase();
-  return v.length > 0 && productTypes.has(v);
+  if (!v) {
+    return productTypes.has("none") || productTypes.has("(none)") || productTypes.has("(blank)");
+  }
+  return productTypes.has(v);
 }
 
 /**

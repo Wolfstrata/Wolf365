@@ -104,10 +104,10 @@ export const salesforceConnector: ConnectorDefinition<
       type: "text",
       required: false,
       secret: false,
-      placeholder: "Product Income",
+      placeholder: "None, Product Income (Hardware & Software)",
       default: "Product Income",
       helpText:
-        "Revenue Type value(s) that route an opportunity to the Products line — comma-separated, matched case-insensitively. Must match your Salesforce picklist exactly AND be included in the filter above (so the rows are actually fetched). Default: Product Income.",
+        "Revenue Type value(s) that route an opportunity to the Products line — comma-separated, matched case-insensitively. Use the word None to include opportunities whose Revenue Type is blank/unset. Values must also be fetched by the filter above (e.g. leave the filter blank to import all, or add them to it). Example: None, Product Income (Hardware & Software).",
     },
     {
       key: "defaultOwnerEmail",
