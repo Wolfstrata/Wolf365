@@ -42,6 +42,30 @@ function withEnv(message: string, env?: string): string {
   return `${env.charAt(0).toUpperCase()}${env.slice(1)}: ${message}`;
 }
 
+/**
+ * Append a short routing breakdown when a sync provides one (e.g. Salesforce
+ * reports how records mapped to CRM lines and what Revenue Type values it saw),
+ * so an empty target line (like Products) is explainable at a glance.
+ */
+function syncDiagnostics(summary: Record<string, unknown> | undefined): string {
+  if (!summary) return "";
+  const fmt = (obj: unknown): string =>
+    obj && typeof obj === "object" && !Array.isArray(obj)
+      ? Object.entries(obj as Record<string, unknown>)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ")
+      : "";
+  const parts: string[] = [];
+  const byLine = fmt(summary.byLine);
+  if (byLine) parts.push(`Routed → ${byLine}`);
+  const rt = fmt(summary.revenueTypes);
+  if (rt) parts.push(`Revenue types → ${rt}`);
+  if (typeof summary.lineLockedSkips === "number" && summary.lineLockedSkips > 0) {
+    parts.push(`${summary.lineLockedSkips} kept a locked line`);
+  }
+  return parts.length ? ` ${parts.join(" · ")}.` : "";
+}
+
 const CONNECTOR_TYPES: ConnectorType[] = [
   "TD_SYNNEX_STELLR",
   "QUICKBOOKS_ONLINE",
@@ -137,7 +161,8 @@ export async function syncNowAction(
       ok: true,
       env,
       message: withEnv(
-        `Sync complete: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped.`,
+        `Sync complete: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped.` +
+          syncDiagnostics(result.summary),
         env,
       ),
     };

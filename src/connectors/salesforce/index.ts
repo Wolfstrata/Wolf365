@@ -264,6 +264,12 @@ export const salesforceConnector: ConnectorDefinition<
     let updated = 0;
     let skipped = 0;
     let localEditsPreserved = 0;
+    // Diagnostics: how records resolved to lines, what Revenue Type values were
+    // seen, and how many kept an old line because it was locked. Surfaced in the
+    // Sync Now result + persisted on the SyncRun to explain routing at a glance.
+    const byLine: Record<string, number> = {};
+    const revenueTypesSeen: Record<string, number> = {};
+    let lineLockedSkips = 0;
 
     for (const r of records) {
       const externalId = getStr(r, "Id");
@@ -286,6 +292,9 @@ export const salesforceConnector: ConnectorDefinition<
       const isProductIncome = isProductIncomeRevenueType(revenueType);
       let recordLine: CrmLine = isProductIncome ? "PRODUCTS" : lineFromName(name, line);
       if (recordLine === "PRODUCTS" && !isProductIncome) recordLine = "MANAGED_SERVICES";
+      byLine[recordLine] = (byLine[recordLine] ?? 0) + 1;
+      const rtSeen = (revenueType ?? "").trim() || "(blank/unreadable)";
+      revenueTypesSeen[rtSeen] = (revenueTypesSeen[rtSeen] ?? 0) + 1;
 
       // The Salesforce Amount IS the total contract value; MRR is TCV ÷ 12.
       // Margin is likewise the total margin, with monthly margin = margin ÷ 12.
@@ -335,6 +344,10 @@ export const salesforceConnector: ConnectorDefinition<
         const writable: Record<string, unknown> = { ...data };
         for (const col of existing.lockedFields) delete writable[col];
         if (existing.lockedFields.length > 0) localEditsPreserved += 1;
+        // A locked `line` means this opp keeps its previous line (won't move to
+        // the routed line, e.g. Products) — track it so empty-line puzzles are
+        // explainable.
+        if (existing.lockedFields.includes("line")) lineLockedSkips += 1;
         await prisma.crmOpportunity.update({ where: { id: existing.id }, data: writable });
         updated += 1;
       } else {
@@ -349,7 +362,14 @@ export const salesforceConnector: ConnectorDefinition<
       imported,
       updated,
       skipped,
-      summary: { line, fetched: records.length, localEditsPreserved },
+      summary: {
+        line,
+        fetched: records.length,
+        localEditsPreserved,
+        byLine,
+        revenueTypes: revenueTypesSeen,
+        lineLockedSkips,
+      },
     };
   },
 };
