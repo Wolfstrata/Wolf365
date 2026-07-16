@@ -40,18 +40,18 @@ export default async function CrmLinePage({
   const config = CRM_LINES[line];
   const canWrite = can(user.role, "crm:write");
 
-  // The Products dashboard is scoped to the current fiscal year (Oct 1 – Sep 30)
-  // by close date, unless the user narrows it further with the date filter.
   const isProducts = line === "PRODUCTS";
-  const fy = isProducts ? fiscalYearFor(new Date()) : null;
+  // Every CRM line is scoped to the current fiscal year (Oct 1 – Sep 30) by
+  // close date, unless the user narrows it further with the date filter.
+  const fy = fiscalYearFor(new Date());
 
   const sp = await searchParams;
   const stage = STAGE_ORDER.includes(sp.stage as CrmStage)
     ? (sp.stage as CrmStage)
     : undefined;
   // User-supplied bounds override the fiscal-year default per side.
-  const fromDate = parseDay(sp.from) ?? fy?.start;
-  const toDate = (sp.to ? parseDay(`${sp.to}T23:59:59.999`) : undefined) ?? fy?.end;
+  const fromDate = parseDay(sp.from) ?? fy.start;
+  const toDate = (sp.to ? parseDay(`${sp.to}T23:59:59.999`) : undefined) ?? fy.end;
 
   const where: Prisma.CrmOpportunityWhereInput = { line };
   if (stage) where.stage = stage;
@@ -135,11 +135,7 @@ export default async function CrmLinePage({
     <div>
       <PageHeader
         title={config.label}
-        description={
-          isProducts && fy
-            ? `${config.blurb} Fiscal year ${fy.label}: ${formatDate(fy.start)} – ${formatDate(fy.end)}.`
-            : config.blurb
-        }
+        description={`${config.blurb} Fiscal year ${fy.label}: ${formatDate(fy.start)} – ${formatDate(fy.end)}.`}
         actions={
           canWrite ? (
             <Link

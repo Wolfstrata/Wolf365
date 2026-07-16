@@ -4,12 +4,14 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { computeForecast, forecastGrid } from "@/lib/crm/forecast";
 import {
   CRM_LINES,
   CRM_LINE_ORDER,
   STAGE_ORDER,
   STAGE_LABELS,
+  fiscalYearFor,
 } from "@/lib/crm/constants";
 
 /** Horizontal bar relative to a max, with a value label. */
@@ -55,7 +57,10 @@ function monthLabel(key: string): string {
 export default async function ForecastPage() {
   await requirePermission("crm:read");
 
+  // Scope the whole forecast to the current fiscal year (Oct 1 – Sep 30) by close date.
+  const fy = fiscalYearFor(new Date());
   const opps = await prisma.crmOpportunity.findMany({
+    where: { closeDate: { gte: fy.start, lte: fy.end } },
     select: {
       line: true,
       stage: true,
@@ -112,7 +117,7 @@ export default async function ForecastPage() {
     <div>
       <PageHeader
         title="Sales Forecast"
-        description="Pipeline across all Salesforce opportunities — Products, Managed Services, Managed NOC and Microsoft 365."
+        description={`Pipeline across all Salesforce opportunities — Products, Managed Services, Managed NOC and Microsoft 365. Fiscal year ${fy.label}: ${formatDate(fy.start)} – ${formatDate(fy.end)}.`}
       />
       <div className="space-y-6 p-4 sm:p-8">
         {opps.length === 0 ? (
