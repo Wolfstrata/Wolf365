@@ -112,14 +112,14 @@ export default async function ForecastPage() {
     <div>
       <PageHeader
         title="Sales Forecast"
-        description="Pipeline across Managed Services, Managed NOC and Microsoft 365."
+        description="Pipeline across all Salesforce opportunities — Products, Managed Services, Managed NOC and Microsoft 365."
       />
       <div className="space-y-6 p-4 sm:p-8">
         {opps.length === 0 ? (
           <EmptyState
             icon={<Layers className="h-8 w-8" />}
             title="No opportunities yet"
-            description="Add opportunities under Managed Services, Managed NOC, or Microsoft 365 to build your forecast."
+            description="Add opportunities under Products, Managed Services, Managed NOC, or Microsoft 365 to build your forecast."
           />
         ) : (
           <>
