@@ -248,6 +248,34 @@ export const OPPORTUNITY_TYPE_LABELS: Record<CrmOpportunityType, string> = {
 
 export const TERM_YEARS_OPTIONS = [1, 2, 3] as const;
 
+/**
+ * CRM lines assumed to carry 100% gross margin — pure-service lines with no cost
+ * of goods (Managed Services). Margin for these is derived from revenue rather
+ * than an imported margin figure.
+ */
+export const FULL_MARGIN_LINES = new Set<CrmLine>(["MANAGED_SERVICES"]);
+
+/** Effective gross-margin % for a line: 100 for full-margin lines, else the
+ *  stored value (null when unknown). */
+export function effectiveMarginPct(
+  line: CrmLine,
+  storedPct: number | null | undefined,
+): number | null {
+  if (FULL_MARGIN_LINES.has(line)) return 100;
+  return storedPct ?? null;
+}
+
+/** Effective gross-margin amount for a line: the full revenue for full-margin
+ *  lines, else the stored margin amount (0 when unknown). */
+export function effectiveMarginAmount(
+  line: CrmLine,
+  amount: number,
+  storedMargin: number | null | undefined,
+): number {
+  if (FULL_MARGIN_LINES.has(line)) return amount;
+  return storedMargin ?? 0;
+}
+
 /** Month (1–12) the fiscal year starts on. October → fiscal year Oct 1 – Sep 30. */
 export const FISCAL_YEAR_START_MONTH = 10;
 

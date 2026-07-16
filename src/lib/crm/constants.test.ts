@@ -4,6 +4,8 @@ import {
   lineFromSlug,
   isProductIncomeRevenueType,
   fiscalYearFor,
+  effectiveMarginPct,
+  effectiveMarginAmount,
   CRM_LINES,
 } from "@/lib/crm/constants";
 
@@ -60,6 +62,22 @@ describe("fiscalYearFor", () => {
     expect(fy.start.toISOString()).toBe("2024-10-01T00:00:00.000Z");
     expect(fy.end.toISOString()).toBe("2025-09-30T23:59:59.999Z");
     expect(fy.label).toBe("FY2025");
+  });
+});
+
+describe("effective margin (Managed Services assumed 100%)", () => {
+  it("forces 100% for Managed Services regardless of stored value", () => {
+    expect(effectiveMarginPct("MANAGED_SERVICES", null)).toBe(100);
+    expect(effectiveMarginPct("MANAGED_SERVICES", 12)).toBe(100);
+    expect(effectiveMarginAmount("MANAGED_SERVICES", 5000, null)).toBe(5000);
+    expect(effectiveMarginAmount("MANAGED_SERVICES", 5000, 100)).toBe(5000);
+  });
+
+  it("uses the stored value for other lines", () => {
+    expect(effectiveMarginPct("MANAGED_NOC", 30)).toBe(30);
+    expect(effectiveMarginPct("PRODUCTS", null)).toBeNull();
+    expect(effectiveMarginAmount("M365", 5000, 1200)).toBe(1200);
+    expect(effectiveMarginAmount("PRODUCTS", 5000, null)).toBe(0);
   });
 });
 

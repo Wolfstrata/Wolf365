@@ -12,6 +12,7 @@ import {
   STAGE_ORDER,
   STAGE_LABELS,
   fiscalYearFor,
+  effectiveMarginAmount,
 } from "@/lib/crm/constants";
 
 /** Horizontal bar relative to a max, with a value label. */
@@ -72,14 +73,23 @@ export default async function ForecastPage() {
     },
   });
 
-  const inputs = opps.map((o) => ({
-    line: o.line,
-    stage: o.stage,
-    amount: o.amount ? Number(o.amount) : 0,
-    marginAmount: o.marginAmount ? Number(o.marginAmount) : 0,
-    probability: o.probability,
-    closeMonth: o.closeDate.toISOString().slice(0, 7),
-  }));
+  const inputs = opps.map((o) => {
+    const amount = o.amount ? Number(o.amount) : 0;
+    return {
+      line: o.line,
+      stage: o.stage,
+      amount,
+      // Managed Services is assumed 100% margin (full revenue); other lines use
+      // the imported margin amount.
+      marginAmount: effectiveMarginAmount(
+        o.line,
+        amount,
+        o.marginAmount != null ? Number(o.marginAmount) : null,
+      ),
+      probability: o.probability,
+      closeMonth: o.closeDate.toISOString().slice(0, 7),
+    };
+  });
   const f = computeForecast(inputs);
   const grid = forecastGrid(inputs);
 

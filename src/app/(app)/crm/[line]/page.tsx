@@ -15,6 +15,7 @@ import {
   BILLING_FREQUENCY_LABELS,
   isOpenStage,
   fiscalYearFor,
+  effectiveMarginPct,
 } from "@/lib/crm/constants";
 import { OpportunitiesTable, type OpportunityRow } from "./opportunities-table";
 import { CrmFilterBar } from "./filter-bar";
@@ -69,9 +70,9 @@ export default async function CrmLinePage({
     include: { owner: { select: { name: true, email: true } } },
   });
 
-  // Per forecast category over the filtered set: MRR (recurring lines), plus
-  // gross revenue (from Price = TCV) and gross margin (Price × margin %) for the
-  // Products view, which sells one-off product deals rather than recurring MRR.
+  // Per forecast category over the filtered set: MRR (recurring lines) and gross
+  // revenue (from Price = TCV) for the Products view, which sells one-off product
+  // deals rather than recurring MRR.
   const zeroByCategory = (): Record<CrmForecastCategory, number> => ({
     CLOSED: 0,
     COMMIT: 0,
@@ -81,14 +82,11 @@ export default async function CrmLinePage({
   });
   const mrrByCategory = zeroByCategory();
   const revenueByCategory = zeroByCategory();
-  const marginByCategory = zeroByCategory();
   const countByCategory = zeroByCategory();
   for (const o of opps) {
     const price = o.amount != null ? Number(o.amount) : 0;
-    const marginPct = o.marginPercentage != null ? Number(o.marginPercentage) : 0;
     mrrByCategory[o.forecastCategory] += o.monthlyAmount ? Number(o.monthlyAmount) : 0;
     revenueByCategory[o.forecastCategory] += price;
-    marginByCategory[o.forecastCategory] += price * (marginPct / 100);
     countByCategory[o.forecastCategory] += 1;
   }
 
@@ -117,7 +115,10 @@ export default async function CrmLinePage({
     stageOrder: STAGE_ORDER.indexOf(o.stage),
     tcv: o.amount != null ? Number(o.amount) : null,
     mrr: o.monthlyAmount != null ? Number(o.monthlyAmount) : null,
-    marginPct: o.marginPercentage != null ? Number(o.marginPercentage) : null,
+    marginPct: effectiveMarginPct(
+      line,
+      o.marginPercentage != null ? Number(o.marginPercentage) : null,
+    ),
     termYears: o.termYears,
     billingLabel: BILLING_FREQUENCY_LABELS[o.billingFrequency],
     closeDate: o.closeDate.toISOString(),
@@ -151,39 +152,20 @@ export default async function CrmLinePage({
         <CrmFilterBar />
 
         {isProducts ? (
-          <div className="space-y-4">
-            {/* Gross revenue (from Price) per forecast category. */}
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {productCategories.map((c) => (
-                <Card key={c.category}>
-                  <p className="text-sm text-muted-foreground">Gross Revenue — {c.label}</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">
-                    {formatCurrency(revenueByCategory[c.category])}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {countByCategory[c.category]}{" "}
-                    {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
-                  </p>
-                </Card>
-              ))}
-            </div>
-            {/* Gross margin (Price × margin %) per forecast category. */}
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {productCategories.map((c) => {
-                const rev = revenueByCategory[c.category];
-                const mgn = marginByCategory[c.category];
-                const pct = rev > 0 ? Math.round((mgn / rev) * 1000) / 10 : 0;
-                return (
-                  <Card key={c.category}>
-                    <p className="text-sm text-muted-foreground">Gross Margin — {c.label}</p>
-                    <p className="mt-2 text-2xl font-semibold tabular-nums">
-                      {formatCurrency(mgn)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">{pct}% margin</p>
-                  </Card>
-                );
-              })}
-            </div>
+          // Gross revenue (from Price) per forecast category.
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {productCategories.map((c) => (
+              <Card key={c.category}>
+                <p className="text-sm text-muted-foreground">Gross Revenue — {c.label}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums">
+                  {formatCurrency(revenueByCategory[c.category])}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {countByCategory[c.category]}{" "}
+                  {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
+                </p>
+              </Card>
+            ))}
           </div>
         ) : (
           <div className="space-y-4">
