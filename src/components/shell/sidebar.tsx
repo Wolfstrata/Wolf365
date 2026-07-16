@@ -30,6 +30,7 @@ import {
   BellRing,
   Archive,
   Package,
+  Award,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ const ICONS: Record<string, LucideIcon> = {
   BellRing,
   Archive,
   Package,
+  Award,
 };
 
 const SECTION_ORDER = [

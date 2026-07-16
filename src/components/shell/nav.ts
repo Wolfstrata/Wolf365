@@ -28,6 +28,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "QBO Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
   { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
+  { label: "Opportunity Reliability", href: "/crm/reliability", icon: "Award", section: "CRM", permission: "crm:read" },
   { label: "Products", href: "/crm/products", icon: "Package", section: "CRM", permission: "crm:read" },
   { label: "Managed Services", href: "/crm/managed-services", icon: "Wrench", section: "CRM", permission: "crm:read" },
   { label: "Managed NOC", href: "/crm/managed-noc", icon: "Network", section: "CRM", permission: "crm:read" },
