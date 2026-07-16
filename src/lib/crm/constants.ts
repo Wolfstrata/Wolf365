@@ -87,15 +87,42 @@ export function lineFromName(
 }
 
 /**
- * Whether a Salesforce "Revenue Type" value denotes product income — the sole
- * criterion for the Products line. Matches "Product Income" case-insensitively
- * (and tolerates surrounding text), and deliberately does NOT match Managed
- * Services or Professional Services.
+ * Parse a comma-separated list of Salesforce "Revenue Type" values that should
+ * route to the Products line into a normalized (lowercased, trimmed) set. An
+ * empty/blank config falls back to the default "product income".
+ */
+export function parseProductRevenueTypes(
+  csv: string | null | undefined,
+): Set<string> {
+  const items = (csv ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(items.length ? items : ["product income"]);
+}
+
+/**
+ * Whether a Revenue Type value maps to the Products line, given the configured
+ * set of product Revenue Type values (exact, case-insensitive match). Managed
+ * Services / Professional Services values are not in the set, so they don't match.
+ */
+export function isProductRevenueType(
+  value: string | null | undefined,
+  productTypes: Set<string>,
+): boolean {
+  const v = (value ?? "").trim().toLowerCase();
+  return v.length > 0 && productTypes.has(v);
+}
+
+/**
+ * Default-config convenience: whether a value denotes product income under the
+ * built-in default ("Product Income"). Kept for callers/tests that don't supply
+ * a configured set.
  */
 export function isProductIncomeRevenueType(
   value: string | null | undefined,
 ): boolean {
-  return (value ?? "").trim().toLowerCase().includes("product income");
+  return isProductRevenueType(value, parseProductRevenueTypes(null));
 }
 
 /**

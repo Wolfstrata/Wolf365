@@ -31,6 +31,7 @@ export interface SalesforceConfig {
   targetLine?: string;
   soqlFilter?: string;
   revenueTypeField?: string;
+  productRevenueTypes?: string;
   amountField?: string;
   marginField?: string;
   termField?: string;

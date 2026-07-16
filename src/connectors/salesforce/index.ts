@@ -12,7 +12,8 @@ import {
   CRM_LINES,
   forecastCategoryForProbability,
   lineFromName,
-  isProductIncomeRevenueType,
+  parseProductRevenueTypes,
+  isProductRevenueType,
 } from "@/lib/crm/constants";
 import { computeMarginPercentage } from "@/lib/crm/forecast";
 import { commissionAmount } from "@/lib/crm/pricing";
@@ -95,7 +96,18 @@ export const salesforceConnector: ConnectorDefinition<
       placeholder: "Revenue_Type__c",
       default: "Revenue_Type__c",
       helpText:
-        "Salesforce field holding the opportunity's Revenue Type. Opportunities whose value is 'Product Income' are routed to the Products line (Managed Services / Professional Services are not). Leave blank to disable Product Income routing.",
+        "Salesforce field holding the opportunity's Revenue Type. Its value decides the Products line (see below). Leave blank to disable Revenue-Type routing. Tip: after a sync, the result message lists every Revenue Type value it saw — use that to find your exact product value.",
+    },
+    {
+      key: "productRevenueTypes",
+      label: "Product Income value(s)",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "Product Income",
+      default: "Product Income",
+      helpText:
+        "Revenue Type value(s) that route an opportunity to the Products line — comma-separated, matched case-insensitively. Must match your Salesforce picklist exactly AND be included in the filter above (so the rows are actually fetched). Default: Product Income.",
     },
     {
       key: "defaultOwnerEmail",
@@ -222,6 +234,8 @@ export const salesforceConnector: ConnectorDefinition<
     // Default the Revenue Type field (used to route Product Income → Products)
     // when unset; an explicit empty value disables that routing.
     const revenueTypeField = (ctx.config.revenueTypeField ?? "Revenue_Type__c").trim();
+    // Revenue Type value(s) that route to the Products line (default "Product Income").
+    const productRevenueTypes = parseProductRevenueTypes(ctx.config.productRevenueTypes);
     const defaultTerm = clampTerm(Number(ctx.config.defaultTermYears ?? "1"));
     const where = (ctx.config.soqlFilter ?? "").trim();
 
@@ -289,7 +303,7 @@ export const salesforceConnector: ConnectorDefinition<
       // (even when the configured default line is Products).
       const name = getStr(r, "Name") ?? "(Untitled opportunity)";
       const revenueType = revenueTypeField ? getStr(r, revenueTypeField) : null;
-      const isProductIncome = isProductIncomeRevenueType(revenueType);
+      const isProductIncome = isProductRevenueType(revenueType, productRevenueTypes);
       let recordLine: CrmLine = isProductIncome ? "PRODUCTS" : lineFromName(name, line);
       if (recordLine === "PRODUCTS" && !isProductIncome) recordLine = "MANAGED_SERVICES";
       byLine[recordLine] = (byLine[recordLine] ?? 0) + 1;
