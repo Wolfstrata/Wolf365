@@ -186,19 +186,34 @@ export default async function CrmLinePage({
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {cards.map((c) => (
-              <Card key={c.category}>
-                <p className="text-sm text-muted-foreground">{c.label}</p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums">
-                  {formatCurrency(mrrByCategory[c.category])}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {countByCategory[c.category]}{" "}
-                  {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
-                </p>
-              </Card>
-            ))}
+          <div className="space-y-4">
+            {/* MRR per forecast category. */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {cards.map((c) => (
+                <Card key={c.category}>
+                  <p className="text-sm text-muted-foreground">{c.label}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {formatCurrency(mrrByCategory[c.category])}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {countByCategory[c.category]}{" "}
+                    {countByCategory[c.category] === 1 ? "opportunity" : "opportunities"}
+                  </p>
+                </Card>
+              ))}
+            </div>
+            {/* ARR = MRR × 12 per forecast category (fiscal-year annualized). */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {productCategories.map((c) => (
+                <Card key={c.category}>
+                  <p className="text-sm text-muted-foreground">ARR — {c.label}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {formatCurrency(mrrByCategory[c.category] * 12)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">annualized (MRR × 12)</p>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
 
