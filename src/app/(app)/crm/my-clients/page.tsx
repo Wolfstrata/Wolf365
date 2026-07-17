@@ -26,7 +26,15 @@ export default async function MyClientsPage() {
 
   const opps = await prisma.crmOpportunity.findMany({
     where: { ownerId: user.id, stage: "CLOSED_WON" },
-    select: { accountName: true, line: true, stage: true, amount: true, marginAmount: true, closeDate: true },
+    select: {
+      accountName: true,
+      contactEmail: true,
+      line: true,
+      stage: true,
+      amount: true,
+      marginAmount: true,
+      closeDate: true,
+    },
   });
 
   const inputs: MyClientOppInput[] = opps.map((o) => ({
@@ -41,25 +49,20 @@ export default async function MyClientsPage() {
   const now = new Date();
   const report = computeMyClients(inputs, now);
 
-  // Resolve each account to its email domain(s) via the matching QuickBooks
-  // customer's billing email, so Microsoft 365 touchpoints can be attributed.
-  const qboCustomers = await prisma.qboCustomer.findMany({
-    where: { billingEmail: { not: null } },
-    select: { displayName: true, companyName: true, billingEmail: true },
-  });
-  const domainByName = new Map<string, Set<string>>();
-  for (const c of qboCustomers) {
-    const dom = domainOf(c.billingEmail);
+  // Resolve each account to its email domain(s) from the Salesforce customer
+  // contact email on the account's opportunities, so Microsoft 365 touchpoints
+  // can be attributed. (Contact email — who we talk to — not the QBO billing
+  // email, which is just where invoices go.)
+  const domainsByAccount = new Map<string, Set<string>>();
+  for (const o of opps) {
+    const dom = domainOf(o.contactEmail);
     if (!dom) continue;
-    for (const nm of [c.displayName, c.companyName]) {
-      const key = nm?.trim().toLowerCase();
-      if (!key) continue;
-      (domainByName.get(key) ?? domainByName.set(key, new Set()).get(key)!).add(dom);
-    }
+    const account = o.accountName?.trim() || "Unknown account";
+    (domainsByAccount.get(account) ?? domainsByAccount.set(account, new Set()).get(account)!).add(dom);
   }
   const accountDomains = new Map<string, string[]>();
   for (const r of report.rows) {
-    const doms = domainByName.get(r.account.trim().toLowerCase());
+    const doms = domainsByAccount.get(r.account);
     if (doms && doms.size) accountDomains.set(r.account, [...doms]);
   }
 
@@ -143,7 +146,8 @@ export default async function MyClientsPage() {
               meeting with each client from your Microsoft 365 mailbox via Microsoft Graph.
               It shows &ldquo;—&rdquo; until an admin grants the Graph application permissions
               (Mail.Read, Calendars.Read) with admin consent on the Entra app, and each
-              client is matched to an email domain (via its QuickBooks billing email).
+              client is matched to an email domain (via its Salesforce customer contact
+              email — set the contact-email field on the Salesforce connector).
             </p>
           </Card>
         )}

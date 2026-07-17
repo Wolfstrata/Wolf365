@@ -120,6 +120,16 @@ export const salesforceConnector: ConnectorDefinition<
         "Wolf365 user who owns imported opportunities when the Salesforce owner's email doesn't match a Wolf365 user. Must be an existing Wolf365 user.",
     },
     {
+      key: "contactEmailField",
+      label: "Contact email field (optional)",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "Contact_Email__c",
+      helpText:
+        "Optional Salesforce field holding the customer contact's email. Its domain identifies the client for Microsoft 365 touchpoint matching on the My Clients page. Accepts a field on the Opportunity (e.g. Contact_Email__c) or a cross-object path (e.g. Account.Primary_Contact_Email__c). Left blank, touchpoints stay blank.",
+    },
+    {
       key: "amountField",
       label: "Amount field",
       type: "text",
@@ -231,6 +241,7 @@ export const salesforceConnector: ConnectorDefinition<
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
     const marginField = (ctx.config.marginField ?? "").trim();
     const termField = (ctx.config.termField ?? "").trim();
+    const contactEmailField = (ctx.config.contactEmailField ?? "").trim();
     // Default the Revenue Type field (used to route Product Income → Products)
     // when unset; an explicit empty value disables that routing.
     const revenueTypeField = (ctx.config.revenueTypeField ?? "Revenue_Type__c").trim();
@@ -244,6 +255,7 @@ export const salesforceConnector: ConnectorDefinition<
     assertFieldName(amountField, "Amount field");
     if (marginField) assertFieldName(marginField, "Margin field");
     if (termField) assertFieldName(termField, "Term field");
+    if (contactEmailField) assertFieldName(contactEmailField, "Contact email field");
     if (revenueTypeField) assertFieldName(revenueTypeField, "Revenue Type field");
     if (where) assertSoqlFilter(where);
 
@@ -265,6 +277,7 @@ export const salesforceConnector: ConnectorDefinition<
       amountField,
       ...(marginField ? [marginField] : []),
       ...(termField ? [termField] : []),
+      ...(contactEmailField ? [contactEmailField] : []),
       ...(revenueTypeField ? [revenueTypeField] : []),
     ];
     const soql =
@@ -330,6 +343,7 @@ export const salesforceConnector: ConnectorDefinition<
         line: recordLine,
         name,
         accountName: getStr(r, "Account.Name") ?? "(No account)",
+        contactEmail: contactEmailField ? getStr(r, contactEmailField) : null,
         monthlyAmount,
         monthlyMargin,
         amount: tcv,

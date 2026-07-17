@@ -879,6 +879,10 @@ model CrmOpportunity {
   forecastCategory CrmForecastCategory @default(PIPELINE)
   closeDate        DateTime
 
+  // Customer contact email (from Salesforce) — its domain identifies the client
+  // for Microsoft 365 touchpoint matching on the My Clients page.
+  contactEmail String?
+
   // Optional extras mirrored from the existing process.
   estimatedInvoiceDate DateTime?
   cashInDate           DateTime?
