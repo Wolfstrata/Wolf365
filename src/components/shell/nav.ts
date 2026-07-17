@@ -32,6 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Cash-Flow / DSO", href: "/cash-flow", icon: "Banknote", section: "Finance Workspace", permission: "billing:read" },
   { label: "Suppliers & Expenses / DSO", href: "/suppliers-dpo", icon: "Truck", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
+  { label: "My Clients", href: "/crm/my-clients", icon: "Contact", section: "CRM", permission: "crm:read" },
   { label: "Opportunity Reliability", href: "/crm/reliability", icon: "Award", section: "CRM", permission: "crm:read" },
   { label: "Products", href: "/crm/products", icon: "Package", section: "CRM", permission: "crm:read" },
   { label: "Managed Services", href: "/crm/managed-services", icon: "Wrench", section: "CRM", permission: "crm:read" },

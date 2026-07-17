@@ -33,6 +33,7 @@ import {
   Award,
   Banknote,
   Truck,
+  Contact,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ const ICONS: Record<string, LucideIcon> = {
   Award,
   Banknote,
   Truck,
+  Contact,
 };
 
 // Administration + Account are intentionally omitted — Administration items and
