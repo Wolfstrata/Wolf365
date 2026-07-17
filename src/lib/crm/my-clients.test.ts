@@ -38,14 +38,24 @@ describe("computeMyClients", () => {
     expect(acme.daysSinceLastPurchase).toBe(138);
   });
 
-  it("assumes 100% margin on Managed Services", () => {
+  it("uses the real synced margin, not a 100% Managed Services assumption", () => {
     const r = computeMyClients(
       [opp({ accountName: "MSP Co", line: "MANAGED_SERVICES", amount: 1200, marginAmount: 10 })],
       NOW,
     );
     const row = r.rows.find((x) => x.account === "MSP Co")!;
-    expect(row.grossMargin).toBe(1200); // full revenue, ignoring stored 10
-    expect(row.avgMarginPct).toBe(100);
+    expect(row.grossMargin).toBe(10); // real margin, not full revenue
+    expect(row.avgMarginPct).toBeCloseTo(0.8, 1); // 10 / 1200
+  });
+
+  it("reports $0 margin and a blank average when no margin was synced", () => {
+    const r = computeMyClients(
+      [opp({ accountName: "No Margin Co", line: "PRODUCTS", amount: 5000, marginAmount: null })],
+      NOW,
+    );
+    const row = r.rows.find((x) => x.account === "No Margin Co")!;
+    expect(row.grossMargin).toBe(0);
+    expect(row.avgMarginPct).toBeNull(); // unknown, not a fake 0%
   });
 
   it("computes YoY spend movers (expanding vs contracting) by fiscal year", () => {

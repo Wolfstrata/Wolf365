@@ -1,5 +1,5 @@
 import type { CrmLine, CrmStage } from "@prisma/client";
-import { effectiveMarginAmount, fiscalYearFor } from "./constants";
+import { fiscalYearFor } from "./constants";
 import type { SpendMover } from "@/lib/reports/dso";
 
 /**
@@ -9,8 +9,9 @@ import type { SpendMover } from "@/lib/reports/dso";
  * purchase, and year-over-year spend movement (expanding vs contracting).
  *
  * Callers map Prisma rows (Decimal money, Date) into plain numbers before calling
- * so this stays dependency-free. Margin is normalized here via
- * `effectiveMarginAmount` (100% on Managed Services), matching the rest of CRM.
+ * so this stays dependency-free. Margin is the REAL margin synced from Salesforce
+ * (no 100%-on-Managed-Services assumption) — this is a client profitability view,
+ * so accounts with no margin synced report $0 margin and a blank average.
  */
 export interface MyClientOppInput {
   accountName: string;
@@ -56,6 +57,8 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 interface Accum {
   currentRevenue: number;
   currentMargin: number;
+  /** Whether any current-FY deal carried a real (non-null) margin figure. */
+  currentMarginKnown: boolean;
   priorRevenue: number;
   totalSpend: number;
   lastPurchase: Date | null;
@@ -82,17 +85,22 @@ export function computeMyClients(
     if (o.stage !== "CLOSED_WON") continue;
     const account = o.accountName?.trim() || "Unknown account";
     const amount = o.amount || 0;
-    const margin = effectiveMarginAmount(o.line, amount, o.marginAmount);
+    // Real synced margin — do NOT assume 100% for Managed Services here.
+    const margin = o.marginAmount;
     const a =
       byAccount.get(account) ??
-      { currentRevenue: 0, currentMargin: 0, priorRevenue: 0, totalSpend: 0, lastPurchase: null };
+      {
+        currentRevenue: 0, currentMargin: 0, currentMarginKnown: false,
+        priorRevenue: 0, totalSpend: 0, lastPurchase: null,
+      };
     a.totalSpend += amount;
     if (!a.lastPurchase || o.closeDate.getTime() > a.lastPurchase.getTime()) {
       a.lastPurchase = o.closeDate;
     }
     if (inWindow(o.closeDate, fy)) {
       a.currentRevenue += amount;
-      a.currentMargin += margin;
+      a.currentMargin += margin ?? 0;
+      if (margin != null) a.currentMarginKnown = true;
     } else if (inWindow(o.closeDate, fyPrior)) {
       a.priorRevenue += amount;
     }
@@ -105,7 +113,7 @@ export function computeMyClients(
       grossRevenue: round2(a.currentRevenue),
       grossMargin: round2(a.currentMargin),
       avgMarginPct:
-        a.currentRevenue > 0
+        a.currentMarginKnown && a.currentRevenue > 0
           ? Math.round((a.currentMargin / a.currentRevenue) * 1000) / 10
           : null,
       totalSpend: round2(a.totalSpend),

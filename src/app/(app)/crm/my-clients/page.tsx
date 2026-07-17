@@ -7,6 +7,7 @@ import { getLastTouchpoints } from "@/lib/crm/touchpoints";
 import { domainOf } from "@/lib/crm/graph";
 import { SpendMoverTable } from "../../cash-flow/tables";
 import { MyClientsTable, type MyClientTableRow } from "./clients-table";
+import { RepPicker } from "./rep-picker";
 
 export const maxDuration = 120;
 
@@ -17,15 +18,42 @@ const DAY = 86_400_000;
  * movement (expanding vs contracting, reused from the Suppliers / DSO report) so
  * reps can see what their customers are doing, plus a roster of every client with
  * current-FY gross revenue/margin, average margin, lifetime spend, days since the
- * last purchase (from close dates) and days since the last touchpoint (email,
- * Teams message or calendar meeting — via Microsoft 365, pending integration).
- * Scoped to the signed-in user's owned opportunities.
+ * last purchase (from close dates) and days since the last touchpoint (email or
+ * calendar meeting via Microsoft 365). Scoped to the signed-in user's owned
+ * opportunities; administrators can "View as" any account manager.
  */
-export default async function MyClientsPage() {
+export default async function MyClientsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ rep?: string }>;
+}) {
   const user = await requirePermission("crm:read");
+  const isAdmin = user.role === "ADMINISTRATOR";
+
+  // Account managers = users who own opportunities. Admins may view any of them.
+  const reps = isAdmin
+    ? await (async () => {
+        const owners = await prisma.crmOpportunity.groupBy({ by: ["ownerId"] });
+        const users = await prisma.user.findMany({
+          where: { id: { in: owners.map((o) => o.ownerId) } },
+          select: { id: true, name: true, email: true },
+        });
+        return users
+          .map((u) => ({ id: u.id, email: u.email, label: u.name ?? u.email }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+      })()
+    : [];
+
+  const sp = await searchParams;
+  // Resolve whose clients to show: admins may pick a rep; everyone else is scoped
+  // to themselves. Fall back to self when the picked rep isn't valid.
+  const picked = isAdmin && sp.rep ? reps.find((r) => r.id === sp.rep) : undefined;
+  const viewingId = picked?.id ?? user.id;
+  const viewingEmail = picked?.email ?? user.email ?? "";
+  const viewingName = picked?.label ?? null;
 
   const opps = await prisma.crmOpportunity.findMany({
-    where: { ownerId: user.id, stage: "CLOSED_WON" },
+    where: { ownerId: viewingId, stage: "CLOSED_WON" },
     select: {
       accountName: true,
       contactEmail: true,
@@ -66,9 +94,9 @@ export default async function MyClientsPage() {
     if (doms && doms.size) accountDomains.set(r.account, [...doms]);
   }
 
-  // Last-touchpoint recency per account (Microsoft Graph — the rep's mailbox).
+  // Last-touchpoint recency per account (Microsoft Graph — the viewed rep's mailbox).
   const { live: touchpointsLive, touchpoints } = await getLastTouchpoints(
-    user.email ?? "",
+    viewingEmail,
     accountDomains,
   );
   const tableRows: MyClientTableRow[] = report.rows.map((r) => {
@@ -84,17 +112,26 @@ export default async function MyClientsPage() {
     };
   });
 
-  const description = `Your accounts — ${report.fyLabel} gross figures, lifetime spend and purchase/touchpoint recency.`;
+  const whose = viewingName ? `${viewingName}'s accounts` : "Your accounts";
+  const description = `${whose} — ${report.fyLabel} gross figures, lifetime spend and purchase/touchpoint recency.`;
+  const picker = isAdmin && reps.length > 0 && (
+    <RepPicker reps={reps} selected={viewingId} />
+  );
 
   if (!report.hasData) {
     return (
       <div>
         <PageHeader title="My Clients" description={description} />
         <div className="space-y-6 p-4 sm:p-8">
+          {picker}
           <EmptyState
             icon={<Contact className="h-8 w-8" />}
             title="No clients yet"
-            description="Once you have Closed Won opportunities, your clients — and how their spend is trending year over year — will show up here."
+            description={
+              viewingName
+                ? `${viewingName} has no Closed Won opportunities yet.`
+                : "Once you have Closed Won opportunities, your clients — and how their spend is trending year over year — will show up here."
+            }
           />
         </div>
       </div>
@@ -107,6 +144,7 @@ export default async function MyClientsPage() {
     <div>
       <PageHeader title="My Clients" description={description} />
       <div className="space-y-6 p-4 sm:p-8">
+        {picker}
         <section>
           <h2 className="mb-1 text-sm font-semibold">
             Year-over-year spend movers: {report.compareYear} vs {report.priorYear}
