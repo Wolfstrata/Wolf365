@@ -102,6 +102,7 @@ export function resolveDateWindow(
  */
 export async function getCashFlowReport(
   window?: DateWindow,
+  limit = 10,
 ): Promise<CashFlowReport | null> {
   try {
     const invoiceWhere: Prisma.QboInvoiceWhereInput = {};
@@ -146,7 +147,7 @@ export async function getCashFlowReport(
       return { txnDate: p.txnDate, lines };
     });
 
-    return computeCashFlowReport(inv, pay);
+    return computeCashFlowReport(inv, pay, limit);
   } catch {
     // Tables not present yet (migration pending) — treat as "not set up".
     return null;

@@ -1,52 +1,23 @@
 import Link from "next/link";
-import { Banknote, TrendingUp } from "lucide-react";
+import { Banknote, TrendingUp, ArrowRight } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState, StatItem } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { getCashFlowReport, resolveDateWindow } from "@/lib/reports/cash-flow";
-import type { CustomerRow } from "@/lib/reports/dso";
 import { RangeBar } from "./range-bar";
+import {
+  CustomerTable,
+  FollowUpTable,
+  TierTable,
+  MoverTable,
+  SpendMoverTable,
+  num,
+} from "./tables";
 
 export const maxDuration = 120;
 
-const num = (n: number) => Math.round(n).toLocaleString("en-US");
 const dsoTone = (dso: number) =>
   dso <= 45 ? "text-success" : dso <= 60 ? "text-warning" : "text-danger";
-
-function CustomerTable({
-  rows,
-  columns,
-}: {
-  rows: CustomerRow[];
-  columns: { key: string; label: string; render: (r: CustomerRow) => React.ReactNode; right?: boolean }[];
-}) {
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-          <tr>
-            {columns.map((c) => (
-              <th key={c.key} className={`px-4 py-2 font-medium ${c.right ? "text-right" : ""}`}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.customerId} className="border-t">
-              {columns.map((c) => (
-                <td key={c.key} className={`px-4 py-2 ${c.right ? "text-right tabular-nums" : ""}`}>
-                  {c.render(r)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 const AR_PLAN: { action: string; owner: string; timing: string; impact: string }[] = [
   { action: "Turn on automated invoice reminders", owner: "Finance/Admin", timing: "Week 1", impact: "Stops routine follow-up from being manual and inconsistent." },
@@ -59,7 +30,8 @@ const AR_PLAN: { action: string; owner: string; timing: string; impact: string }
 /**
  * Cash-Flow / DSO report — customer payment behaviour, DSO, revenue quality and
  * cash-flow risk built from synced QuickBooks invoices + received payments.
- * Finance users and administrators only (billing:read).
+ * Finance users and administrators only (billing:read). Each table links to a
+ * full-list screen (/cash-flow/<table>).
  */
 export default async function CashFlowPage({
   searchParams,
@@ -73,6 +45,30 @@ export default async function CashFlowPage({
   const report = await getCashFlowReport(window);
 
   const rangeBar = <RangeBar range={range} from={sp.from} to={sp.to} />;
+
+  // Preserve the active range when linking to a full-table screen.
+  const qs = new URLSearchParams();
+  if (sp.range) qs.set("range", sp.range);
+  if (sp.from) qs.set("from", sp.from);
+  if (sp.to) qs.set("to", sp.to);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  const viewAll = (table: string) => `/cash-flow/${table}${suffix}`;
+
+  function SectionHead({ title, table }: { title: string; table?: string }) {
+    return (
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {table && (
+          <Link
+            href={viewAll(table)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            View all <ArrowRight className="h-3 w-3" />
+          </Link>
+        )}
+      </div>
+    );
+  }
 
   if (!report) {
     return (
@@ -127,9 +123,7 @@ export default async function CashFlowPage({
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Card>
             <p className="text-sm text-muted-foreground">Real collection DSO</p>
-            <p className={`mt-2 text-2xl font-semibold tabular-nums ${dsoTone(k.realDso)}`}>
-              {k.realDso} days
-            </p>
+            <p className={`mt-2 text-2xl font-semibold tabular-nums ${dsoTone(k.realDso)}`}>{k.realDso} days</p>
             <p className="mt-1 text-xs text-muted-foreground">Cash-weighted invoice-to-cash</p>
           </Card>
           <Card>
@@ -139,9 +133,7 @@ export default async function CashFlowPage({
           </Card>
           <Card>
             <p className="text-sm text-muted-foreground">Customers early / on-time</p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {k.customersEarlyOnTime}/{k.customers}
-            </p>
+            <p className="mt-2 text-2xl font-semibold tabular-nums">{k.customersEarlyOnTime}/{k.customers}</p>
             <p className="mt-1 text-xs text-muted-foreground">{k.pctCustomersEarlyOnTime}% of customers</p>
           </Card>
           <Card>
@@ -155,250 +147,78 @@ export default async function CashFlowPage({
             <StatItem label="Avg days late vs terms" value={`${k.avgDaysLate} days`} />
             <StatItem label="Cash matched" value={formatCurrency(k.totalCashMatched)} />
             <StatItem label="Customers" value={k.customers} />
-            <StatItem
-              label="Late-tail customers"
-              value={k.customers - k.customersEarlyOnTime}
-            />
+            <StatItem label="Late-tail customers" value={k.customers - k.customersEarlyOnTime} />
           </div>
         </Card>
 
-        {/* Tier mix */}
         <section>
-          <h2 className="mb-3 text-sm font-semibold">Customer payment tiers</h2>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Tier</th>
-                  <th className="px-4 py-2 text-right font-medium">Customers</th>
-                  <th className="px-4 py-2 text-right font-medium">%</th>
-                  <th className="px-4 py-2 text-right font-medium">Cash received</th>
-                  <th className="px-4 py-2 text-right font-medium">Drag ($-days)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.tiers.map((t) => (
-                  <tr key={t.tier} className="border-t">
-                    <td className="px-4 py-2">{t.tier}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{t.customers}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{t.pctCustomers}%</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(t.cashReceived)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{num(t.drag)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SectionHead title="Customer payment tiers" table="tiers" />
+          <TierTable tiers={report.tiers} />
         </section>
 
-        {/* Late-payment follow-up priority */}
         <section>
-          <h2 className="mb-1 text-sm font-semibold">Top customers to follow up with (late payments)</h2>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Ranked by a priority score = dollars paid more than 30 days late ×
-            days over 30. Large ($10k+) and very-late accounts rise to the top.
+          <SectionHead title="Top customers to follow up with (late payments)" table="follow-up" />
+          <p className="mb-3 -mt-1 text-xs text-muted-foreground">
+            Ranked by a priority score = dollars paid more than 30 days late × days over 30.
+            Large ($10k+) and very-late accounts rise to the top.
           </p>
           {report.followUp.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No customers paid more than 30 days late in this range — nothing to chase.
-            </p>
+            <p className="text-sm text-muted-foreground">No customers paid more than 30 days late in this range — nothing to chase.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-2 font-medium">#</th>
-                    <th className="px-4 py-2 font-medium">Customer</th>
-                    <th className="px-4 py-2 text-right font-medium">Late amount (&gt;30d)</th>
-                    <th className="px-4 py-2 text-right font-medium">Max days late</th>
-                    <th className="px-4 py-2 text-right font-medium">Avg days late</th>
-                    <th className="px-4 py-2 text-right font-medium">Priority score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.followUp.map((r, i) => (
-                    <tr key={r.customerId} className={`border-t ${r.large ? "bg-danger/5" : ""}`}>
-                      <td className="px-4 py-2 tabular-nums">{i + 1}</td>
-                      <td className="px-4 py-2 font-medium">
-                        {r.customer}
-                        {r.large && (
-                          <span className="ml-2 rounded-full bg-danger/15 px-2 py-0.5 text-xs font-medium text-danger">
-                            $10k+
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(r.lateAmount)}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{r.maxDaysLate}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{r.avgDaysLate ?? "—"}</td>
-                      <td className="px-4 py-2 text-right font-semibold tabular-nums">{num(r.score)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <FollowUpTable rows={report.followUp} />
           )}
         </section>
 
-        {/* Top revenue */}
         <section>
-          <h2 className="mb-3 text-sm font-semibold">Revenue concentration — top customers by cash received</h2>
-          <CustomerTable
-            rows={report.topRevenue}
-            columns={[
-              { key: "customer", label: "Customer", render: (r) => r.customer },
-              { key: "cash", label: "Cash received", right: true, render: (r) => formatCurrency(r.cashReceived) },
-              { key: "dso", label: "DSO", right: true, render: (r) => (r.dso ?? "—") },
-              { key: "late", label: "Avg days late", right: true, render: (r) => (r.avgDaysLate ?? "—") },
-              { key: "tier", label: "Tier", render: (r) => r.tier },
-            ]}
-          />
+          <SectionHead title="Revenue concentration — top customers by cash received" table="revenue" />
+          <CustomerTable rows={report.topRevenue} variant="revenue" />
         </section>
 
-        {/* Cash-flow drag ranking */}
         <section>
-          <h2 className="mb-3 text-sm font-semibold">Who is hurting cash flow the most (drag $-days)</h2>
+          <SectionHead title="Who is hurting cash flow the most (drag $-days)" table="drag" />
           {report.topDrag.length === 0 ? (
             <p className="text-sm text-muted-foreground">No overdue dollar-days — everyone paid on time.</p>
           ) : (
-            <CustomerTable
-              rows={report.topDrag}
-              columns={[
-                { key: "customer", label: "Customer", render: (r) => r.customer },
-                { key: "cash", label: "Cash received", right: true, render: (r) => formatCurrency(r.cashReceived) },
-                { key: "late", label: "Avg days late", right: true, render: (r) => (r.avgDaysLate ?? "—") },
-                { key: "drag", label: "Drag ($-days)", right: true, render: (r) => num(r.drag) },
-              ]}
-            />
+            <CustomerTable rows={report.topDrag} variant="drag" />
           )}
         </section>
 
-        {/* Worst late / best reliable */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section>
-            <h2 className="mb-3 text-sm font-semibold">Worst repeat late payers</h2>
-            <CustomerTable
-              rows={report.worstLate}
-              columns={[
-                { key: "customer", label: "Customer", render: (r) => r.customer },
-                { key: "cash", label: "Revenue", right: true, render: (r) => formatCurrency(r.cashReceived) },
-                { key: "late", label: "Avg late", right: true, render: (r) => (r.avgDaysLate ?? "—") },
-              ]}
-            />
+            <SectionHead title="Worst repeat late payers" table="worst-late" />
+            <CustomerTable rows={report.worstLate} variant="worst" />
           </section>
           <section>
-            <h2 className="mb-3 text-sm font-semibold">Best reliable revenue accounts</h2>
-            <CustomerTable
-              rows={report.bestReliable}
-              columns={[
-                { key: "customer", label: "Customer", render: (r) => r.customer },
-                { key: "cash", label: "Revenue", right: true, render: (r) => formatCurrency(r.cashReceived) },
-                { key: "ontime", label: "On-time $", right: true, render: (r) => (r.onTimeCashPct != null ? `${r.onTimeCashPct}%` : "—") },
-              ]}
-            />
+            <SectionHead title="Best reliable revenue accounts" table="best-reliable" />
+            <CustomerTable rows={report.bestReliable} variant="best" />
           </section>
         </div>
 
-        {/* YoY movers */}
         {report.compareYear && report.priorYear && (
           <>
             <section>
-              <h2 className="mb-1 text-sm font-semibold">
-                Year-over-year payment movers: {report.compareYear} vs {report.priorYear}
-              </h2>
-              <p className="mb-3 text-xs text-muted-foreground">
+              <SectionHead
+                title={`Year-over-year payment movers: ${report.compareYear} vs ${report.priorYear}`}
+                table="payment-movers"
+              />
+              <p className="mb-3 -mt-1 text-xs text-muted-foreground">
                 Change in cash-weighted average days late by invoice-year cohort. Negative = paid faster (good).
               </p>
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-2 font-medium">Improved</th>
-                        <th className="px-4 py-2 text-right font-medium">{report.priorYear}</th>
-                        <th className="px-4 py-2 text-right font-medium">{report.compareYear}</th>
-                        <th className="px-4 py-2 text-right font-medium">Change</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.paymentMovers.improved.map((m) => (
-                        <tr key={m.customer} className="border-t">
-                          <td className="px-4 py-2">{m.customer}</td>
-                          <td className="px-4 py-2 text-right tabular-nums">{m.prior}</td>
-                          <td className="px-4 py-2 text-right tabular-nums">{m.current}</td>
-                          <td className="px-4 py-2 text-right tabular-nums text-success">{m.change}</td>
-                        </tr>
-                      ))}
-                      {report.paymentMovers.improved.length === 0 && (
-                        <tr className="border-t"><td className="px-4 py-2 text-muted-foreground" colSpan={4}>None</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-2 font-medium">Worsened</th>
-                        <th className="px-4 py-2 text-right font-medium">{report.priorYear}</th>
-                        <th className="px-4 py-2 text-right font-medium">{report.compareYear}</th>
-                        <th className="px-4 py-2 text-right font-medium">Change</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.paymentMovers.worsened.map((m) => (
-                        <tr key={m.customer} className="border-t">
-                          <td className="px-4 py-2">{m.customer}</td>
-                          <td className="px-4 py-2 text-right tabular-nums">{m.prior}</td>
-                          <td className="px-4 py-2 text-right tabular-nums">{m.current}</td>
-                          <td className="px-4 py-2 text-right tabular-nums text-danger">+{m.change}</td>
-                        </tr>
-                      ))}
-                      {report.paymentMovers.worsened.length === 0 && (
-                        <tr className="border-t"><td className="px-4 py-2 text-muted-foreground" colSpan={4}>None</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                <MoverTable rows={report.paymentMovers.improved} priorYear={report.priorYear} compareYear={report.compareYear} kind="improved" />
+                <MoverTable rows={report.paymentMovers.worsened} priorYear={report.priorYear} compareYear={report.compareYear} kind="worsened" />
               </div>
             </section>
 
             <section>
-              <h2 className="mb-1 text-sm font-semibold">
-                Year-over-year spend movers: {report.compareYear} vs {report.priorYear}
-              </h2>
-              <p className="mb-3 text-xs text-muted-foreground">Invoiced revenue by calendar year.</p>
+              <SectionHead
+                title={`Year-over-year spend movers: ${report.compareYear} vs ${report.priorYear}`}
+                table="spend-movers"
+              />
+              <p className="mb-3 -mt-1 text-xs text-muted-foreground">Invoiced revenue by calendar year.</p>
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                {(["up", "down"] as const).map((dir) => (
-                  <div key={dir} className="overflow-x-auto rounded-lg border">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-                        <tr>
-                          <th className="px-4 py-2 font-medium">{dir === "up" ? "Expanding" : "Contracting"}</th>
-                          <th className="px-4 py-2 text-right font-medium">{report.priorYear}</th>
-                          <th className="px-4 py-2 text-right font-medium">{report.compareYear}</th>
-                          <th className="px-4 py-2 text-right font-medium">Change</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {report.spendMovers[dir].map((s) => (
-                          <tr key={s.customer} className="border-t">
-                            <td className="px-4 py-2">{s.customer}</td>
-                            <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(s.spendPrior)}</td>
-                            <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(s.spendCurrent)}</td>
-                            <td className={`px-4 py-2 text-right tabular-nums ${dir === "up" ? "text-success" : "text-danger"}`}>
-                              {s.change > 0 ? "+" : ""}
-                              {formatCurrency(s.change)}
-                              {s.pctChange != null ? ` (${s.pctChange > 0 ? "+" : ""}${s.pctChange}%)` : ""}
-                            </td>
-                          </tr>
-                        ))}
-                        {report.spendMovers[dir].length === 0 && (
-                          <tr className="border-t"><td className="px-4 py-2 text-muted-foreground" colSpan={4}>None</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
+                <SpendMoverTable rows={report.spendMovers.up} priorYear={report.priorYear} compareYear={report.compareYear} kind="up" />
+                <SpendMoverTable rows={report.spendMovers.down} priorYear={report.priorYear} compareYear={report.compareYear} kind="down" />
               </div>
             </section>
           </>
