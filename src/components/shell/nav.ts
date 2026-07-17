@@ -27,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
   { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
+  { label: "Cash-Flow / DSO", href: "/cash-flow", icon: "Banknote", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
   { label: "Opportunity Reliability", href: "/crm/reliability", icon: "Award", section: "CRM", permission: "crm:read" },
   { label: "Products", href: "/crm/products", icon: "Package", section: "CRM", permission: "crm:read" },

@@ -190,6 +190,66 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       itemStart += pageSize;
     }
 
+    // --- Invoices (for the Cash-Flow / DSO report) -------------------------
+    // Each invoice carries its own date, so a full pull supports both annual and
+    // monthly rollups in the report. Best-effort: never fail a customer/item sync.
+    try {
+      let invStart = 1;
+      for (;;) {
+        const query = encodeURIComponent(
+          `select * from Invoice startposition ${invStart} maxresults ${pageSize}`,
+        );
+        const res = await qboGet(
+          ctx,
+          `/v3/company/${realmId}/query?query=${query}`,
+          "sync_invoices",
+        );
+        if (!res.ok) break;
+        const invoices =
+          (res.json as { QueryResponse?: { Invoice?: QboInvoiceRaw[] } })?.QueryResponse
+            ?.Invoice ?? [];
+        if (invoices.length === 0) break;
+        for (const inv of invoices) {
+          const result = await upsertQboInvoice(realmId, inv);
+          if (result === "created") imported += 1;
+          else updated += 1;
+        }
+        if (invoices.length < pageSize) break;
+        invStart += pageSize;
+      }
+    } catch {
+      /* invoices best-effort */
+    }
+
+    // --- Received payments (with per-invoice allocations) ------------------
+    try {
+      let payStart = 1;
+      for (;;) {
+        const query = encodeURIComponent(
+          `select * from Payment startposition ${payStart} maxresults ${pageSize}`,
+        );
+        const res = await qboGet(
+          ctx,
+          `/v3/company/${realmId}/query?query=${query}`,
+          "sync_payments",
+        );
+        if (!res.ok) break;
+        const payments =
+          (res.json as { QueryResponse?: { Payment?: QboPaymentRaw[] } })?.QueryResponse
+            ?.Payment ?? [];
+        if (payments.length === 0) break;
+        for (const p of payments) {
+          const result = await upsertQboPayment(realmId, p);
+          if (result === "created") imported += 1;
+          else updated += 1;
+        }
+        if (payments.length < pageSize) break;
+        payStart += pageSize;
+      }
+    } catch {
+      /* payments best-effort */
+    }
+
     // --- Learn SKU → item mappings from invoice history --------------------
     // The invoice history records which QBO item each product was billed under,
     // so we auto-fill mappings for still-unmapped TD SYNNEX SKUs. Best-effort:
@@ -254,6 +314,102 @@ async function upsertQboItem(
     return "updated";
   }
   await prisma.qboItem.create({ data: { qboId: it.Id, ...data } });
+  return "created";
+}
+
+/** QBO dates are 'YYYY-MM-DD'; store as UTC midnight to avoid tz drift. */
+function parseQboDate(s: string | undefined): Date | null {
+  if (!s) return null;
+  const d = new Date(`${s}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+interface QboRef {
+  value?: string;
+  name?: string;
+}
+
+interface QboInvoiceRaw {
+  Id: string;
+  DocNumber?: string;
+  TxnDate?: string;
+  DueDate?: string;
+  TotalAmt?: number;
+  Balance?: number;
+  CustomerRef?: QboRef;
+  CurrencyRef?: QboRef;
+  SalesTermRef?: QboRef;
+}
+
+async function upsertQboInvoice(
+  realmId: string,
+  inv: QboInvoiceRaw,
+): Promise<"created" | "updated"> {
+  const data = {
+    realmId,
+    customerRef: inv.CustomerRef?.value ?? null,
+    customerName: inv.CustomerRef?.name ?? null,
+    docNumber: inv.DocNumber ?? null,
+    txnDate: parseQboDate(inv.TxnDate) ?? new Date(),
+    dueDate: parseQboDate(inv.DueDate),
+    totalAmount: inv.TotalAmt ?? 0,
+    balance: inv.Balance ?? 0,
+    currency: inv.CurrencyRef?.value ?? null,
+    termName: inv.SalesTermRef?.name ?? null,
+    raw: inv as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  const existing = await prisma.qboInvoice.findUnique({ where: { qboId: inv.Id } });
+  if (existing) {
+    await prisma.qboInvoice.update({ where: { qboId: inv.Id }, data });
+    return "updated";
+  }
+  await prisma.qboInvoice.create({ data: { qboId: inv.Id, ...data } });
+  return "created";
+}
+
+interface QboPaymentRaw {
+  Id: string;
+  TxnDate?: string;
+  TotalAmt?: number;
+  CustomerRef?: QboRef;
+  CurrencyRef?: QboRef;
+  Line?: Array<{
+    Amount?: number;
+    LinkedTxn?: Array<{ TxnId?: string; TxnType?: string }>;
+  }>;
+}
+
+async function upsertQboPayment(
+  realmId: string,
+  p: QboPaymentRaw,
+): Promise<"created" | "updated"> {
+  // Per-invoice allocations — enables cash-weighted days-late / DSO math.
+  const lines: { invoiceId: string; amount: number }[] = [];
+  for (const ln of p.Line ?? []) {
+    for (const lt of ln.LinkedTxn ?? []) {
+      if (lt.TxnType === "Invoice" && lt.TxnId) {
+        lines.push({ invoiceId: lt.TxnId, amount: ln.Amount ?? 0 });
+      }
+    }
+  }
+  const data = {
+    realmId,
+    customerRef: p.CustomerRef?.value ?? null,
+    customerName: p.CustomerRef?.name ?? null,
+    txnDate: parseQboDate(p.TxnDate) ?? new Date(),
+    totalAmount: p.TotalAmt ?? 0,
+    currency: p.CurrencyRef?.value ?? null,
+    lines: lines as unknown as Prisma.InputJsonValue,
+    raw: p as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  const existing = await prisma.qboPayment.findUnique({ where: { qboId: p.Id } });
+  if (existing) {
+    await prisma.qboPayment.update({ where: { qboId: p.Id }, data });
+    return "updated";
+  }
+  await prisma.qboPayment.create({ data: { qboId: p.Id, ...data } });
   return "created";
 }
 

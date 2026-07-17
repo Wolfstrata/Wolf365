@@ -368,6 +368,48 @@ model QboItem {
   @@index([name])
 }
 
+// QuickBooks Online invoice snapshot — powers the Cash-Flow / DSO report.
+model QboInvoice {
+  id           String    @id @default(cuid())
+  qboId        String    @unique
+  realmId      String
+  customerRef  String? // QBO customer Id
+  customerName String?
+  docNumber    String?
+  txnDate      DateTime // invoice date
+  dueDate      DateTime?
+  totalAmount  Decimal   @default(0) @db.Decimal(18, 2)
+  balance      Decimal   @default(0) @db.Decimal(18, 2)
+  currency     String?
+  termName     String?
+  raw          Json?
+  lastSyncedAt DateTime  @default(now())
+
+  @@index([realmId])
+  @@index([customerRef])
+  @@index([txnDate])
+}
+
+// QuickBooks Online received-payment snapshot, with per-invoice allocations
+// (LinkedTxn) kept in `lines` for cash-weighted DSO / days-late math.
+model QboPayment {
+  id           String   @id @default(cuid())
+  qboId        String   @unique
+  realmId      String
+  customerRef  String?
+  customerName String?
+  txnDate      DateTime // payment date
+  totalAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  currency     String?
+  lines        Json? // [{ invoiceId, amount }]
+  raw          Json?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([realmId])
+  @@index([customerRef])
+  @@index([txnDate])
+}
+
 // TD SYNNEX StreamOne Stellr customer/account snapshot.
 model TdSynnexCustomer {
   id            String  @id @default(cuid())

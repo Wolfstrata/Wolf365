@@ -31,6 +31,7 @@ import {
   Archive,
   Package,
   Award,
+  Banknote,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -65,15 +66,16 @@ const ICONS: Record<string, LucideIcon> = {
   Archive,
   Package,
   Award,
+  Banknote,
 };
 
 // Administration + Account are intentionally omitted — Administration items and
 // Settings are surfaced through the account menu in the sidebar footer instead.
 const SECTION_ORDER = [
   "Finance Workspace",
-  "Connector Data",
   "CRM",
   "Reconciliation",
+  "Connector Data",
 ] as const;
 
 /**
