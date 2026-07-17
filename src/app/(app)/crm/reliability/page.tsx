@@ -9,6 +9,13 @@ import { fiscalYearFor } from "@/lib/crm/constants";
 const CURRENT_FY_WEIGHT = 2;
 
 /**
+ * Minimum opportunities for a rep to be ranked on merit. Reps below this are
+ * pushed beneath everyone who meets it — a high rating on a tiny sample isn't
+ * comparable — and flagged as a small sample.
+ */
+const MIN_OPPORTUNITIES = 100;
+
+/**
  * Opportunity Reliability leaderboard. For each sales rep, the reliability
  * rating is the percentage of the opportunities they entered that ultimately
  * moved from open pipeline to Closed Won. ALL dates are included, but
@@ -85,9 +92,11 @@ export default async function OpportunityReliabilityPage() {
         ...t,
       };
     })
-    // Most reliable first; break ties by more wins, then name.
+    // Reps with a full sample (≥100 opportunities) rank above everyone below the
+    // threshold; within each group, most reliable first, then more wins, then name.
     .sort(
       (a, b) =>
+        Number(b.total >= MIN_OPPORTUNITIES) - Number(a.total >= MIN_OPPORTUNITIES) ||
         b.reliability - a.reliability ||
         b.won - a.won ||
         a.rep.localeCompare(b.rep),
@@ -99,7 +108,7 @@ export default async function OpportunityReliabilityPage() {
     <div>
       <PageHeader
         title="Opportunity Reliability"
-        description={`How reliably each rep's entered opportunities convert to Closed Won — the share of every opportunity they created that ended up won. All dates count, with ${fy.label} weighted ${CURRENT_FY_WEIGHT}×. Ranked best to worst.`}
+        description={`How reliably each rep's entered opportunities convert to Closed Won — the share of every opportunity they created that ended up won. All dates count, with ${fy.label} weighted ${CURRENT_FY_WEIGHT}×. Reps with fewer than ${MIN_OPPORTUNITIES} opportunities rank below full-sample reps. Ranked best to worst.`}
       />
       <div className="space-y-6 p-4 sm:p-8">
         {ranked.length === 0 ? (
@@ -133,7 +142,17 @@ export default async function OpportunityReliabilityPage() {
                         <td className="px-3 py-2 font-medium tabular-nums">
                           {MEDALS[rank] ?? rank}
                         </td>
-                        <td className="px-3 py-2 font-medium">{r.rep}</td>
+                        <td className="px-3 py-2 font-medium">
+                          {r.rep}
+                          {r.total < MIN_OPPORTUNITIES && (
+                            <span
+                              className="ml-2 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning"
+                              title={`Fewer than ${MIN_OPPORTUNITIES} opportunities — ranked below full-sample reps`}
+                            >
+                              small sample
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right font-semibold tabular-nums">
                           {r.reliability.toFixed(1)}%
                         </td>
@@ -155,9 +174,10 @@ export default async function OpportunityReliabilityPage() {
               Reliability = Closed Won ÷ total opportunities entered (open deals count
               against it since they haven&apos;t converted yet), with {fy.label}{" "}
               opportunities weighted {CURRENT_FY_WEIGHT}× so recent performance carries
-              more. Win rate = Closed Won ÷ (Closed Won + Closed Lost). Watch
-              &ldquo;Total entered&rdquo; — a high rating on very few opportunities is a
-              small sample.
+              more. Win rate = Closed Won ÷ (Closed Won + Closed Lost). Reps with
+              fewer than {MIN_OPPORTUNITIES} opportunities entered are flagged
+              &ldquo;small sample&rdquo; and ranked below everyone at or above the
+              threshold, since a high rating on very few opportunities isn&apos;t comparable.
             </p>
           </Card>
         )}
