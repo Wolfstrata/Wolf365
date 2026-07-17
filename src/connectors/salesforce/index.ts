@@ -323,9 +323,20 @@ export const salesforceConnector: ConnectorDefinition<
         continue;
       }
 
-      const termYears = termField
-        ? clampTerm(Number(getNum(r, termField) ?? defaultTerm))
-        : defaultTerm;
+      const existing = await prisma.crmOpportunity.findUnique({
+        where: { sourceSystem_externalId: { sourceSystem: "salesforce", externalId } },
+        select: { id: true, lockedFields: true, termYears: true },
+      });
+
+      // Term: use the Salesforce value when a term field is configured AND the
+      // record actually has one; otherwise DON'T clobber an existing opportunity's
+      // term (a user may have set it in Wolf365) — only fall back to the default
+      // for brand-new records.
+      const sfTerm = termField ? getNum(r, termField) : null;
+      const termYears =
+        sfTerm != null
+          ? clampTerm(sfTerm)
+          : existing?.termYears ?? defaultTerm;
 
       // Route to a line. "Product Income" (by Revenue Type) always goes to
       // Products; everything else routes by name keyword (NOC / 365), falling
@@ -394,10 +405,6 @@ export const salesforceConnector: ConnectorDefinition<
         description: getStr(r, "Description"),
       };
 
-      const existing = await prisma.crmOpportunity.findUnique({
-        where: { sourceSystem_externalId: { sourceSystem: "salesforce", externalId } },
-        select: { id: true, lockedFields: true },
-      });
       if (existing) {
         // Field-level protection: don't overwrite columns the user locked/edited
         // in Wolf365; update everything else.
