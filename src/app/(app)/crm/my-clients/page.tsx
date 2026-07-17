@@ -1,125 +1,55 @@
-import { Contact } from "lucide-react";
-import { prisma } from "@/lib/db";
+import Link from "next/link";
+import { Contact, ArrowRight } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { computeMyClients, type MyClientOppInput } from "@/lib/crm/my-clients";
-import { getLastTouchpoints } from "@/lib/crm/touchpoints";
-import { domainOf } from "@/lib/crm/graph";
-import { SpendMoverTable } from "../../cash-flow/tables";
-import { MyClientsTable, type MyClientTableRow } from "./clients-table";
+import { loadMyClientsView } from "./data";
+import { MoversTable } from "./movers-table";
+import { MyClientsTable } from "./clients-table";
 import { RepPicker } from "./rep-picker";
 
 export const maxDuration = 120;
 
-const DAY = 86_400_000;
-
 /**
- * My Clients — a per-rep view of their own accounts. Shows year-over-year spend
- * movement (expanding vs contracting, reused from the Suppliers / DSO report) so
- * reps can see what their customers are doing, plus a roster of every client with
- * current-FY gross revenue/margin, average margin, lifetime spend, days since the
- * last purchase (from close dates) and days since the last touchpoint (email or
- * calendar meeting via Microsoft 365). Scoped to the signed-in user's owned
- * opportunities; administrators can "View as" any account manager.
+ * My Clients — a per-rep view of their own accounts. Year-over-year spend movement
+ * (expanding vs contracting) plus a roster of every client with current-FY gross
+ * revenue/margin, average margin, lifetime spend, days since last purchase and
+ * days since last touchpoint. Each table sorts by its headers and has a full-list
+ * "View all" screen. Administrators/Power Users can "View as" any account manager.
  */
 export default async function MyClientsPage({
   searchParams,
 }: {
   searchParams: Promise<{ rep?: string }>;
 }) {
-  const user = await requirePermission("crm:read");
-  // Administrators and Power Users may view any account manager's clients.
-  const isAdmin = user.role === "ADMINISTRATOR" || user.role === "POWER_USER";
-
-  // Account managers = users who own opportunities. Admins may view any of them.
-  const reps = isAdmin
-    ? await (async () => {
-        const owners = await prisma.crmOpportunity.groupBy({ by: ["ownerId"] });
-        const users = await prisma.user.findMany({
-          where: { id: { in: owners.map((o) => o.ownerId) } },
-          select: { id: true, name: true, email: true },
-        });
-        return users
-          .map((u) => ({ id: u.id, email: u.email, label: u.name ?? u.email }))
-          .sort((a, b) => a.label.localeCompare(b.label));
-      })()
-    : [];
-
+  await requirePermission("crm:read");
   const sp = await searchParams;
-  // Resolve whose clients to show: admins may pick a rep; everyone else is scoped
-  // to themselves. Fall back to self when the picked rep isn't valid.
-  const picked = isAdmin && sp.rep ? reps.find((r) => r.id === sp.rep) : undefined;
-  const viewingId = picked?.id ?? user.id;
-  const viewingEmail = picked?.email ?? user.email ?? "";
-  const viewingName = picked?.label ?? null;
+  const v = await loadMyClientsView(sp.rep);
 
-  const opps = await prisma.crmOpportunity.findMany({
-    where: { ownerId: viewingId, stage: "CLOSED_WON" },
-    select: {
-      accountName: true,
-      contactEmail: true,
-      line: true,
-      stage: true,
-      amount: true,
-      marginAmount: true,
-      closeDate: true,
-    },
-  });
-
-  const inputs: MyClientOppInput[] = opps.map((o) => ({
-    accountName: o.accountName,
-    line: o.line,
-    stage: o.stage,
-    amount: o.amount != null ? Number(o.amount) : 0,
-    marginAmount: o.marginAmount != null ? Number(o.marginAmount) : null,
-    closeDate: o.closeDate,
-  }));
-
-  const now = new Date();
-  const report = computeMyClients(inputs, now);
-
-  // Resolve each account to its email domain(s) from the Salesforce customer
-  // contact email on the account's opportunities, so Microsoft 365 touchpoints
-  // can be attributed. (Contact email — who we talk to — not the QBO billing
-  // email, which is just where invoices go.)
-  const domainsByAccount = new Map<string, Set<string>>();
-  for (const o of opps) {
-    const dom = domainOf(o.contactEmail);
-    if (!dom) continue;
-    const account = o.accountName?.trim() || "Unknown account";
-    (domainsByAccount.get(account) ?? domainsByAccount.set(account, new Set()).get(account)!).add(dom);
-  }
-  const accountDomains = new Map<string, string[]>();
-  for (const r of report.rows) {
-    const doms = domainsByAccount.get(r.account);
-    if (doms && doms.size) accountDomains.set(r.account, [...doms]);
-  }
-
-  // Last-touchpoint recency per account (Microsoft Graph — the viewed rep's mailbox).
-  const { live: touchpointsLive, touchpoints } = await getLastTouchpoints(
-    viewingEmail,
-    accountDomains,
-  );
-  const tableRows: MyClientTableRow[] = report.rows.map((r) => {
-    const tp = touchpoints.get(r.account) ?? null;
-    return {
-      account: r.account,
-      grossRevenue: r.grossRevenue,
-      grossMargin: r.grossMargin,
-      avgMarginPct: r.avgMarginPct,
-      totalSpend: r.totalSpend,
-      daysSinceLastPurchase: r.daysSinceLastPurchase,
-      daysSinceLastTouchpoint: tp ? Math.floor((now.getTime() - tp.getTime()) / DAY) : null,
-    };
-  });
-
-  const whose = viewingName ? `${viewingName}'s accounts` : "Your accounts";
-  const description = `${whose} — ${report.fyLabel} gross figures, lifetime spend and purchase/touchpoint recency.`;
-  const picker = isAdmin && reps.length > 0 && (
-    <RepPicker reps={reps} selected={viewingId} />
+  const whose = v.viewingName ? `${v.viewingName}'s accounts` : "Your accounts";
+  const description = `${whose} — ${v.report.fyLabel} gross figures, lifetime spend and purchase/touchpoint recency.`;
+  const picker = v.canViewAsRep && v.reps.length > 0 && (
+    <RepPicker reps={v.reps} selected={v.viewingId} />
   );
 
-  if (!report.hasData) {
+  // Preserve the viewed rep when linking to a full-table screen.
+  const suffix = sp.rep ? `?rep=${encodeURIComponent(sp.rep)}` : "";
+  const viewAll = (table: string) => `/crm/my-clients/${table}${suffix}`;
+
+  function SectionHead({ title, table }: { title: string; table: string }) {
+    return (
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Link
+          href={viewAll(table)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          View all <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+    );
+  }
+
+  if (!v.report.hasData) {
     return (
       <div>
         <PageHeader title="My Clients" description={description} />
@@ -129,8 +59,8 @@ export default async function MyClientsPage({
             icon={<Contact className="h-8 w-8" />}
             title="No clients yet"
             description={
-              viewingName
-                ? `${viewingName} has no Closed Won opportunities yet.`
+              v.viewingName
+                ? `${v.viewingName} has no Closed Won opportunities yet.`
                 : "Once you have Closed Won opportunities, your clients — and how their spend is trending year over year — will show up here."
             }
           />
@@ -139,6 +69,7 @@ export default async function MyClientsPage({
     );
   }
 
+  const { report } = v;
   const hasMovers = report.spendMovers.up.length > 0 || report.spendMovers.down.length > 0;
 
   return (
@@ -147,17 +78,18 @@ export default async function MyClientsPage({
       <div className="space-y-6 p-4 sm:p-8">
         {picker}
         <section>
-          <h2 className="mb-1 text-sm font-semibold">
-            Year-over-year spend movers: {report.compareYear} vs {report.priorYear}
-          </h2>
+          <SectionHead
+            title={`Year-over-year spend movers: ${report.compareYear} vs ${report.priorYear}`}
+            table="movers"
+          />
           <p className="mb-3 text-xs text-muted-foreground">
             Won revenue by account, current fiscal year vs prior. Shows which of your
             clients are expanding and which are contracting.
           </p>
           {hasMovers ? (
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <SpendMoverTable rows={report.spendMovers.up} priorYear={report.priorYear} compareYear={report.compareYear} kind="up" showTotals />
-              <SpendMoverTable rows={report.spendMovers.down} priorYear={report.priorYear} compareYear={report.compareYear} kind="down" showTotals />
+              <MoversTable rows={report.spendMovers.up} priorYear={report.priorYear} compareYear={report.compareYear} kind="up" />
+              <MoversTable rows={report.spendMovers.down} priorYear={report.priorYear} compareYear={report.compareYear} kind="down" />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -167,17 +99,17 @@ export default async function MyClientsPage({
         </section>
 
         <section>
-          <h2 className="mb-1 text-sm font-semibold">Client roster</h2>
+          <SectionHead title="Client roster" table="roster" />
           <p className="mb-3 text-xs text-muted-foreground">
             Gross revenue and margin are for {report.fyLabel}; total spend is lifetime.
             Days since last purchase uses each account&apos;s most recent close date.
             Days since last touchpoint is the most recent email or meeting with the
-            client in your Microsoft 365 mailbox.
+            client in your Microsoft 365 mailbox. Click any header to sort.
           </p>
-          <MyClientsTable rows={tableRows} touchpointsLive={touchpointsLive} />
+          <MyClientsTable rows={v.tableRows} touchpointsLive={v.touchpointsLive} />
         </section>
 
-        {!touchpointsLive && (
+        {!v.touchpointsLive && (
           <Card>
             <p className="text-sm font-medium">Touchpoints not available</p>
             <p className="mt-1 text-sm text-muted-foreground">
