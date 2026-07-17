@@ -28,7 +28,8 @@ export default async function MyClientsPage({
   searchParams: Promise<{ rep?: string }>;
 }) {
   const user = await requirePermission("crm:read");
-  const isAdmin = user.role === "ADMINISTRATOR";
+  // Administrators and Power Users may view any account manager's clients.
+  const isAdmin = user.role === "ADMINISTRATOR" || user.role === "POWER_USER";
 
   // Account managers = users who own opportunities. Admins may view any of them.
   const reps = isAdmin

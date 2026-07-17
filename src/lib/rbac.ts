@@ -56,13 +56,16 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "crm:manage",
     "backups:manage",
   ],
-  // Power User — can operate the whole billing pipeline and run syncs / test
-  // connections, but CANNOT change connector credentials or other admin-only
-  // settings (SSO, user management). Note the absence of connectors:configure.
+  // Power User — the same as Administrator in every respect EXCEPT the ability to
+  // CHANGE connector configuration/credentials. They can still view connectors
+  // and run syncs; they just can't edit connector info. Note the deliberate
+  // absence of connectors:configure — everything else Administrator has is here.
   POWER_USER: [
     "connectors:read",
     "connectors:sync",
     "debuglogs:read",
+    "sso:configure",
+    "users:manage",
     "clients:read",
     "mappings:read",
     "mappings:propose",
@@ -77,6 +80,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "crm:read",
     "crm:write",
     "crm:manage",
+    "backups:manage",
   ],
   // Financial Power User — the full billing pipeline and CRM, plus manual
   // syncs, reconciliation (mappings/exceptions/reports) and the synced-client
@@ -148,7 +152,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   ADMINISTRATOR:
     "Full access to everything, including connector credentials, security, and user management.",
   POWER_USER:
-    "Can run billing, approve/push invoices, and sync or test connectors — but cannot change connector credentials or admin settings.",
+    "Same as Administrator — billing, CRM, reports, users, security and backups — except they cannot change connector configuration or credentials (they can still view connectors and run syncs).",
   FINANCIAL_POWER_USER:
     "Same as Power User (full billing pipeline, CRM, reconciliation, and manual syncs) but with no access to the Administration section — no connector credentials, debug logs, audit log, users, security, or backups.",
   SALES:

@@ -9,14 +9,19 @@ describe("RBAC three-role policy", () => {
     expect(can("ADMINISTRATOR", "billing:push")).toBe(true);
   });
 
-  it("Power User can operate billing and sync, but not change credentials or admin settings", () => {
+  it("Power User is Administrator minus the ability to change connector config", () => {
+    expect(can("POWER_USER", "connectors:read")).toBe(true);
     expect(can("POWER_USER", "connectors:sync")).toBe(true);
     expect(can("POWER_USER", "billing:approve")).toBe(true);
     expect(can("POWER_USER", "billing:push")).toBe(true);
-    // Cannot change connector credentials or other admin-only settings.
+    // Now has the same admin settings Administrator has…
+    expect(can("POWER_USER", "sso:configure")).toBe(true);
+    expect(can("POWER_USER", "users:manage")).toBe(true);
+    expect(can("POWER_USER", "backups:manage")).toBe(true);
+    expect(can("POWER_USER", "audit:read")).toBe(true);
+    expect(can("POWER_USER", "debuglogs:read")).toBe(true);
+    // …except changing connector configuration/credentials.
     expect(can("POWER_USER", "connectors:configure")).toBe(false);
-    expect(can("POWER_USER", "sso:configure")).toBe(false);
-    expect(can("POWER_USER", "users:manage")).toBe(false);
   });
 
   it("Financial Power User has the finance pipeline and CRM but no Administration", () => {
