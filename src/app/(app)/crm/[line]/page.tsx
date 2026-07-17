@@ -19,6 +19,7 @@ import {
 } from "@/lib/crm/constants";
 import { OpportunitiesTable, type OpportunityRow } from "./opportunities-table";
 import { CrmFilterBar } from "./filter-bar";
+import { ResyncProductsButton } from "./resync-products-button";
 
 function parseDay(value?: string): Date | undefined {
   if (!value) return undefined;
@@ -40,6 +41,7 @@ export default async function CrmLinePage({
 
   const config = CRM_LINES[line];
   const canWrite = can(user.role, "crm:write");
+  const canSync = can(user.role, "connectors:sync");
 
   const isProducts = line === "PRODUCTS";
   // Every CRM line is scoped to the current fiscal year (Oct 1 – Sep 30) by
@@ -138,13 +140,18 @@ export default async function CrmLinePage({
         title={config.label}
         description={`${config.blurb} Fiscal year ${fy.label}: ${formatDate(fy.start)} – ${formatDate(fy.end)}.`}
         actions={
-          canWrite ? (
-            <Link
-              href={`/crm/new?line=${config.slug}`}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              <Plus className="h-4 w-4" /> New Opportunity
-            </Link>
+          canWrite || (isProducts && canSync) ? (
+            <div className="flex flex-wrap items-start justify-end gap-3">
+              {isProducts && canSync && <ResyncProductsButton />}
+              {canWrite && (
+                <Link
+                  href={`/crm/new?line=${config.slug}`}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  <Plus className="h-4 w-4" /> New Opportunity
+                </Link>
+              )}
+            </div>
           ) : undefined
         }
       />
