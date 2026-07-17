@@ -3,6 +3,7 @@ import {
   totalContractValue,
   commissionAmount,
   lineHasCommission,
+  productCommission,
 } from "@/lib/crm/pricing";
 
 describe("totalContractValue", () => {
@@ -30,5 +31,17 @@ describe("commissionAmount", () => {
   });
   it("unknown term pays nothing", () => {
     expect(commissionAmount("MANAGED_NOC", 5, 1000)).toBe(0);
+  });
+});
+
+describe("productCommission", () => {
+  it("is a percentage of gross margin", () => {
+    expect(productCommission(10, 5000)).toBe(500);
+    expect(productCommission(7.5, 2000)).toBe(150);
+  });
+  it("is 0 with no rate or no margin", () => {
+    expect(productCommission(0, 5000)).toBe(0);
+    expect(productCommission(10, null)).toBe(0);
+    expect(productCommission(null, 5000)).toBe(0);
   });
 });

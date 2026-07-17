@@ -53,6 +53,7 @@ model User {
   createdOpportunities CrmOpportunity[] @relation("OpportunityCreator")
   createdBackups       Backup[]         @relation("BackupCreator")
   salesQuotas          SalesQuota[]     @relation("SalesQuotaUser")
+  salesRepComp         SalesRepComp?    @relation("SalesRepCompUser")
 
   @@index([role])
 }
@@ -261,6 +262,7 @@ enum AuditAction {
   BACKUP_RESTORED
   SANDBOX_DATA_PURGED
   QUOTA_SET
+  REP_COMP_SET
   LEAD_UPDATED
   LEADS_IMPORTED
   LICENSE_ARCHIVED
@@ -831,6 +833,20 @@ model CrmOpportunity {
 // Sales management — quota targets per salesperson. quarter 0 = annual,
 // 1–4 = calendar quarters (0 instead of NULL so the composite unique works).
 // Attainment is computed from CLOSED_WON opportunity amounts in the period.
+model SalesRepComp {
+  id                           String   @id @default(cuid())
+  userId                       String   @unique
+  user                         User     @relation("SalesRepCompUser", fields: [userId], references: [id], onDelete: Cascade)
+  baseSalary                   Decimal  @default(0) @db.Decimal(18, 2)
+  // Product commission is a percentage of gross margin on product deals.
+  productCommissionPct         Decimal  @default(0) @db.Decimal(6, 3)
+  // Services commission follows the standard month-of-MRR schedule (1y=1, 2y=1.5,
+  // 3y=2 months); this multiplier scales that schedule per rep (1 = standard).
+  servicesCommissionMultiplier Decimal  @default(1) @db.Decimal(6, 3)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+}
+
 model SalesQuota {
   id           String  @id @default(cuid())
   userId       String

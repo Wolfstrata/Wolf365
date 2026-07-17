@@ -1,11 +1,11 @@
+import Link from "next/link";
 import { Users } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
-import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PageHeader, EmptyState } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { quotaPeriodRange, quotaPeriodLabel } from "@/lib/crm/quota";
-import { QuotaForm } from "./quota-form";
 import { deleteQuotaAction } from "./actions";
 
 function attainmentTone(pct: number): string {
@@ -88,11 +88,6 @@ export default async function SalesManagementPage({
     return { q, target, closedWon, openPipeline, attainment };
   });
 
-  const salespeople = owners.map((o) => ({
-    id: o.id,
-    label: o.name ?? o.email,
-  }));
-
   return (
     <div>
       <PageHeader
@@ -142,7 +137,12 @@ export default async function SalesManagementPage({
                   {owners.map((o) => (
                     <tr key={o.id} className="border-t">
                       <td className="px-4 py-2 font-medium">
-                        {o.name ?? o.email}
+                        <Link
+                          href={`/crm/sales-management/${o.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {o.name ?? o.email}
+                        </Link>
                         {o.name && (
                           <div className="text-xs text-muted-foreground">{o.email}</div>
                         )}
@@ -163,14 +163,6 @@ export default async function SalesManagementPage({
             </div>
           )}
         </section>
-
-        {/* Set quota */}
-        {canManage && (
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold">Set a quota target</h2>
-            <QuotaForm salespeople={salespeople} year={year} />
-          </Card>
-        )}
 
         {/* Quotas & attainment */}
         <section>
@@ -205,7 +197,12 @@ export default async function SalesManagementPage({
                   {quotaRows.map(({ q, target, closedWon, openPipeline, attainment }) => (
                     <tr key={q.id} className="border-t align-middle">
                       <td className="px-4 py-2 font-medium">
-                        {q.user.name ?? q.user.email}
+                        <Link
+                          href={`/crm/sales-management/${q.user.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {q.user.name ?? q.user.email}
+                        </Link>
                       </td>
                       <td className="px-4 py-2">
                         {q.year} {quotaPeriodLabel(q.quarter)}

@@ -42,3 +42,11 @@ export function commissionAmount(
   const months = COMMISSION_MONTHS[termYears] ?? 0;
   return Math.round((monthlyAmount ?? 0) * months * 100) / 100;
 }
+
+/** Product commission = a percentage of gross margin on the product deal(s). */
+export function productCommission(
+  pct: number | null | undefined,
+  grossMargin: number | null | undefined,
+): number {
+  return Math.round((grossMargin ?? 0) * ((pct ?? 0) / 100) * 100) / 100;
+}
