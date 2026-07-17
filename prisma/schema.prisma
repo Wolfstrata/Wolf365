@@ -410,6 +410,50 @@ model QboPayment {
   @@index([txnDate])
 }
 
+// QuickBooks Online vendor bill snapshot — powers the Suppliers & Expenses DPO
+// report (how long we take to pay suppliers/expenses).
+model QboBill {
+  id           String    @id @default(cuid())
+  qboId        String    @unique
+  realmId      String
+  vendorRef    String?
+  vendorName   String?
+  docNumber    String?
+  category     String? // first expense-line account name (for filtering/display)
+  memo         String?
+  txnDate      DateTime // bill date
+  dueDate      DateTime?
+  totalAmount  Decimal   @default(0) @db.Decimal(18, 2)
+  balance      Decimal   @default(0) @db.Decimal(18, 2)
+  currency     String?
+  raw          Json?
+  lastSyncedAt DateTime  @default(now())
+
+  @@index([realmId])
+  @@index([vendorRef])
+  @@index([txnDate])
+}
+
+// QuickBooks Online bill-payment snapshot, with per-bill allocations (LinkedTxn)
+// for days-to-pay (DPO) math.
+model QboBillPayment {
+  id           String   @id @default(cuid())
+  qboId        String   @unique
+  realmId      String
+  vendorRef    String?
+  vendorName   String?
+  txnDate      DateTime // payment date
+  totalAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  currency     String?
+  lines        Json? // [{ billId, amount }]
+  raw          Json?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([realmId])
+  @@index([vendorRef])
+  @@index([txnDate])
+}
+
 // TD SYNNEX StreamOne Stellr customer/account snapshot.
 model TdSynnexCustomer {
   id            String  @id @default(cuid())

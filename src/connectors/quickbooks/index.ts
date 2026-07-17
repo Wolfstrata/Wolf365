@@ -250,6 +250,66 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       /* payments best-effort */
     }
 
+    // --- Vendor bills (for the Suppliers & Expenses / DPO report) ----------
+    // Mirror of invoices on the AP side: each bill carries its date so a full
+    // pull supports annual + monthly rollups. Best-effort.
+    try {
+      let billStart = 1;
+      for (;;) {
+        const query = encodeURIComponent(
+          `select * from Bill startposition ${billStart} maxresults ${pageSize}`,
+        );
+        const res = await qboGet(
+          ctx,
+          `/v3/company/${realmId}/query?query=${query}`,
+          "sync_bills",
+        );
+        if (!res.ok) break;
+        const bills =
+          (res.json as { QueryResponse?: { Bill?: QboBillRaw[] } })?.QueryResponse
+            ?.Bill ?? [];
+        if (bills.length === 0) break;
+        for (const b of bills) {
+          const result = await upsertQboBill(realmId, b);
+          if (result === "created") imported += 1;
+          else updated += 1;
+        }
+        if (bills.length < pageSize) break;
+        billStart += pageSize;
+      }
+    } catch {
+      /* bills best-effort */
+    }
+
+    // --- Bill payments (with per-bill allocations) ------------------------
+    try {
+      let bpStart = 1;
+      for (;;) {
+        const query = encodeURIComponent(
+          `select * from BillPayment startposition ${bpStart} maxresults ${pageSize}`,
+        );
+        const res = await qboGet(
+          ctx,
+          `/v3/company/${realmId}/query?query=${query}`,
+          "sync_bill_payments",
+        );
+        if (!res.ok) break;
+        const billPayments =
+          (res.json as { QueryResponse?: { BillPayment?: QboBillPaymentRaw[] } })
+            ?.QueryResponse?.BillPayment ?? [];
+        if (billPayments.length === 0) break;
+        for (const bp of billPayments) {
+          const result = await upsertQboBillPayment(realmId, bp);
+          if (result === "created") imported += 1;
+          else updated += 1;
+        }
+        if (billPayments.length < pageSize) break;
+        bpStart += pageSize;
+      }
+    } catch {
+      /* bill payments best-effort */
+    }
+
     // --- Learn SKU → item mappings from invoice history --------------------
     // The invoice history records which QBO item each product was billed under,
     // so we auto-fill mappings for still-unmapped TD SYNNEX SKUs. Best-effort:
@@ -280,7 +340,11 @@ export const quickbooksConnector: ConnectorDefinition<QboConfig, QboSecrets> = {
       imported,
       updated,
       skipped,
-      summary: { entity: "customers+items+invoices", realmId, mappingsFromInvoices },
+      summary: {
+        entity: "customers+items+invoices+bills",
+        realmId,
+        mappingsFromInvoices,
+      },
     };
   },
 };
@@ -410,6 +474,106 @@ async function upsertQboPayment(
     return "updated";
   }
   await prisma.qboPayment.create({ data: { qboId: p.Id, ...data } });
+  return "created";
+}
+
+interface QboBillRaw {
+  Id: string;
+  DocNumber?: string;
+  TxnDate?: string;
+  DueDate?: string;
+  TotalAmt?: number;
+  Balance?: number;
+  PrivateNote?: string;
+  VendorRef?: QboRef;
+  CurrencyRef?: QboRef;
+  Line?: Array<{
+    DetailType?: string;
+    AccountBasedExpenseLineDetail?: { AccountRef?: QboRef };
+  }>;
+}
+
+/** First expense-line account name — used for exclude-keyword matching/display. */
+function firstBillCategory(bill: QboBillRaw): string | null {
+  for (const ln of bill.Line ?? []) {
+    const name = ln.AccountBasedExpenseLineDetail?.AccountRef?.name;
+    if (name) return name;
+  }
+  return null;
+}
+
+async function upsertQboBill(
+  realmId: string,
+  bill: QboBillRaw,
+): Promise<"created" | "updated"> {
+  const data = {
+    realmId,
+    vendorRef: bill.VendorRef?.value ?? null,
+    vendorName: bill.VendorRef?.name ?? null,
+    docNumber: bill.DocNumber ?? null,
+    category: firstBillCategory(bill),
+    memo: bill.PrivateNote ?? null,
+    txnDate: parseQboDate(bill.TxnDate) ?? new Date(),
+    dueDate: parseQboDate(bill.DueDate),
+    totalAmount: bill.TotalAmt ?? 0,
+    balance: bill.Balance ?? 0,
+    currency: bill.CurrencyRef?.value ?? null,
+    raw: bill as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  const existing = await prisma.qboBill.findUnique({ where: { qboId: bill.Id } });
+  if (existing) {
+    await prisma.qboBill.update({ where: { qboId: bill.Id }, data });
+    return "updated";
+  }
+  await prisma.qboBill.create({ data: { qboId: bill.Id, ...data } });
+  return "created";
+}
+
+interface QboBillPaymentRaw {
+  Id: string;
+  TxnDate?: string;
+  TotalAmt?: number;
+  VendorRef?: QboRef;
+  CurrencyRef?: QboRef;
+  Line?: Array<{
+    Amount?: number;
+    LinkedTxn?: Array<{ TxnId?: string; TxnType?: string }>;
+  }>;
+}
+
+async function upsertQboBillPayment(
+  realmId: string,
+  bp: QboBillPaymentRaw,
+): Promise<"created" | "updated"> {
+  // Per-bill allocations — enables days-to-pay (DPO) math.
+  const lines: { billId: string; amount: number }[] = [];
+  for (const ln of bp.Line ?? []) {
+    for (const lt of ln.LinkedTxn ?? []) {
+      if (lt.TxnType === "Bill" && lt.TxnId) {
+        lines.push({ billId: lt.TxnId, amount: ln.Amount ?? 0 });
+      }
+    }
+  }
+  const data = {
+    realmId,
+    vendorRef: bp.VendorRef?.value ?? null,
+    vendorName: bp.VendorRef?.name ?? null,
+    txnDate: parseQboDate(bp.TxnDate) ?? new Date(),
+    totalAmount: bp.TotalAmt ?? 0,
+    currency: bp.CurrencyRef?.value ?? null,
+    lines: lines as unknown as Prisma.InputJsonValue,
+    raw: bp as unknown as Prisma.InputJsonValue,
+    lastSyncedAt: new Date(),
+  };
+  const existing = await prisma.qboBillPayment.findUnique({
+    where: { qboId: bp.Id },
+  });
+  if (existing) {
+    await prisma.qboBillPayment.update({ where: { qboId: bp.Id }, data });
+    return "updated";
+  }
+  await prisma.qboBillPayment.create({ data: { qboId: bp.Id, ...data } });
   return "created";
 }
 

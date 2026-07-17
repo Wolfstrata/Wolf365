@@ -9,6 +9,32 @@ import type {
 
 export const num = (n: number) => Math.round(n).toLocaleString("en-US");
 
+/** Column nouns so the same tables serve the AR (customers) and AP (suppliers) reports. */
+export interface ReportLabels {
+  entity: string; // "Customer" | "Supplier"
+  entities: string; // "Customers" | "Suppliers"
+  paid: string; // "Cash received" | "Amount paid"
+  paidShort: string; // "Revenue" | "Spend"
+  dso: string; // "DSO" | "DPO"
+  onTime: string; // "On-time $" | "On-time paid"
+}
+export const CUSTOMER_LABELS: ReportLabels = {
+  entity: "Customer",
+  entities: "Customers",
+  paid: "Cash received",
+  paidShort: "Revenue",
+  dso: "DSO",
+  onTime: "On-time $",
+};
+export const SUPPLIER_LABELS: ReportLabels = {
+  entity: "Supplier",
+  entities: "Suppliers",
+  paid: "Amount paid",
+  paidShort: "Spend",
+  dso: "DPO",
+  onTime: "On-time paid",
+};
+
 function Shell({
   head,
   children,
@@ -39,13 +65,15 @@ export type CustomerVariant = "revenue" | "drag" | "worst" | "best";
 export function CustomerTable({
   rows,
   variant,
+  labels = CUSTOMER_LABELS,
 }: {
   rows: CustomerRow[];
   variant: CustomerVariant;
+  labels?: ReportLabels;
 }) {
   if (variant === "revenue") {
     return (
-      <Shell head={[th("Customer"), th("Cash received", true), th("DSO", true), th("Avg days late", true), th("Tier")]}>
+      <Shell head={[th(labels.entity), th(labels.paid, true), th(labels.dso, true), th("Avg days late", true), th("Tier")]}>
         {rows.map((r) => (
           <tr key={r.customerId} className="border-t">
             <td className="px-4 py-2 font-medium">{r.customer}</td>
@@ -60,7 +88,7 @@ export function CustomerTable({
   }
   if (variant === "drag") {
     return (
-      <Shell head={[th("Customer"), th("Cash received", true), th("Avg days late", true), th("Drag ($-days)", true)]}>
+      <Shell head={[th(labels.entity), th(labels.paid, true), th("Avg days late", true), th("Drag ($-days)", true)]}>
         {rows.map((r) => (
           <tr key={r.customerId} className="border-t">
             <td className="px-4 py-2 font-medium">{r.customer}</td>
@@ -74,7 +102,7 @@ export function CustomerTable({
   }
   if (variant === "worst") {
     return (
-      <Shell head={[th("Customer"), th("Revenue", true), th("Avg late", true)]}>
+      <Shell head={[th(labels.entity), th(labels.paidShort, true), th("Avg late", true)]}>
         {rows.map((r) => (
           <tr key={r.customerId} className="border-t">
             <td className="px-4 py-2 font-medium">{r.customer}</td>
@@ -87,7 +115,7 @@ export function CustomerTable({
   }
   // best
   return (
-    <Shell head={[th("Customer"), th("Revenue", true), th("On-time $", true)]}>
+    <Shell head={[th(labels.entity), th(labels.paidShort, true), th(labels.onTime, true)]}>
       {rows.map((r) => (
         <tr key={r.customerId} className="border-t">
           <td className="px-4 py-2 font-medium">{r.customer}</td>
@@ -101,12 +129,18 @@ export function CustomerTable({
   );
 }
 
-export function FollowUpTable({ rows }: { rows: FollowUpRow[] }) {
+export function FollowUpTable({
+  rows,
+  labels = CUSTOMER_LABELS,
+}: {
+  rows: FollowUpRow[];
+  labels?: ReportLabels;
+}) {
   return (
     <Shell
       head={[
         th("#"),
-        th("Customer"),
+        th(labels.entity),
         th("Late amount (>30d)", true),
         th("Max days late", true),
         th("Avg days late", true),
@@ -134,9 +168,15 @@ export function FollowUpTable({ rows }: { rows: FollowUpRow[] }) {
   );
 }
 
-export function TierTable({ tiers }: { tiers: TierSummary[] }) {
+export function TierTable({
+  tiers,
+  labels = CUSTOMER_LABELS,
+}: {
+  tiers: TierSummary[];
+  labels?: ReportLabels;
+}) {
   return (
-    <Shell head={[th("Tier"), th("Customers", true), th("%", true), th("Cash received", true), th("Drag ($-days)", true)]}>
+    <Shell head={[th("Tier"), th(labels.entities, true), th("%", true), th(labels.paid, true), th("Drag ($-days)", true)]}>
       {tiers.map((t) => (
         <tr key={t.tier} className="border-t">
           <td className="px-4 py-2">{t.tier}</td>

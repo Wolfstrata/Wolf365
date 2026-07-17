@@ -8,11 +8,12 @@ function fmtPeriod(period: string): string {
 }
 
 /**
- * DSO trend line chart (inline SVG, theme-aware). Plots cash-weighted collection
- * DSO by invoice-cohort month across the selected date range. No client JS —
- * hover titles give per-point detail.
+ * DSO/DPO trend line chart (inline SVG, theme-aware). Plots the cash-weighted
+ * days metric by cohort month across the selected date range. No client JS —
+ * hover titles give per-point detail. `unit` labels the metric ("DSO" on the AR
+ * cash-flow report, "DPO" on the AP suppliers report).
  */
-export function DsoChart({ points }: { points: DsoPoint[] }) {
+export function DsoChart({ points, unit = "DSO" }: { points: DsoPoint[]; unit?: string }) {
   const W = 800;
   const H = 220;
   const padL = 44;
@@ -38,7 +39,7 @@ export function DsoChart({ points }: { points: DsoPoint[] }) {
   }
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="DSO over time">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={`${unit} over time`}>
       {/* Gridlines + y labels */}
       {gridVals.map((v) => (
         <g key={v}>
@@ -72,7 +73,7 @@ export function DsoChart({ points }: { points: DsoPoint[] }) {
       {/* Points */}
       {points.map((p, i) => (
         <circle key={p.period} cx={xAt(i)} cy={yAt(p.dso)} r={n > 60 ? 1.5 : 3} className="text-primary" fill="currentColor">
-          <title>{`${fmtPeriod(p.period)}: ${p.dso} days DSO`}</title>
+          <title>{`${fmtPeriod(p.period)}: ${p.dso} days ${unit}`}</title>
         </circle>
       ))}
 

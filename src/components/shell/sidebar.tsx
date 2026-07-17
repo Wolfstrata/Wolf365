@@ -32,6 +32,7 @@ import {
   Package,
   Award,
   Banknote,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,7 @@ const ICONS: Record<string, LucideIcon> = {
   Package,
   Award,
   Banknote,
+  Truck,
 };
 
 // Administration + Account are intentionally omitted — Administration items and

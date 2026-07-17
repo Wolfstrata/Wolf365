@@ -30,6 +30,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Hidden for now (functionality kept; route still works) — future item.
   // { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
   { label: "Cash-Flow / DSO", href: "/cash-flow", icon: "Banknote", section: "Finance Workspace", permission: "billing:read" },
+  { label: "Suppliers & Expenses / DSO", href: "/suppliers-dpo", icon: "Truck", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
   { label: "Opportunity Reliability", href: "/crm/reliability", icon: "Award", section: "CRM", permission: "crm:read" },
   { label: "Products", href: "/crm/products", icon: "Package", section: "CRM", permission: "crm:read" },
