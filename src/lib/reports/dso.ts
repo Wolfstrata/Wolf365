@@ -91,6 +91,12 @@ export interface SpendMover {
   pctChange: number | null;
 }
 
+export interface DsoPoint {
+  period: string; // YYYY-MM (invoice cohort month)
+  dso: number; // cash-weighted invoice→cash days for that month's invoices
+  cash: number;
+}
+
 export interface CashFlowReport {
   hasData: boolean;
   kpis: {
@@ -103,6 +109,7 @@ export interface CashFlowReport {
     customersEarlyOnTime: number;
     pctCustomersEarlyOnTime: number;
   };
+  timeline: DsoPoint[]; // DSO by invoice-cohort month, ascending
   tiers: TierSummary[];
   followUp: FollowUpRow[]; // late-payment follow-up priority (weighted by $ and days over 30)
   customers: CustomerRow[]; // all, sorted by cash received desc
@@ -186,6 +193,9 @@ export function computeCashFlowReport(
   let gWDaysLate = 0;
   let gOnTime = 0;
   let totalDrag = 0;
+  // DSO trend by invoice-cohort month.
+  const monthCash = new Map<string, number>();
+  const monthWtc = new Map<string, number>();
   for (const p of payments) {
     for (const ln of p.lines) {
       const inv = invById.get(ln.invoiceId);
@@ -215,8 +225,19 @@ export function computeCashFlowReport(
       gWDaysLate += ln.amount * daysLate;
       if (daysLate <= 0) gOnTime += ln.amount;
       totalDrag += lateDrag;
+      const period = `${inv.txnDate.getUTCFullYear()}-${String(inv.txnDate.getUTCMonth() + 1).padStart(2, "0")}`;
+      monthCash.set(period, (monthCash.get(period) ?? 0) + ln.amount);
+      monthWtc.set(period, (monthWtc.get(period) ?? 0) + ln.amount * daysToCash);
     }
   }
+
+  const timeline: DsoPoint[] = [...monthCash.keys()]
+    .sort()
+    .map((period) => ({
+      period,
+      cash: round2(monthCash.get(period)!),
+      dso: round1((monthWtc.get(period) ?? 0) / (monthCash.get(period) || 1)),
+    }));
 
   const rows: CustomerRow[] = [...acc.entries()].map(([id, a]) => {
     const avgLate = a.cash > 0 ? a.wDaysLate / a.cash : null;
@@ -319,6 +340,7 @@ export function computeCashFlowReport(
       customersEarlyOnTime: earlyOnTime,
       pctCustomersEarlyOnTime: customerCount > 0 ? round1((earlyOnTime / customerCount) * 100) : 0,
     },
+    timeline,
     tiers,
     followUp,
     customers: rows,

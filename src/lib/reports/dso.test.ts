@@ -72,6 +72,16 @@ describe("computeCashFlowReport", () => {
     expect(up?.change).toBe(1200);
   });
 
+  it("builds a monthly DSO timeline (invoice cohort → cash-weighted days-to-cash)", () => {
+    const byPeriod = Object.fromEntries(r.timeline.map((p) => [p.period, p.dso]));
+    // i3 (Globex) invoiced 2025-03-01, paid 2025-05-30 → 90 days.
+    expect(byPeriod["2025-03"]).toBe(90);
+    // i0 (Acme) invoiced 2024-01-01, paid 2024-01-15 → 14 days.
+    expect(byPeriod["2024-01"]).toBe(14);
+    // Ascending by period.
+    expect(r.timeline.map((p) => p.period)).toEqual([...r.timeline.map((p) => p.period)].sort());
+  });
+
   it("is empty-safe", () => {
     const empty = computeCashFlowReport([], []);
     expect(empty.hasData).toBe(false);

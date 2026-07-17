@@ -5,6 +5,7 @@ import { PageHeader, Card, EmptyState, StatItem } from "@/components/ui/primitiv
 import { formatCurrency } from "@/lib/utils";
 import { getCashFlowReport, resolveDateWindow } from "@/lib/reports/cash-flow";
 import { RangeBar } from "./range-bar";
+import { DsoChart } from "./dso-chart";
 import {
   CustomerTable,
   FollowUpTable,
@@ -150,6 +151,19 @@ export default async function CashFlowPage({
             <StatItem label="Late-tail customers" value={k.customers - k.customersEarlyOnTime} />
           </div>
         </Card>
+
+        {report.timeline.length > 0 && (
+          <section>
+            <h2 className="mb-3 text-sm font-semibold">DSO performance over time</h2>
+            <Card>
+              <DsoChart points={report.timeline} />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Cash-weighted collection DSO by invoice-cohort month, across {window.label.toLowerCase()}.
+                Lower is better.
+              </p>
+            </Card>
+          </section>
+        )}
 
         <section>
           <SectionHead title="Customer payment tiers" table="tiers" />
