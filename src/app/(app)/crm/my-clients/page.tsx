@@ -155,8 +155,8 @@ export default async function MyClientsPage({
           </p>
           {hasMovers ? (
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <SpendMoverTable rows={report.spendMovers.up} priorYear={report.priorYear} compareYear={report.compareYear} kind="up" />
-              <SpendMoverTable rows={report.spendMovers.down} priorYear={report.priorYear} compareYear={report.compareYear} kind="down" />
+              <SpendMoverTable rows={report.spendMovers.up} priorYear={report.priorYear} compareYear={report.compareYear} kind="up" showTotals />
+              <SpendMoverTable rows={report.spendMovers.down} priorYear={report.priorYear} compareYear={report.compareYear} kind="down" showTotals />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

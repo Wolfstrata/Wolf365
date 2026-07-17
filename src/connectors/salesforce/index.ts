@@ -141,12 +141,14 @@ export const salesforceConnector: ConnectorDefinition<
     },
     {
       key: "marginField",
-      label: "Margin field (optional)",
+      label: "Margin Amount field",
       type: "text",
       required: false,
       secret: false,
+      placeholder: "Margin_Amount__c",
+      default: "Margin_Amount__c",
       helpText:
-        "Optional Salesforce field holding the total margin amount. Stored as the margin TCV; monthly margin is derived as field ÷ 12. Left blank, margin is imported empty.",
+        "Salesforce field holding the deal's margin amount (dollars). Defaults to the standard custom field Margin_Amount__c so margin and margin % import automatically; change it if your org uses a different API name. Margin % is derived as margin ÷ amount.",
     },
     {
       key: "termField",
@@ -239,7 +241,9 @@ export const salesforceConnector: ConnectorDefinition<
     const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
 
     const amountField = (ctx.config.amountField ?? "Amount").trim() || "Amount";
-    const marginField = (ctx.config.marginField ?? "").trim();
+    // Default to the standard custom "Margin Amount" field so per-deal margin
+    // (and margin %) sync out of the box; an admin can override the API name.
+    const marginField = (ctx.config.marginField ?? "").trim() || "Margin_Amount__c";
     const termField = (ctx.config.termField ?? "").trim();
     const contactEmailField = (ctx.config.contactEmailField ?? "").trim();
     // Default the Revenue Type field (used to route Product Income → Products)

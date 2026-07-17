@@ -228,12 +228,20 @@ export function SpendMoverTable({
   priorYear,
   compareYear,
   kind,
+  showTotals = false,
 }: {
   rows: SpendMover[];
   priorYear: number;
   compareYear: number;
   kind: "up" | "down";
+  /** Append a totals row summing the two year columns and Change. */
+  showTotals?: boolean;
 }) {
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const totalPrior = round2(rows.reduce((s, r) => s + r.spendPrior, 0));
+  const totalCurrent = round2(rows.reduce((s, r) => s + r.spendCurrent, 0));
+  const totalChange = round2(rows.reduce((s, r) => s + r.change, 0));
+
   return (
     <Shell head={[th(kind === "up" ? "Expanding" : "Contracting"), th(String(priorYear), true), th(String(compareYear), true), th("Change", true)]}>
       {rows.map((s) => (
@@ -251,6 +259,17 @@ export function SpendMoverTable({
       {rows.length === 0 && (
         <tr className="border-t">
           <td className="px-4 py-2 text-muted-foreground" colSpan={4}>None</td>
+        </tr>
+      )}
+      {showTotals && rows.length > 0 && (
+        <tr className="border-t-2 bg-muted/50 font-semibold">
+          <td className="px-4 py-2">Total</td>
+          <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(totalPrior)}</td>
+          <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(totalCurrent)}</td>
+          <td className={`px-4 py-2 text-right tabular-nums ${kind === "up" ? "text-success" : "text-danger"}`}>
+            {totalChange > 0 ? "+" : ""}
+            {formatCurrency(totalChange)}
+          </td>
         </tr>
       )}
     </Shell>
