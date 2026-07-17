@@ -49,6 +49,10 @@ const schema = z.object({
   accountName: z.string().trim().min(1, "Account Name is required"),
   monthlyAmount: numberish,
   monthlyMargin: numberish,
+  // One-time Products: a flat amount + dollar margin (see pricingMode).
+  amount: numberish,
+  marginAmount: numberish,
+  pricingMode: z.preprocess(emptyToUndefined, z.enum(["onetime", "mrr"]).optional()),
   termYears: z.coerce.number().int().refine((n) => [1, 2, 3].includes(n), {
     message: "Term must be 1, 2 or 3 years",
   }),
@@ -77,6 +81,9 @@ function parse(formData: FormData) {
     accountName: formData.get("accountName"),
     monthlyAmount: formData.get("monthlyAmount"),
     monthlyMargin: formData.get("monthlyMargin"),
+    amount: formData.get("amount"),
+    marginAmount: formData.get("marginAmount"),
+    pricingMode: formData.get("pricingMode"),
     termYears: formData.get("termYears"),
     billingFrequency: formData.get("billingFrequency"),
     stage: formData.get("stage"),
@@ -117,30 +124,62 @@ export async function saveOpportunityAction(
     lineSlug = CRM_LINES[data.line].slug;
     const probability = data.probability ?? STAGE_PROBABILITY[data.stage];
 
-    // Derive TCV, contract-level margin, margin % and commission from the
-    // monthly figures the user entered.
-    const tcv = totalContractValue(data.monthlyAmount, data.termYears);
-    const tcvMargin = totalContractValue(data.monthlyMargin, data.termYears);
-    const marginPercentage = computeMarginPercentage(
-      data.monthlyAmount ?? 0,
-      data.monthlyMargin ?? 0,
-    );
-    const commission = commissionAmount(
-      data.line,
-      data.termYears,
-      data.monthlyAmount,
-    );
+    // Money can be entered two ways:
+    //  • One-time Products: a flat Amount + dollar Margin Amount (no MRR/term).
+    //  • Everything else (incl. recurring Products): monthly figures × term,
+    //    from which TCV, contract margin, margin % and commission are derived.
+    const isOneTimeProduct =
+      data.line === "PRODUCTS" && data.pricingMode === "onetime";
+
+    let money: {
+      monthlyAmount: number | null;
+      monthlyMargin: number | null;
+      amount: number | null;
+      marginAmount: number | null;
+      marginPercentage: number;
+      commissionAmount: number | null;
+    };
+    if (isOneTimeProduct) {
+      money = {
+        monthlyAmount: null,
+        monthlyMargin: null,
+        amount: data.amount ?? null,
+        marginAmount: data.marginAmount ?? null,
+        marginPercentage: computeMarginPercentage(
+          data.amount ?? 0,
+          data.marginAmount ?? 0,
+        ),
+        commissionAmount: null,
+      };
+    } else {
+      const tcv = totalContractValue(data.monthlyAmount, data.termYears);
+      const tcvMargin = totalContractValue(data.monthlyMargin, data.termYears);
+      money = {
+        monthlyAmount: data.monthlyAmount ?? null,
+        monthlyMargin: data.monthlyMargin ?? null,
+        amount: data.monthlyAmount != null ? tcv : null,
+        marginAmount: data.monthlyMargin != null ? tcvMargin : null,
+        marginPercentage: computeMarginPercentage(
+          data.monthlyAmount ?? 0,
+          data.monthlyMargin ?? 0,
+        ),
+        commissionAmount:
+          data.monthlyAmount != null
+            ? commissionAmount(data.line, data.termYears, data.monthlyAmount)
+            : null,
+      };
+    }
 
     const fields = {
       line: data.line,
       name: data.name,
       accountName: data.accountName,
-      monthlyAmount: data.monthlyAmount ?? null,
-      monthlyMargin: data.monthlyMargin ?? null,
-      amount: data.monthlyAmount != null ? tcv : null,
-      marginAmount: data.monthlyMargin != null ? tcvMargin : null,
-      marginPercentage,
-      commissionAmount: data.monthlyAmount != null ? commission : null,
+      monthlyAmount: money.monthlyAmount,
+      monthlyMargin: money.monthlyMargin,
+      amount: money.amount,
+      marginAmount: money.marginAmount,
+      marginPercentage: money.marginPercentage,
+      commissionAmount: money.commissionAmount,
       termYears: data.termYears,
       billingFrequency: data.billingFrequency,
       stage: data.stage,

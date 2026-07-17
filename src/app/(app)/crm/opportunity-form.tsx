@@ -26,6 +26,9 @@ export interface OpportunityFormValues {
   accountName: string;
   monthlyAmount: string;
   monthlyMargin: string;
+  /** One-time deal amount + dollar margin — used for the Products line. */
+  amount: string;
+  marginAmount: string;
   termYears: number;
   billingFrequency: "MONTHLY" | "YEARLY";
   stage: keyof typeof STAGE_LABELS;
@@ -102,6 +105,22 @@ export function OpportunityForm({
   const [monthlyMargin, setMonthlyMargin] = useState(values.monthlyMargin);
   const [termYears, setTermYears] = useState(values.termYears);
 
+  // Products can be sold one-time (a flat Amount + dollar Margin Amount, mirroring
+  // the Salesforce Product opportunity) OR as MRR (like the service lines). The
+  // rep picks which. Existing rows infer the mode: a stored MRR ⇒ recurring, else
+  // one-time.
+  const isProduct = line === "PRODUCTS";
+  const [amount, setAmount] = useState(values.amount);
+  const [marginAmount, setMarginAmount] = useState(values.marginAmount);
+  const [productMode, setProductMode] = useState<"onetime" | "mrr">(
+    Number(values.monthlyAmount) > 0 ? "mrr" : "onetime",
+  );
+  const productOneTime = isProduct && productMode === "onetime";
+  const productMarginPct = computeMarginPercentage(
+    Number(amount) || 0,
+    Number(marginAmount) || 0,
+  );
+
   // Stage and probability drive the forecast category (Closed / Commit / Best
   // Case / Open Pipeline). Both are still editable afterwards.
   function onStageChange(next: keyof typeof STAGE_LABELS) {
@@ -156,7 +175,13 @@ export function OpportunityForm({
   return (
     <form action={action} className="space-y-8">
       {values.id && <input type="hidden" name="id" value={values.id} />}
-      {!allowYearly && <input type="hidden" name="billingFrequency" value="MONTHLY" />}
+      {(!allowYearly || productOneTime) && (
+        <input type="hidden" name="billingFrequency" value="MONTHLY" />
+      )}
+      {/* Pricing mode drives how the server interprets the money fields. */}
+      {isProduct && <input type="hidden" name="pricingMode" value={productMode} />}
+      {/* One-time products have no term; keep the required field satisfied. */}
+      {productOneTime && <input type="hidden" name="termYears" value={1} />}
 
       {result && !result.ok && (
         <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -230,113 +255,164 @@ export function OpportunityForm({
             </select>
           </Field>
 
-          <Field
-            label="Monthly Amount (MRR)"
-            help="Monthly recurring revenue for this deal. TCV is derived from this and the term."
-          >
-            <input
-              name="monthlyAmount"
-              type="number"
-              step="0.01"
-              min="0"
-              value={monthlyAmount}
-              onChange={(e) => setMonthlyAmount(e.target.value)}
-              className={inputCls}
-            />
-          </Field>
-          <Field
-            label="Total Contract Value"
-            help="MRR × 12 × term. Calculated."
-          >
-            <div className="px-1 py-2 text-sm font-medium tabular-nums">
-              {formatCurrency(tcv)}
-            </div>
-          </Field>
-
-          <Field label="Monthly Margin Amount">
-            <input
-              name="monthlyMargin"
-              type="number"
-              step="0.01"
-              min="0"
-              value={monthlyMargin}
-              onChange={(e) => setMonthlyMargin(e.target.value)}
-              className={inputCls}
-            />
-          </Field>
-          <Field label="Margin Percentage" help="Margin ÷ MRR. Calculated.">
-            <div className="px-1 py-2 text-sm font-medium tabular-nums">
-              {marginPct.toFixed(2)}%
-            </div>
-          </Field>
-
-          <Field label="Term" required help="Length of the agreement.">
-            <select
-              name="termYears"
-              value={termYears}
-              onChange={(e) => onTermChange(Number(e.target.value))}
-              className={inputCls}
+          {isProduct && (
+            <Field
+              label="Pricing"
+              required
+              help="Choose one-time (a flat price) or recurring monthly revenue."
             >
-              {TERM_YEARS_OPTIONS.map((y) => (
-                <option key={y} value={y}>
-                  {y} year{y > 1 ? "s" : ""}
-                </option>
-              ))}
-            </select>
-            {termPrompt && (
-              <div className="mt-2 space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
-                <p>
-                  Term changed from {termPrompt.from} to {termPrompt.to} year
-                  {termPrompt.to > 1 ? "s" : ""}. Keep the total contract value at{" "}
-                  <strong>{formatCurrency(promptTcv)}</strong> by recalculating MRR{" "}
-                  {formatCurrency(mrr)} → <strong>{formatCurrency(promptMrr)}</strong>
-                  /mo, or keep the MRR (contract value becomes{" "}
-                  {formatCurrency(tcv)})?
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={recalcMrrForTerm}
-                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
-                  >
-                    Recalculate MRR (keep contract value)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTermPrompt(null)}
-                    className="rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
-                  >
-                    Keep MRR
-                  </button>
-                </div>
-              </div>
-            )}
-          </Field>
-          <Field
-            label="Billing Frequency"
-            required
-            help={
-              allowYearly
-                ? "Microsoft 365 can bill monthly or yearly."
-                : `${lineLabel} is billed monthly only.`
-            }
-          >
-            {allowYearly ? (
               <select
-                name="billingFrequency"
-                defaultValue={values.billingFrequency}
+                value={productMode}
+                onChange={(e) => setProductMode(e.target.value as "onetime" | "mrr")}
                 className={inputCls}
               >
-                {Object.entries(BILLING_FREQUENCY_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
+                <option value="onetime">One-time</option>
+                <option value="mrr">Monthly (MRR)</option>
               </select>
-            ) : (
-              <div className="px-1 py-2 text-sm">Monthly</div>
-            )}
-          </Field>
+            </Field>
+          )}
+
+          {productOneTime ? (
+            <>
+              <Field label="Amount" help="One-time deal amount (price).">
+                <input
+                  name="amount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Margin Amount" help="Gross margin in dollars.">
+                <input
+                  name="marginAmount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={marginAmount}
+                  onChange={(e) => setMarginAmount(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Margin Percentage" help="Margin ÷ amount. Calculated.">
+                <div className="px-1 py-2 text-sm font-medium tabular-nums">
+                  {productMarginPct.toFixed(2)}%
+                </div>
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field
+                label="Monthly Amount (MRR)"
+                help="Monthly recurring revenue for this deal. TCV is derived from this and the term."
+              >
+                <input
+                  name="monthlyAmount"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={monthlyAmount}
+                  onChange={(e) => setMonthlyAmount(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+              <Field
+                label="Total Contract Value"
+                help="MRR × 12 × term. Calculated."
+              >
+                <div className="px-1 py-2 text-sm font-medium tabular-nums">
+                  {formatCurrency(tcv)}
+                </div>
+              </Field>
+
+              <Field label="Monthly Margin Amount">
+                <input
+                  name="monthlyMargin"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={monthlyMargin}
+                  onChange={(e) => setMonthlyMargin(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Margin Percentage" help="Margin ÷ MRR. Calculated.">
+                <div className="px-1 py-2 text-sm font-medium tabular-nums">
+                  {marginPct.toFixed(2)}%
+                </div>
+              </Field>
+
+              <Field label="Term" required help="Length of the agreement.">
+                <select
+                  name="termYears"
+                  value={termYears}
+                  onChange={(e) => onTermChange(Number(e.target.value))}
+                  className={inputCls}
+                >
+                  {TERM_YEARS_OPTIONS.map((y) => (
+                    <option key={y} value={y}>
+                      {y} year{y > 1 ? "s" : ""}
+                    </option>
+                  ))}
+                </select>
+                {termPrompt && (
+                  <div className="mt-2 space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+                    <p>
+                      Term changed from {termPrompt.from} to {termPrompt.to} year
+                      {termPrompt.to > 1 ? "s" : ""}. Keep the total contract value at{" "}
+                      <strong>{formatCurrency(promptTcv)}</strong> by recalculating MRR{" "}
+                      {formatCurrency(mrr)} → <strong>{formatCurrency(promptMrr)}</strong>
+                      /mo, or keep the MRR (contract value becomes{" "}
+                      {formatCurrency(tcv)})?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={recalcMrrForTerm}
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+                      >
+                        Recalculate MRR (keep contract value)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTermPrompt(null)}
+                        className="rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
+                      >
+                        Keep MRR
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Field>
+              <Field
+                label="Billing Frequency"
+                required
+                help={
+                  allowYearly
+                    ? "Can bill monthly or yearly."
+                    : `${lineLabel} is billed monthly only.`
+                }
+              >
+                {allowYearly ? (
+                  <select
+                    name="billingFrequency"
+                    defaultValue={values.billingFrequency}
+                    className={inputCls}
+                  >
+                    {Object.entries(BILLING_FREQUENCY_LABELS).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="px-1 py-2 text-sm">Monthly</div>
+                )}
+              </Field>
+            </>
+          )}
 
           <Field label="Next Step">
             <input name="nextStep" defaultValue={values.nextStep} className={inputCls} />
