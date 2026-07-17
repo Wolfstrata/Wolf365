@@ -152,10 +152,16 @@ export function computeForecast(
  */
 export interface ForecastGridRow {
   month: string;
+  // Gross revenue (deal amount) per cumulative category.
   closedOnly: number;
   commit: number;
   bestCase: number;
   openPipeline: number;
+  // Gross margin (marginAmount) per cumulative category, same roll-up.
+  closedOnlyMargin: number;
+  commitMargin: number;
+  bestCaseMargin: number;
+  openPipelineMargin: number;
 }
 
 const MAX_GRID_MONTHS = 24;
@@ -170,25 +176,37 @@ export function forecastGrid(opps: ForecastOpportunityInput[]): {
   rows: ForecastGridRow[];
   total: ForecastGridRow;
 } {
-  // Raw per-month category buckets (non-cumulative).
+  // Raw per-month category buckets (non-cumulative). `m*` mirror each revenue
+  // bucket with the deal's gross margin.
   const raw: Record<
     string,
-    { closed: number; commit: number; best: number; pipeline: number }
+    {
+      closed: number; commit: number; best: number; pipeline: number;
+      mClosed: number; mCommit: number; mBest: number; mPipeline: number;
+    }
   > = {};
 
   for (const o of opps) {
     if (o.stage === "CLOSED_LOST") continue;
     const amount = o.amount || 0;
+    const margin = o.marginAmount || 0;
     const bucket = (raw[o.closeMonth] ??= {
-      closed: 0,
-      commit: 0,
-      best: 0,
-      pipeline: 0,
+      closed: 0, commit: 0, best: 0, pipeline: 0,
+      mClosed: 0, mCommit: 0, mBest: 0, mPipeline: 0,
     });
-    if (o.stage === "CLOSED_WON") bucket.closed += amount;
-    else if (o.probability >= COMMIT_THRESHOLD) bucket.commit += amount;
-    else if (o.probability >= BEST_CASE_THRESHOLD) bucket.best += amount;
-    else bucket.pipeline += amount;
+    if (o.stage === "CLOSED_WON") {
+      bucket.closed += amount;
+      bucket.mClosed += margin;
+    } else if (o.probability >= COMMIT_THRESHOLD) {
+      bucket.commit += amount;
+      bucket.mCommit += margin;
+    } else if (o.probability >= BEST_CASE_THRESHOLD) {
+      bucket.best += amount;
+      bucket.mBest += margin;
+    } else {
+      bucket.pipeline += amount;
+      bucket.mPipeline += margin;
+    }
   }
 
   const present = Object.keys(raw).sort();
@@ -206,13 +224,19 @@ export function forecastGrid(opps: ForecastOpportunityInput[]): {
   }
 
   const rows: ForecastGridRow[] = months.map((month) => {
-    const b = raw[month] ?? { closed: 0, commit: 0, best: 0, pipeline: 0 };
+    const b =
+      raw[month] ??
+      { closed: 0, commit: 0, best: 0, pipeline: 0, mClosed: 0, mCommit: 0, mBest: 0, mPipeline: 0 };
     return {
       month,
       closedOnly: round2(b.closed),
       commit: round2(b.closed + b.commit),
       bestCase: round2(b.closed + b.commit + b.best),
       openPipeline: round2(b.pipeline),
+      closedOnlyMargin: round2(b.mClosed),
+      commitMargin: round2(b.mClosed + b.mCommit),
+      bestCaseMargin: round2(b.mClosed + b.mCommit + b.mBest),
+      openPipelineMargin: round2(b.mPipeline),
     };
   });
 
@@ -223,13 +247,24 @@ export function forecastGrid(opps: ForecastOpportunityInput[]): {
       commit: t.commit + r.commit,
       bestCase: t.bestCase + r.bestCase,
       openPipeline: t.openPipeline + r.openPipeline,
+      closedOnlyMargin: t.closedOnlyMargin + r.closedOnlyMargin,
+      commitMargin: t.commitMargin + r.commitMargin,
+      bestCaseMargin: t.bestCaseMargin + r.bestCaseMargin,
+      openPipelineMargin: t.openPipelineMargin + r.openPipelineMargin,
     }),
-    { month: "", closedOnly: 0, commit: 0, bestCase: 0, openPipeline: 0 },
+    {
+      month: "", closedOnly: 0, commit: 0, bestCase: 0, openPipeline: 0,
+      closedOnlyMargin: 0, commitMargin: 0, bestCaseMargin: 0, openPipelineMargin: 0,
+    },
   );
   total.closedOnly = round2(total.closedOnly);
   total.commit = round2(total.commit);
   total.bestCase = round2(total.bestCase);
   total.openPipeline = round2(total.openPipeline);
+  total.closedOnlyMargin = round2(total.closedOnlyMargin);
+  total.commitMargin = round2(total.commitMargin);
+  total.bestCaseMargin = round2(total.bestCaseMargin);
+  total.openPipelineMargin = round2(total.openPipelineMargin);
 
   return { rows, total };
 }

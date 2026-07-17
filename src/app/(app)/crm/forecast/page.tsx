@@ -47,6 +47,18 @@ function Bar({
   );
 }
 
+/** A forecast-grid cell: gross revenue on top, gross margin beneath it. */
+function ForecastCell({ revenue, margin }: { revenue: number; margin: number }) {
+  return (
+    <td className="px-3 py-2 text-right tabular-nums">
+      <div>{formatCurrency(revenue)}</div>
+      <div className="text-xs font-normal text-muted-foreground">
+        GM {formatCurrency(margin)}
+      </div>
+    </td>
+  );
+}
+
 function monthLabel(key: string): string {
   const [y, m] = key.split("-");
   return new Date(Date.UTC(Number(y), Number(m) - 1, 1)).toLocaleDateString(
@@ -182,6 +194,8 @@ export default async function ForecastPage() {
               <p className="mb-4 text-xs text-muted-foreground">
                 Closed = 100% (PO) · Commit = 99% (verbal) · Best Case = 75%+ ·
                 Open Pipeline = 0–74%. Closed/Commit/Best Case are cumulative.
+                Each cell shows <span className="font-medium">Gross Revenue</span> with{" "}
+                <span className="font-medium">Gross Margin</span> beneath it.
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -197,18 +211,18 @@ export default async function ForecastPage() {
                   <tbody>
                     <tr className="border-y bg-muted/50 font-semibold">
                       <td className="px-3 py-2">Total · {grid.rows.length} mo</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.closedOnly)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.commit)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.bestCase)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(grid.total.openPipeline)}</td>
+                      <ForecastCell revenue={grid.total.closedOnly} margin={grid.total.closedOnlyMargin} />
+                      <ForecastCell revenue={grid.total.commit} margin={grid.total.commitMargin} />
+                      <ForecastCell revenue={grid.total.bestCase} margin={grid.total.bestCaseMargin} />
+                      <ForecastCell revenue={grid.total.openPipeline} margin={grid.total.openPipelineMargin} />
                     </tr>
                     {grid.rows.map((r) => (
                       <tr key={r.month} className="border-t">
                         <td className="px-3 py-2">{monthLabel(r.month)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.closedOnly)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.commit)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.bestCase)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.openPipeline)}</td>
+                        <ForecastCell revenue={r.closedOnly} margin={r.closedOnlyMargin} />
+                        <ForecastCell revenue={r.commit} margin={r.commitMargin} />
+                        <ForecastCell revenue={r.bestCase} margin={r.bestCaseMargin} />
+                        <ForecastCell revenue={r.openPipeline} margin={r.openPipelineMargin} />
                       </tr>
                     ))}
                   </tbody>
