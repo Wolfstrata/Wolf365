@@ -7,14 +7,14 @@ export interface NavItem {
   /** Lucide icon name resolved in the client sidebar. */
   icon: string;
   permission?: Permission;
-  /** Visually grouped under this section heading. */
+  /** Visually grouped under this section heading. Administration items are not
+   *  rendered in the sidebar — they're surfaced via the account menu. */
   section:
     | "Finance Workspace"
     | "Connector Data"
     | "CRM"
     | "Reconciliation"
-    | "Administration"
-    | "Account";
+    | "Administration";
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -46,5 +46,4 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Users", href: "/admin/users", icon: "Users", section: "Administration", permission: "users:manage" },
   { label: "Security & SSO", href: "/admin/security", icon: "ShieldCheck", section: "Administration", permission: "sso:configure" },
   { label: "Backups", href: "/admin/backup", icon: "DatabaseBackup", section: "Administration", permission: "backups:manage" },
-  { label: "Settings", href: "/settings", icon: "Settings", section: "Account" },
 ];

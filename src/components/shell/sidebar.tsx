@@ -67,13 +67,13 @@ const ICONS: Record<string, LucideIcon> = {
   Award,
 };
 
+// Administration + Account are intentionally omitted — Administration items and
+// Settings are surfaced through the account menu in the sidebar footer instead.
 const SECTION_ORDER = [
   "Finance Workspace",
   "Connector Data",
   "CRM",
   "Reconciliation",
-  "Administration",
-  "Account",
 ] as const;
 
 /**
