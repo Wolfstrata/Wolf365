@@ -23,10 +23,12 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "M365 Archived Clients", href: "/archived-licensing", icon: "Archive", section: "Finance Workspace", permission: "clients:read" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },
-  { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },
-  { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
+  // Hidden for now (functionality kept; routes still work) — future items.
+  // { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },
+  // { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
-  { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
+  // Hidden for now (functionality kept; route still works) — future item.
+  // { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },
   { label: "Cash-Flow / DSO", href: "/cash-flow", icon: "Banknote", section: "Finance Workspace", permission: "billing:read" },
   { label: "Forecast", href: "/crm/forecast", icon: "LineChart", section: "CRM", permission: "crm:read" },
   { label: "Opportunity Reliability", href: "/crm/reliability", icon: "Award", section: "CRM", permission: "crm:read" },
