@@ -347,12 +347,12 @@ export function OpportunityForm({
               <Field label="Term" required help="Length of the agreement.">
                 <select
                   name="termYears"
-                  value={termYears}
+                  value={String(termYears)}
                   onChange={(e) => onTermChange(Number(e.target.value))}
                   className={inputCls}
                 >
                   {TERM_YEARS_OPTIONS.map((y) => (
-                    <option key={y} value={y}>
+                    <option key={y} value={String(y)}>
                       {y} year{y > 1 ? "s" : ""}
                     </option>
                   ))}
