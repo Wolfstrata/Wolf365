@@ -160,6 +160,16 @@ export const salesforceConnector: ConnectorDefinition<
         "Optional Salesforce field giving the agreement length in YEARS (1–3). Left blank, the default term below is used.",
     },
     {
+      key: "recurringProductField",
+      label: "Recurring product field (optional)",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder: "Recurring__c",
+      helpText:
+        "Optional Salesforce field marking a Product opportunity as recurring (MRR). Products import as ONE-TIME by default; if this field is set and truthy (checkbox true, or a value like yes/recurring/monthly), that Product imports as recurring instead. Left blank, all Products are one-time. Only affects the Products line.",
+    },
+    {
       key: "defaultTermYears",
       label: "Default term",
       type: "select",
@@ -246,6 +256,8 @@ export const salesforceConnector: ConnectorDefinition<
     const marginField = (ctx.config.marginField ?? "").trim() || "Margin_Amount__c";
     const termField = (ctx.config.termField ?? "").trim();
     const contactEmailField = (ctx.config.contactEmailField ?? "").trim();
+    // Optional field that flags a Product as recurring (MRR) rather than one-time.
+    const recurringProductField = (ctx.config.recurringProductField ?? "").trim();
     // Default the Revenue Type field (used to route Product Income → Products)
     // when unset; an explicit empty value disables that routing.
     const revenueTypeField = (ctx.config.revenueTypeField ?? "Revenue_Type__c").trim();
@@ -260,6 +272,7 @@ export const salesforceConnector: ConnectorDefinition<
     if (marginField) assertFieldName(marginField, "Margin field");
     if (termField) assertFieldName(termField, "Term field");
     if (contactEmailField) assertFieldName(contactEmailField, "Contact email field");
+    if (recurringProductField) assertFieldName(recurringProductField, "Recurring product field");
     if (revenueTypeField) assertFieldName(revenueTypeField, "Revenue Type field");
     if (where) assertSoqlFilter(where);
 
@@ -282,6 +295,7 @@ export const salesforceConnector: ConnectorDefinition<
       ...(marginField ? [marginField] : []),
       ...(termField ? [termField] : []),
       ...(contactEmailField ? [contactEmailField] : []),
+      ...(recurringProductField ? [recurringProductField] : []),
       ...(revenueTypeField ? [revenueTypeField] : []),
     ];
     const soql =
@@ -327,15 +341,29 @@ export const salesforceConnector: ConnectorDefinition<
       const rtSeen = (revenueType ?? "").trim() || "(blank/unreadable)";
       revenueTypesSeen[rtSeen] = (revenueTypesSeen[rtSeen] ?? 0) + 1;
 
-      // The Salesforce Amount IS the total contract value; MRR is TCV ÷ 12.
-      // Margin is likewise the total margin, with monthly margin = margin ÷ 12.
+      // Pricing model. Service lines (Managed Services / NOC / M365) are always
+      // recurring: the Salesforce Amount is the total contract value and MRR is
+      // TCV ÷ 12. Products are almost always ONE-TIME (a flat Amount + dollar
+      // margin, no MRR/term) — unless an opportunity is explicitly flagged
+      // recurring via the configured field.
+      const isProductLine = recordLine === "PRODUCTS";
+      const productRecurring =
+        isProductLine && recurringProductField
+          ? isRecurringFlag(r, recurringProductField)
+          : false;
+      const oneTime = isProductLine && !productRecurring;
+
       const tcv = getNum(r, amountField);
-      const monthlyAmount = tcv != null ? round2(tcv / 12) : null;
       const tcvMargin = marginField ? getNum(r, marginField) : null;
-      const monthlyMargin = tcvMargin != null ? round2(tcvMargin / 12) : null;
-      const marginPct = computeMarginPercentage(monthlyAmount ?? 0, monthlyMargin ?? 0);
+      const monthlyAmount = oneTime || tcv == null ? null : round2(tcv / 12);
+      const monthlyMargin = oneTime || tcvMargin == null ? null : round2(tcvMargin / 12);
+      // Margin % is margin ÷ amount either way (the ÷12 cancels for recurring).
+      const marginPct = computeMarginPercentage(tcv ?? 0, tcvMargin ?? 0);
       const commission =
-        monthlyAmount != null ? commissionAmount(recordLine, termYears, monthlyAmount) : null;
+        !oneTime && monthlyAmount != null
+          ? commissionAmount(recordLine, termYears, monthlyAmount)
+          : null;
+      const recordTerm = oneTime ? 1 : termYears;
 
       const stage = mapStage(r);
       const probability = clampPct(getNum(r, "Probability"), stage);
@@ -354,7 +382,7 @@ export const salesforceConnector: ConnectorDefinition<
         marginAmount: tcvMargin,
         marginPercentage: marginPct,
         commissionAmount: commission,
-        termYears,
+        termYears: recordTerm,
         billingFrequency: "MONTHLY" as const,
         stage,
         probability,
@@ -581,6 +609,19 @@ function getNum(record: Record<string, unknown>, path: string): number | null {
   if (typeof v === "number") return v;
   if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
   return null;
+}
+
+/** Interpret a Salesforce field as a recurring flag (checkbox, text, or number). */
+function isRecurringFlag(record: Record<string, unknown>, path: string): boolean {
+  const v = getRaw(record, path);
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v > 0;
+  if (typeof v === "string") {
+    return ["true", "yes", "y", "1", "recurring", "monthly", "mrr"].includes(
+      v.trim().toLowerCase(),
+    );
+  }
+  return false;
 }
 
 function resolveLine(value: string | undefined): CrmLine {

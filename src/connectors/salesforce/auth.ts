@@ -36,6 +36,7 @@ export interface SalesforceConfig {
   marginField?: string;
   termField?: string;
   contactEmailField?: string;
+  recurringProductField?: string;
   defaultTermYears?: string;
   defaultOwnerEmail?: string;
 }
