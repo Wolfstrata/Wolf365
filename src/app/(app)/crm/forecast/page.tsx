@@ -120,6 +120,19 @@ export default async function ForecastPage() {
     },
   ];
 
+  // Gross revenue (deal amount) per forecast category, for the category cards.
+  const revenueByCategory: Record<string, number> = {};
+  for (const o of opps) {
+    revenueByCategory[o.forecastCategory] =
+      (revenueByCategory[o.forecastCategory] ?? 0) + (o.amount ? Number(o.amount) : 0);
+  }
+  const categoryCards: { label: string; category: string }[] = [
+    { label: "Closed", category: "CLOSED" },
+    { label: "Commit", category: "COMMIT" },
+    { label: "Best Case", category: "BEST_CASE" },
+    { label: "Open", category: "PIPELINE" },
+  ];
+
   const lineMax = Math.max(1, ...CRM_LINE_ORDER.map((l) => f.byLine[l].amount));
   const stageMax = Math.max(1, ...STAGE_ORDER.map((s) => f.byStage[s].amount));
 
@@ -147,6 +160,18 @@ export default async function ForecastPage() {
                   </div>
                   <p className="mt-2 text-2xl font-semibold tabular-nums">{h.value}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{h.sub}</p>
+                </Card>
+              ))}
+            </div>
+
+            {/* Gross revenue by forecast category */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {categoryCards.map((c) => (
+                <Card key={c.category}>
+                  <p className="text-sm text-muted-foreground">Gross Revenue — {c.label}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {formatCurrency(revenueByCategory[c.category] ?? 0)}
+                  </p>
                 </Card>
               ))}
             </div>

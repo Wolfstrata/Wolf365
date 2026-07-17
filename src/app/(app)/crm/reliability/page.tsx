@@ -58,13 +58,25 @@ export default async function OpportunityReliabilityPage() {
     where: { id: { in: [...byOwner.keys()] } },
     select: { id: true, name: true, email: true },
   });
-  const nameById = new Map(owners.map((o) => [o.id, o.name ?? o.email]));
+  const ownerById = new Map(owners.map((o) => [o.id, o]));
+
+  // Management (not regular sales reps) are excluded from the leaderboard.
+  const MANAGEMENT_MATCHERS = ["rperumal", "raj perumal", "nathan", "andrew"];
+  const isManagement = (name: string | null, email: string): boolean => {
+    const hay = `${name ?? ""} ${email}`.toLowerCase();
+    return MANAGEMENT_MATCHERS.some((m) => hay.includes(m));
+  };
 
   const ranked = [...byOwner.entries()]
+    .filter(([ownerId]) => {
+      const o = ownerById.get(ownerId);
+      return !o || !isManagement(o.name, o.email);
+    })
     .map(([ownerId, t]) => {
+      const o = ownerById.get(ownerId);
       const decided = t.won + t.lost;
       return {
-        rep: nameById.get(ownerId) ?? "Unknown",
+        rep: o?.name ?? o?.email ?? "Unknown",
         // Weighted reliability: entered opportunities that reached Closed Won,
         // with current-FY opportunities counted CURRENT_FY_WEIGHT×.
         reliability: t.wTotal > 0 ? (t.wWon / t.wTotal) * 100 : 0,
