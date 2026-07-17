@@ -54,6 +54,16 @@ describe("computeCashFlowReport", () => {
     expect(r.bestReliable.some((c) => c.customer === "Acme")).toBe(true);
   });
 
+  it("ranks follow-up by dollars × days over 30 (only > 30 days late)", () => {
+    // Globex: $5000 paid 60 days late → score 5000 × (60-30) = 150000.
+    // Acme's late invoice is only 10 days late → excluded.
+    expect(r.followUp).toHaveLength(1);
+    expect(r.followUp[0]!.customer).toBe("Globex");
+    expect(r.followUp[0]!.score).toBe(150000);
+    expect(r.followUp[0]!.lateAmount).toBe(5000);
+    expect(r.followUp[0]!.large).toBe(false); // 5000 < 10000
+  });
+
   it("computes YoY cohorts on the two most recent invoice years", () => {
     expect(r.compareYear).toBe(2025);
     expect(r.priorYear).toBe(2024);

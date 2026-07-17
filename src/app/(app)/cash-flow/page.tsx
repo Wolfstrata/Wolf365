@@ -3,8 +3,9 @@ import { Banknote, TrendingUp } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState, StatItem } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
-import { getCashFlowReport } from "@/lib/reports/cash-flow";
+import { getCashFlowReport, resolveDateWindow } from "@/lib/reports/cash-flow";
 import type { CustomerRow } from "@/lib/reports/dso";
+import { RangeBar } from "./range-bar";
 
 export const maxDuration = 120;
 
@@ -60,22 +61,51 @@ const AR_PLAN: { action: string; owner: string; timing: string; impact: string }
  * cash-flow risk built from synced QuickBooks invoices + received payments.
  * Finance users and administrators only (billing:read).
  */
-export default async function CashFlowPage() {
+export default async function CashFlowPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
+}) {
   await requirePermission("billing:read");
-  const report = await getCashFlowReport();
+  const sp = await searchParams;
+  const range = sp.range ?? "fiscal";
+  const window = resolveDateWindow(range, sp.from, sp.to, new Date());
+  const report = await getCashFlowReport(window);
 
-  if (!report || !report.hasData) {
+  const rangeBar = <RangeBar range={range} from={sp.from} to={sp.to} />;
+
+  if (!report) {
     return (
       <div>
         <PageHeader
           title="Cash-Flow Days Sales Outstanding (DSO)"
           description="Customer payment behaviour, DSO, revenue quality and cash-flow risk, from QuickBooks invoices and payments."
         />
-        <div className="p-4 sm:p-8">
+        <div className="space-y-6 p-4 sm:p-8">
+          {rangeBar}
           <EmptyState
             icon={<Banknote className="h-8 w-8" />}
             title="No QuickBooks payment data yet"
             description="Sync QuickBooks (Connectors → QuickBooks Online → Sync Now) to pull invoices and received payments. A full sync covers annual figures; the per-invoice dates also drive the monthly breakdowns."
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (!report.hasData) {
+    return (
+      <div>
+        <PageHeader
+          title="Cash-Flow Days Sales Outstanding (DSO)"
+          description={`No invoices in the selected range (${window.label}). Try a wider range.`}
+        />
+        <div className="space-y-6 p-4 sm:p-8">
+          {rangeBar}
+          <EmptyState
+            icon={<Banknote className="h-8 w-8" />}
+            title="No invoices in this date range"
+            description="No QuickBooks invoices fall inside the selected range. Choose a wider range (e.g. All-Time), or sync QuickBooks if you expect data here."
           />
         </div>
       </div>
@@ -88,9 +118,11 @@ export default async function CashFlowPage() {
     <div>
       <PageHeader
         title="Cash-Flow Days Sales Outstanding (DSO)"
-        description="Customer payment behaviour, DSO, revenue quality and cash-flow risk. Source: QuickBooks invoices and received payments."
+        description={`Customer payment behaviour, DSO, revenue quality and cash-flow risk — ${window.label}. Source: QuickBooks invoices and received payments.`}
       />
       <div className="space-y-6 p-4 sm:p-8">
+        {rangeBar}
+
         {/* Headline KPIs */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Card>
@@ -157,6 +189,54 @@ export default async function CashFlowPage() {
               </tbody>
             </table>
           </div>
+        </section>
+
+        {/* Late-payment follow-up priority */}
+        <section>
+          <h2 className="mb-1 text-sm font-semibold">Top customers to follow up with (late payments)</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Ranked by a priority score = dollars paid more than 30 days late ×
+            days over 30. Large ($10k+) and very-late accounts rise to the top.
+          </p>
+          {report.followUp.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No customers paid more than 30 days late in this range — nothing to chase.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">#</th>
+                    <th className="px-4 py-2 font-medium">Customer</th>
+                    <th className="px-4 py-2 text-right font-medium">Late amount (&gt;30d)</th>
+                    <th className="px-4 py-2 text-right font-medium">Max days late</th>
+                    <th className="px-4 py-2 text-right font-medium">Avg days late</th>
+                    <th className="px-4 py-2 text-right font-medium">Priority score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.followUp.map((r, i) => (
+                    <tr key={r.customerId} className={`border-t ${r.large ? "bg-danger/5" : ""}`}>
+                      <td className="px-4 py-2 tabular-nums">{i + 1}</td>
+                      <td className="px-4 py-2 font-medium">
+                        {r.customer}
+                        {r.large && (
+                          <span className="ml-2 rounded-full bg-danger/15 px-2 py-0.5 text-xs font-medium text-danger">
+                            $10k+
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">{formatCurrency(r.lateAmount)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{r.maxDaysLate}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{r.avgDaysLate ?? "—"}</td>
+                      <td className="px-4 py-2 text-right font-semibold tabular-nums">{num(r.score)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         {/* Top revenue */}

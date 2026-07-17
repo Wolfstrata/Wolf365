@@ -65,6 +65,16 @@ export interface TierSummary {
   drag: number;
 }
 
+export interface FollowUpRow {
+  customerId: string;
+  customer: string;
+  lateAmount: number; // dollars paid > 30 days late
+  maxDaysLate: number;
+  avgDaysLate: number | null;
+  score: number; // Σ amount × (daysLate − 30) — weights by $ and days over 30
+  large: boolean; // late amount ≥ $10,000
+}
+
 export interface Mover {
   customer: string;
   prior: number;
@@ -94,6 +104,7 @@ export interface CashFlowReport {
     pctCustomersEarlyOnTime: number;
   };
   tiers: TierSummary[];
+  followUp: FollowUpRow[]; // late-payment follow-up priority (weighted by $ and days over 30)
   customers: CustomerRow[]; // all, sorted by cash received desc
   topRevenue: CustomerRow[];
   topDrag: CustomerRow[];
@@ -129,6 +140,9 @@ export function computeCashFlowReport(
     wDaysLate: number; // Σ amount × daysLate
     onTimeCash: number; // Σ amount where daysLate ≤ 0
     drag: number; // Σ amount × max(0, daysLate)
+    lateOver30: number; // Σ amount paid > 30 days late
+    scoreOver30: number; // Σ amount × (daysLate − 30) for daysLate > 30
+    maxDaysLate: number;
     // Per calendar year of the invoice cohort: cash + Σ amount×daysLate.
     byYear: Map<number, { cash: number; wLate: number }>;
   }
@@ -136,7 +150,19 @@ export function computeCashFlowReport(
   const ensure = (id: string, name: string): Acc => {
     let a = acc.get(id);
     if (!a) {
-      a = { customer: name, invoiced: 0, cash: 0, wDaysToCash: 0, wDaysLate: 0, onTimeCash: 0, drag: 0, byYear: new Map() };
+      a = {
+        customer: name,
+        invoiced: 0,
+        cash: 0,
+        wDaysToCash: 0,
+        wDaysLate: 0,
+        onTimeCash: 0,
+        drag: 0,
+        lateOver30: 0,
+        scoreOver30: 0,
+        maxDaysLate: 0,
+        byYear: new Map(),
+      };
       acc.set(id, a);
     }
     if (name && a.customer === id) a.customer = name;
@@ -174,6 +200,11 @@ export function computeCashFlowReport(
       if (daysLate <= 0) a.onTimeCash += ln.amount;
       const lateDrag = ln.amount * Math.max(0, daysLate);
       a.drag += lateDrag;
+      if (daysLate > 30) {
+        a.lateOver30 += ln.amount;
+        a.scoreOver30 += ln.amount * (daysLate - 30);
+      }
+      if (daysLate > a.maxDaysLate) a.maxDaysLate = daysLate;
       const y = inv.txnDate.getUTCFullYear();
       const yr = a.byYear.get(y) ?? { cash: 0, wLate: 0 };
       yr.cash += ln.amount;
@@ -216,6 +247,22 @@ export function computeCashFlowReport(
   });
 
   const earlyOnTime = rows.filter((r) => r.tier === "Early / on-time").length;
+
+  // Follow-up priority: customers with a history of paying > 30 days late,
+  // weighted by dollars × days over 30 (large + very-late float to the top).
+  const followUp: FollowUpRow[] = [...acc.entries()]
+    .filter(([, a]) => a.scoreOver30 > 0)
+    .map(([id, a]) => ({
+      customerId: id,
+      customer: a.customer,
+      lateAmount: round2(a.lateOver30),
+      maxDaysLate: a.maxDaysLate,
+      avgDaysLate: a.cash > 0 ? round1(a.wDaysLate / a.cash) : null,
+      score: Math.round(a.scoreOver30),
+      large: a.lateOver30 >= 10_000,
+    }))
+    .sort((x, y) => y.score - x.score)
+    .slice(0, topN);
 
   // YoY cohorts: the two most recent invoice years present in the data.
   const years = [...new Set(invoices.map((i) => i.txnDate.getUTCFullYear()))].sort((a, b) => b - a);
@@ -273,6 +320,7 @@ export function computeCashFlowReport(
       pctCustomersEarlyOnTime: customerCount > 0 ? round1((earlyOnTime / customerCount) * 100) : 0,
     },
     tiers,
+    followUp,
     customers: rows,
     topRevenue: [...rows].slice(0, topN),
     topDrag: [...rows].sort((x, y) => y.drag - x.drag).filter((r) => r.drag > 0).slice(0, topN),
