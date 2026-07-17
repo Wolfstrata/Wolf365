@@ -68,7 +68,7 @@ export default async function CashFlowPage() {
     return (
       <div>
         <PageHeader
-          title="Cash-Flow / DSO"
+          title="Cash-Flow Days Sales Outstanding (DSO)"
           description="Customer payment behaviour, DSO, revenue quality and cash-flow risk, from QuickBooks invoices and payments."
         />
         <div className="p-4 sm:p-8">
@@ -87,7 +87,7 @@ export default async function CashFlowPage() {
   return (
     <div>
       <PageHeader
-        title="Cash-Flow / DSO"
+        title="Cash-Flow Days Sales Outstanding (DSO)"
         description="Customer payment behaviour, DSO, revenue quality and cash-flow risk. Source: QuickBooks invoices and received payments."
       />
       <div className="space-y-6 p-4 sm:p-8">
