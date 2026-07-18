@@ -118,7 +118,7 @@ export default async function SuppliersDpoPage({
     <div>
       <PageHeader
         title="Suppliers & Expenses — Days Payable Outstanding (DPO)"
-        description={`Supplier payment behaviour, DPO and overdue-payable risk — ${window.label}. Excludes payroll, taxes, loans and credit cards/lines. Source: QuickBooks bills and bill payments.`}
+        description={`Supplier payment behaviour, DPO and overdue-payable risk — ${window.label}. Excludes payroll, taxes, loans and credit cards/lines. Source: QuickBooks bills and bill payments. Amounts in CAD — foreign-currency transactions converted at the point-in-time exchange rate.`}
       />
       <div className="space-y-6 p-4 sm:p-8">
         {rangeBar}

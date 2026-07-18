@@ -381,6 +381,9 @@ model QboInvoice {
   totalAmount  Decimal   @default(0) @db.Decimal(18, 2)
   balance      Decimal   @default(0) @db.Decimal(18, 2)
   currency     String?
+  // Home-currency units per one unit of `currency` (QBO ExchangeRate at txn date).
+  // 1 for home-currency docs; multiply amounts by this to get the home (CAD) value.
+  exchangeRate Decimal   @default(1) @db.Decimal(18, 8)
   termName     String?
   raw          Json?
   lastSyncedAt DateTime  @default(now())
@@ -401,6 +404,8 @@ model QboPayment {
   txnDate      DateTime // payment date
   totalAmount  Decimal  @default(0) @db.Decimal(18, 2)
   currency     String?
+  // Home-currency units per foreign unit at the PAYMENT date (rate revenue was received).
+  exchangeRate Decimal  @default(1) @db.Decimal(18, 8)
   lines        Json? // [{ invoiceId, amount }]
   raw          Json?
   lastSyncedAt DateTime @default(now())
@@ -426,6 +431,8 @@ model QboBill {
   totalAmount  Decimal   @default(0) @db.Decimal(18, 2)
   balance      Decimal   @default(0) @db.Decimal(18, 2)
   currency     String?
+  // Home-currency units per foreign unit (QBO ExchangeRate at the bill date).
+  exchangeRate Decimal   @default(1) @db.Decimal(18, 8)
   raw          Json?
   lastSyncedAt DateTime  @default(now())
 
@@ -445,6 +452,8 @@ model QboBillPayment {
   txnDate      DateTime // payment date
   totalAmount  Decimal  @default(0) @db.Decimal(18, 2)
   currency     String?
+  // Home-currency units per foreign unit at the PAYMENT date (rate revenue was paid).
+  exchangeRate Decimal  @default(1) @db.Decimal(18, 8)
   lines        Json? // [{ billId, amount }]
   raw          Json?
   lastSyncedAt DateTime @default(now())

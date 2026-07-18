@@ -122,26 +122,32 @@ export async function getCashFlowReport(
           txnDate: true,
           dueDate: true,
           totalAmount: true,
+          exchangeRate: true,
         },
       }),
-      prisma.qboPayment.findMany({ select: { txnDate: true, lines: true } }),
+      prisma.qboPayment.findMany({ select: { txnDate: true, lines: true, exchangeRate: true } }),
     ]);
 
+    // Convert every amount to the home currency (CAD) using QBO's point-in-time
+    // exchange rate, so foreign (e.g. USD) figures don't mix with CAD ones.
+    // Invoices convert at the invoice-date rate; payments at the payment-date rate
+    // (the rate the day the revenue was received). Home-currency docs have rate 1.
     const inv: CashFlowInvoice[] = invoices.map((i) => ({
       qboId: i.qboId,
       customerId: i.customerRef ?? i.customerName ?? i.qboId,
       customerName: i.customerName ?? i.customerRef ?? "Unknown",
       txnDate: i.txnDate,
       dueDate: i.dueDate ?? null,
-      total: Number(i.totalAmount),
+      total: Number(i.totalAmount) * Number(i.exchangeRate),
     }));
 
     const pay: CashFlowPayment[] = payments.map((p) => {
+      const rate = Number(p.exchangeRate);
       const raw = Array.isArray(p.lines) ? (p.lines as unknown[]) : [];
       const lines = raw
         .map((l) => {
           const o = (l ?? {}) as { invoiceId?: unknown; amount?: unknown };
-          return { invoiceId: String(o.invoiceId ?? ""), amount: Number(o.amount ?? 0) };
+          return { invoiceId: String(o.invoiceId ?? ""), amount: Number(o.amount ?? 0) * rate };
         })
         .filter((l) => l.invoiceId);
       return { txnDate: p.txnDate, lines };

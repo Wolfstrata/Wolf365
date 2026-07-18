@@ -115,7 +115,7 @@ export default async function CashFlowPage({
     <div>
       <PageHeader
         title="Cash-Flow / Days Sales Outstanding (DSO)"
-        description={`Customer payment behaviour, DSO, revenue quality and cash-flow risk — ${window.label}. Source: QuickBooks invoices and received payments.`}
+        description={`Customer payment behaviour, DSO, revenue quality and cash-flow risk — ${window.label}. Source: QuickBooks invoices and received payments. Amounts in CAD — foreign-currency transactions converted at the point-in-time exchange rate.`}
       />
       <div className="space-y-6 p-4 sm:p-8">
         {rangeBar}

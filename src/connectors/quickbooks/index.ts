@@ -400,6 +400,7 @@ interface QboInvoiceRaw {
   DueDate?: string;
   TotalAmt?: number;
   Balance?: number;
+  ExchangeRate?: number;
   CustomerRef?: QboRef;
   CurrencyRef?: QboRef;
   SalesTermRef?: QboRef;
@@ -419,6 +420,7 @@ async function upsertQboInvoice(
     totalAmount: inv.TotalAmt ?? 0,
     balance: inv.Balance ?? 0,
     currency: inv.CurrencyRef?.value ?? null,
+    exchangeRate: inv.ExchangeRate ?? 1,
     termName: inv.SalesTermRef?.name ?? null,
     raw: inv as unknown as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),
@@ -436,6 +438,7 @@ interface QboPaymentRaw {
   Id: string;
   TxnDate?: string;
   TotalAmt?: number;
+  ExchangeRate?: number;
   CustomerRef?: QboRef;
   CurrencyRef?: QboRef;
   Line?: Array<{
@@ -464,6 +467,7 @@ async function upsertQboPayment(
     txnDate: parseQboDate(p.TxnDate) ?? new Date(),
     totalAmount: p.TotalAmt ?? 0,
     currency: p.CurrencyRef?.value ?? null,
+    exchangeRate: p.ExchangeRate ?? 1,
     lines: lines as unknown as Prisma.InputJsonValue,
     raw: p as unknown as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),
@@ -484,6 +488,7 @@ interface QboBillRaw {
   DueDate?: string;
   TotalAmt?: number;
   Balance?: number;
+  ExchangeRate?: number;
   PrivateNote?: string;
   VendorRef?: QboRef;
   CurrencyRef?: QboRef;
@@ -518,6 +523,7 @@ async function upsertQboBill(
     totalAmount: bill.TotalAmt ?? 0,
     balance: bill.Balance ?? 0,
     currency: bill.CurrencyRef?.value ?? null,
+    exchangeRate: bill.ExchangeRate ?? 1,
     raw: bill as unknown as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),
   };
@@ -534,6 +540,7 @@ interface QboBillPaymentRaw {
   Id: string;
   TxnDate?: string;
   TotalAmt?: number;
+  ExchangeRate?: number;
   VendorRef?: QboRef;
   CurrencyRef?: QboRef;
   Line?: Array<{
@@ -562,6 +569,7 @@ async function upsertQboBillPayment(
     txnDate: parseQboDate(bp.TxnDate) ?? new Date(),
     totalAmount: bp.TotalAmt ?? 0,
     currency: bp.CurrencyRef?.value ?? null,
+    exchangeRate: bp.ExchangeRate ?? 1,
     lines: lines as unknown as Prisma.InputJsonValue,
     raw: bp as unknown as Prisma.InputJsonValue,
     lastSyncedAt: new Date(),

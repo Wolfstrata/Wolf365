@@ -51,9 +51,10 @@ export async function getSuppliersReport(
           txnDate: true,
           dueDate: true,
           totalAmount: true,
+          exchangeRate: true,
         },
       }),
-      prisma.qboBillPayment.findMany({ select: { txnDate: true, lines: true } }),
+      prisma.qboBillPayment.findMany({ select: { txnDate: true, lines: true, exchangeRate: true } }),
     ]);
 
     // Exclude payroll/tax/loan/credit bills; keep the set of kept bill ids so
@@ -63,21 +64,24 @@ export async function getSuppliersReport(
     );
     const keptIds = new Set(kept.map((b) => b.qboId));
 
+    // Convert to home currency (CAD) using QBO's point-in-time exchange rate —
+    // bills at the bill-date rate, bill-payments at the payment-date rate.
     const inv: CashFlowInvoice[] = kept.map((b) => ({
       qboId: b.qboId,
       customerId: b.vendorRef ?? b.vendorName ?? b.qboId,
       customerName: b.vendorName ?? b.vendorRef ?? "Unknown supplier",
       txnDate: b.txnDate,
       dueDate: b.dueDate ?? null,
-      total: Number(b.totalAmount),
+      total: Number(b.totalAmount) * Number(b.exchangeRate),
     }));
 
     const pay: CashFlowPayment[] = billPayments.map((p) => {
+      const rate = Number(p.exchangeRate);
       const raw = Array.isArray(p.lines) ? (p.lines as unknown[]) : [];
       const lines = raw
         .map((l) => {
           const o = (l ?? {}) as { billId?: unknown; amount?: unknown };
-          return { invoiceId: String(o.billId ?? ""), amount: Number(o.amount ?? 0) };
+          return { invoiceId: String(o.billId ?? ""), amount: Number(o.amount ?? 0) * rate };
         })
         .filter((l) => l.invoiceId && keptIds.has(l.invoiceId));
       return { txnDate: p.txnDate, lines };
