@@ -20,6 +20,12 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
+  // Cross-origin isolation: keep this app's browsing context and its resources
+  // same-origin. The app authenticates via full-page OAuth redirects (Entra SSO,
+  // QBO callback), never popups, so `same-origin` here is safe and blocks other
+  // sites from opening/reading our windows or loading our resources cross-origin.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
   // NOTE: Content-Security-Policy is set per-request in middleware.ts so it can
   // include a unique nonce (no 'unsafe-inline' for scripts).
 ];
