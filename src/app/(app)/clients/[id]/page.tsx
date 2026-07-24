@@ -8,6 +8,7 @@ import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { LocalTime } from "@/components/ui/local-time";
 import { recurringSummary, monthlyRevenue, toRecurringInput } from "@/lib/billing/recurring";
+import { computeProration } from "@/lib/billing/proration";
 import { renewalWindow, isMonthToMonth, isExpired } from "@/lib/licensing/renewal";
 import { isM365Subscription } from "@/lib/licensing/vendor";
 import { isMarginException } from "@/lib/licensing/margin";
@@ -79,6 +80,17 @@ export default async function ClientProfilePage({
   const isGroup = client.subsidiaries.length > 0;
   // Single "now" for expiry checks across recurring totals + the licensing table.
   const attentionNow = new Date();
+
+  // Current calendar month (UTC), for classifying/pro-rating licenses added
+  // mid-month. A subscription whose start date falls in this window is billed
+  // pro-rated for its first month; it becomes "existing" (full month) next cycle.
+  const monthStart = new Date(Date.UTC(attentionNow.getUTCFullYear(), attentionNow.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(attentionNow.getUTCFullYear(), attentionNow.getUTCMonth() + 1, 1));
+  const monthLabel = monthStart.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
   // Group rollup: cumulative recurring across this client + all its
   // subsidiaries' M365 licensing. Each subscription belongs to exactly one
@@ -207,6 +219,30 @@ export default async function ClientProfilePage({
     if (marginException || (marginDelta != null && marginDelta < 0)) attention = "bad";
     else if (marginDelta != null && marginDelta > 0) attention = "good";
 
+    // Licenses whose start date falls in the current month are pro-rated for
+    // their first month (billed from the add day to month end).
+    const addedThisMonth =
+      s.startDate != null &&
+      s.startDate.getTime() >= monthStart.getTime() &&
+      s.startDate.getTime() < monthEnd.getTime();
+    let proratedFactor: number | null = null;
+    let proratedExtendedPrice: number | null = null;
+    if (addedThisMonth && s.startDate) {
+      // Count from the start of the add day so the add day is billed in full.
+      const activeStart = new Date(
+        Date.UTC(s.startDate.getUTCFullYear(), s.startDate.getUTCMonth(), s.startDate.getUTCDate()),
+      );
+      const pr = computeProration({
+        periodStart: monthStart,
+        periodEnd: monthEnd,
+        activeStart,
+        activeEnd: s.cancellationWindowEnds ?? null,
+      });
+      proratedFactor = pr.factor;
+      proratedExtendedPrice =
+        customerPrice != null ? round2(customerPrice * s.quantity * pr.factor) : null;
+    }
+
     return {
       id: s.id,
       sku: s.productSku,
@@ -232,8 +268,15 @@ export default async function ClientProfilePage({
       status: s.status,
       reducible: s.reducible,
       currency,
+      startDate: s.startDate ? s.startDate.toISOString() : null,
+      proratedFactor,
+      proratedExtendedPrice,
     };
   });
+
+  // Split into existing licensing vs. licenses added (and pro-rated) this month.
+  const addedThisMonthRows = m365Rows.filter((r) => r.proratedFactor != null);
+  const existingRows = m365Rows.filter((r) => r.proratedFactor == null);
 
   // Per-client attention summary: upcoming renewals + under-cost lines.
   const clientRenewals = m365Rows
@@ -629,19 +672,44 @@ export default async function ClientProfilePage({
         {/* This client's own licensing (groups show the combined by-SKU table
             above instead, to avoid a long duplicated list). */}
         {!isGroup && td && (
-          <Card>
-            <h2 className="mb-3 text-sm font-semibold">
-              Microsoft 365 licensing ({visibleSubs.length})
-            </h2>
-            {visibleSubs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No subscriptions synced for this customer. Run a TD SYNNEX sync,
-                or this customer may have no active TD SYNNEX subscriptions.
+          <>
+            <Card>
+              <h2 className="mb-3 text-sm font-semibold">
+                Existing Licensing ({existingRows.length})
+              </h2>
+              {visibleSubs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No subscriptions synced for this customer. Run a TD SYNNEX sync,
+                  or this customer may have no active TD SYNNEX subscriptions.
+                </p>
+              ) : existingRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  All current licensing was added this month — see the section below.
+                </p>
+              ) : (
+                <M365LicensingTable rows={existingRows} canArchive={can(user.role, "billing:edit")} />
+              )}
+            </Card>
+
+            <Card>
+              <h2 className="mb-1 text-sm font-semibold">
+                Pro-rated Licensing Added This Month ({addedThisMonthRows.length})
+              </h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Licenses whose start date falls in {monthLabel}, billed pro-rated from the day
+                they were added through month-end. They roll into Existing Licensing next month.
               </p>
-            ) : (
-              <M365LicensingTable rows={m365Rows} canArchive={can(user.role, "billing:edit")} />
-            )}
-          </Card>
+              {addedThisMonthRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No licenses added this month.</p>
+              ) : (
+                <M365LicensingTable
+                  rows={addedThisMonthRows}
+                  canArchive={can(user.role, "billing:edit")}
+                  variant="added"
+                />
+              )}
+            </Card>
+          </>
         )}
       </div>
     </div>

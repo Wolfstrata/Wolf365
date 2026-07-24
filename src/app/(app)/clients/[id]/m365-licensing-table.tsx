@@ -37,6 +37,12 @@ export interface M365LicensingRow {
   status: string | null;
   reducible: boolean | null;
   currency: string;
+  /** Subscription start (activation) date, ISO — the "added" date for mid-month adds. */
+  startDate: string | null;
+  /** Current-month proration factor (0–1) for licenses added this month; else null. */
+  proratedFactor: number | null;
+  /** Extended price pro-rated for the current month (added-this-month rows); else null. */
+  proratedExtendedPrice: number | null;
 }
 
 const RENEWAL_BADGE: Record<RenewalBucket, string> = {
@@ -93,10 +99,14 @@ function cmp(a: M365LicensingRow, b: M365LicensingRow, key: SortKey): number {
 export function M365LicensingTable({
   rows,
   canArchive = false,
+  variant = "existing",
 }: {
   rows: M365LicensingRow[];
   canArchive?: boolean;
+  /** "added" appends an Added-date + Pro-rated-this-month column for mid-month adds. */
+  variant?: "existing" | "added";
 }) {
+  const showProration = variant === "added";
   const [hideOneTime, setHideOneTime] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -161,6 +171,12 @@ export function M365LicensingTable({
                 </th>
               ))}
               <th className="py-1 pr-4 font-medium">Reducible</th>
+              {showProration && (
+                <>
+                  <th className="py-1 pr-4 font-medium">Added</th>
+                  <th className="py-1 pr-4 text-right font-medium">Pro-rated this mo</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -279,6 +295,27 @@ export function M365LicensingTable({
                       "—"
                     )}
                   </td>
+                  {showProration && (
+                    <>
+                      <td className="py-1.5 pr-4 whitespace-nowrap">
+                        {r.startDate ? <LocalTime value={r.startDate} dateOnly /> : "—"}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right tabular-nums">
+                        {r.proratedExtendedPrice != null ? (
+                          <>
+                            {formatCurrency(r.proratedExtendedPrice, r.currency)}
+                            {r.proratedFactor != null && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                ({Math.round(r.proratedFactor * 100)}%)
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </>
+                  )}
                 </tr>
               );
             })}
