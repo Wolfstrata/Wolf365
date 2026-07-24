@@ -28,6 +28,33 @@ export interface ChangeLogResult {
   raw: unknown;
 }
 
+/**
+ * Generate candidate paths by re-spelling a change-log-ish last path segment.
+ * Stellr's route is one of several common spellings (changelogs / change-logs /
+ * changeLogs …); we try them so a single wrong spelling doesn't force the admin
+ * to guess-and-save repeatedly. The configured spelling is always tried first.
+ */
+function changeLogPathVariants(template: string): string[] {
+  const [pathPart = "", query = ""] = template.split("?");
+  const segs = pathPart.split("/");
+  const lastIdx = segs.length - 1;
+  const last = segs[lastIdx] ?? "";
+  if (!/change|log/i.test(last)) return [template];
+  const spellings = [last, "change-logs", "changeLogs", "changelogs", "change-log", "changelog"];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of spellings) {
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const copy = [...segs];
+    copy[lastIdx] = s;
+    const joined = copy.join("/");
+    out.push(query ? `${joined}?${query}` : joined);
+  }
+  return out;
+}
+
 /** Pull the first array-of-objects out of a Stellr paginated envelope. */
 function extractRecords(parsed: unknown): Record<string, unknown>[] {
   if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
@@ -112,34 +139,51 @@ export async function fetchStellrChangeLogs(
       (next) => ctx.saveSecrets(next as Record<string, unknown>),
     );
     const base = (config.apiBaseUrl ?? "").replace(/\/$/, "");
-    let filled = chosenPath
-      .replace(/\{customerNo\}/g, encodeURIComponent(customerNo))
-      .replace(/\{contractNo\}/g, encodeURIComponent(contractNo));
-    if (!filled.startsWith("/")) filled = `/${filled}`;
-    const url = `${base}${filled}`;
+    const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
 
-    const res = await connectorFetch(url, {
-      connectorType: "TD_SYNNEX_STELLR",
-      connectorId: connector.id,
-      action: "changelogs_probe",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    });
-
-    let raw: unknown = res.body;
-    try {
-      raw = JSON.parse(res.body);
-    } catch {
-      /* non-JSON body — surface as-is */
+    // Try the configured spelling first, then common change-log segment variants
+    // so one wrong spelling doesn't force a save-and-retry loop. First 2xx wins;
+    // otherwise keep the configured spelling's result to report.
+    const variants = changeLogPathVariants(chosenPath);
+    let chosen: { url: string; status: number; ok: boolean; raw: unknown } | null = null;
+    let firstAttempt: { url: string; status: number; ok: boolean; raw: unknown } | null = null;
+    for (const variant of variants) {
+      let filled = variant
+        .replace(/\{customerNo\}/g, encodeURIComponent(customerNo))
+        .replace(/\{contractNo\}/g, encodeURIComponent(contractNo));
+      if (!filled.startsWith("/")) filled = `/${filled}`;
+      const url = `${base}${filled}`;
+      const res = await connectorFetch(url, {
+        connectorType: "TD_SYNNEX_STELLR",
+        connectorId: connector.id,
+        action: "changelogs_probe",
+        headers,
+      });
+      let raw: unknown = res.body;
+      try {
+        raw = JSON.parse(res.body);
+      } catch {
+        /* non-JSON body — surface as-is */
+      }
+      const attempt = { url, status: res.status, ok: res.ok, raw };
+      firstAttempt ??= attempt;
+      if (res.ok) {
+        chosen = attempt;
+        break;
+      }
     }
+    const result = chosen ?? firstAttempt!;
+    const foundVariant = chosen && variants.length > 1;
+    const raw = result.raw;
 
     return {
-      ok: res.ok,
-      status: res.status,
-      url,
-      message: res.ok
-        ? `HTTP ${res.status} · ${chosenEnv}`
-        : `HTTP ${res.status} · ${chosenEnv} — check the change logs path/parameters`,
-      records: res.ok ? extractRecords(raw) : [],
+      ok: result.ok,
+      status: result.status,
+      url: result.url,
+      message: result.ok
+        ? `HTTP ${result.status} · ${chosenEnv}${foundVariant ? " — working path found; save this exact path in the connector" : ""}`
+        : `HTTP ${result.status} · ${chosenEnv} — tried ${variants.length} path spelling(s); none matched. Verify the exact segment in the Stellr docs.`,
+      records: result.ok ? extractRecords(raw) : [],
       raw,
     };
   } catch (err) {
