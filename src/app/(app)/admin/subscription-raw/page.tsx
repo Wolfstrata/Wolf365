@@ -1,9 +1,32 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { formatDate } from "@/lib/utils";
+import { fetchStellrChangeLogs, type ChangeLogResult } from "@/connectors/tdsynnex/changelogs";
 
 export const maxDuration = 60;
+
+/**
+ * Derive the Stellr contract number for a subscription. It is usually carried in
+ * the raw payload; otherwise the subscription id is `{contractNo}_{line}` (e.g.
+ * "411833_1" → "411833"), so fall back to the prefix before the first separator.
+ */
+function deriveContractNo(
+  raw: unknown,
+  stellrSubscriptionId: string,
+): string | null {
+  if (raw && typeof raw === "object") {
+    const r = raw as Record<string, unknown>;
+    for (const k of ["contractNo", "contractNumber", "contract", "contractId"]) {
+      const v = r[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+      if (typeof v === "number") return String(v);
+    }
+  }
+  const prefix = stellrSubscriptionId.split(/[_\-:]/)[0];
+  return prefix || null;
+}
 
 /**
  * Admin diagnostic: inspect the raw TD SYNNEX (Stellr) subscription payloads for a
@@ -45,11 +68,13 @@ function scanDateFields(raw: unknown): { path: string; value: string }[] {
 export default async function SubscriptionRawPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; cl?: string }>;
 }) {
   await requirePermission("connectors:configure");
-  const { q } = await searchParams;
+  const { q, cl } = await searchParams;
   const query = (q ?? "").trim();
+  // Subscription id whose change logs the admin asked to fetch (live call).
+  const changeLogSubId = (cl ?? "").trim();
 
   const customers = query
     ? await prisma.tdSynnexCustomer.findMany({
@@ -62,6 +87,7 @@ export default async function SubscriptionRawPage({
         select: {
           id: true,
           name: true,
+          stellrId: true,
           subscriptions: {
             orderBy: { startDate: "desc" },
             select: {
@@ -81,6 +107,29 @@ export default async function SubscriptionRawPage({
         take: 5,
       })
     : [];
+
+  // Live change-log retrieval for the one requested subscription (read-only).
+  let changeLog: ChangeLogResult | null = null;
+  let changeLogContractNo: string | null = null;
+  if (changeLogSubId) {
+    for (const c of customers) {
+      const sub = c.subscriptions.find((s) => s.id === changeLogSubId);
+      if (sub) {
+        changeLogContractNo = deriveContractNo(sub.raw, sub.stellrSubscriptionId);
+        if (changeLogContractNo) {
+          changeLog = await fetchStellrChangeLogs(c.stellrId, changeLogContractNo);
+        } else {
+          changeLog = {
+            ok: false,
+            message: `Could not derive a contract number from subscription "${sub.stellrSubscriptionId}".`,
+            records: [],
+            raw: null,
+          };
+        }
+        break;
+      }
+    }
+  }
 
   return (
     <div>
@@ -120,13 +169,31 @@ export default async function SubscriptionRawPage({
             <div className="space-y-6">
               {c.subscriptions.map((s) => {
                 const candidates = scanDateFields(s.raw);
+                const contractNo = deriveContractNo(s.raw, s.stellrSubscriptionId);
+                const isActiveChangeLog = s.id === changeLogSubId;
                 return (
                   <div key={s.id} className="rounded-lg border p-3">
-                    <div className="mb-2 text-sm font-medium">
-                      {s.productName ?? s.productSku ?? s.stellrSubscriptionId}{" "}
-                      <span className="text-muted-foreground">· qty {s.quantity}</span>
-                      {s.status && <span className="text-muted-foreground"> · {s.status}</span>}
+                    <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                      <span>
+                        {s.productName ?? s.productSku ?? s.stellrSubscriptionId}{" "}
+                        <span className="text-muted-foreground">· qty {s.quantity}</span>
+                        {s.status && <span className="text-muted-foreground"> · {s.status}</span>}
+                      </span>
+                      <Link
+                        href={`/admin/subscription-raw?q=${encodeURIComponent(query)}${isActiveChangeLog ? "" : `&cl=${encodeURIComponent(s.id)}`}#cl-${s.id}`}
+                        id={`cl-${s.id}`}
+                        className="rounded-md border px-2 py-0.5 text-xs font-normal transition hover:bg-accent"
+                      >
+                        {isActiveChangeLog ? "Hide change logs" : "Fetch change logs"}
+                        {contractNo && (
+                          <span className="ml-1 text-muted-foreground">(contract {contractNo})</span>
+                        )}
+                      </Link>
                     </div>
+
+                    {isActiveChangeLog && changeLog && (
+                      <ChangeLogBlock result={changeLog} contractNo={changeLogContractNo} />
+                    )}
 
                     <div className="mb-3 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
                       <div>
@@ -176,6 +243,83 @@ export default async function SubscriptionRawPage({
           </Card>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a live listSubscriptionChangeLogs response for one subscription:
+ * status, the extracted entries with a date-field scan (so the mid-month add
+ * date + quantity delta are easy to spot), and the full raw JSON.
+ */
+function ChangeLogBlock({
+  result,
+  contractNo,
+}: {
+  result: ChangeLogResult;
+  contractNo: string | null;
+}) {
+  return (
+    <div className="mb-3 rounded-md border border-dashed bg-muted/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <span
+          className={`rounded-full px-2 py-0.5 font-medium ${
+            result.ok ? "bg-success/15 text-success" : "bg-danger/15 text-danger"
+          }`}
+        >
+          {result.message}
+        </span>
+        {contractNo && <span className="text-muted-foreground">contract {contractNo}</span>}
+        {result.ok && (
+          <span className="text-muted-foreground">
+            {result.records.length} change-log {result.records.length === 1 ? "entry" : "entries"}
+          </span>
+        )}
+      </div>
+
+      {result.url && (
+        <p className="mb-2 break-all text-[11px] text-muted-foreground">
+          <code>{result.url}</code>
+        </p>
+      )}
+
+      {result.records.length > 0 && (
+        <div className="mb-2 space-y-2">
+          {result.records.map((entry, i) => {
+            const dates = scanDateFields(entry);
+            return (
+              <div key={i} className="rounded border bg-background p-2">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                  Entry {i + 1} — date-like fields:
+                </p>
+                {dates.length > 0 ? (
+                  <ul className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-xs sm:grid-cols-2">
+                    {dates.map((f) => (
+                      <li key={f.path} className="tabular-nums">
+                        <code className="text-primary">{f.path}</code>{" "}
+                        <span className="text-muted-foreground">=</span> {f.value}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No date-like fields.</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <details open={!result.ok || result.records.length === 0}>
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+          Full change-log response
+        </summary>
+        <pre className="mt-2 max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs">
+          {typeof result.raw === "string"
+            ? result.raw
+            : JSON.stringify(result.raw, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 }

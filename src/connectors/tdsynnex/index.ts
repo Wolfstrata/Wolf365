@@ -115,6 +115,17 @@ export const tdSynnexConnector: ConnectorDefinition<
       helpText:
         "Documented path for listing M365 subscriptions. Required for subscription sync.",
     },
+    {
+      key: "changeLogsPath",
+      label: "Subscription change logs path (optional)",
+      type: "text",
+      required: false,
+      secret: false,
+      placeholder:
+        "/reseller/v1/customers/{customerNo}/subscriptions/changelogs?contractNo={contractNo}",
+      helpText:
+        "Documented listSubscriptionChangeLogs path (use {customerNo} and {contractNo} placeholders). Used by the Subscription Raw diagnostic to reveal the exact date and quantity of mid-month seat additions.",
+    },
   ],
   secretFields: [
     {

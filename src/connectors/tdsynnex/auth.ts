@@ -34,6 +34,15 @@ export interface StellrConfig {
   /** Documented resource paths (admin-supplied from the API reference). */
   customersPath?: string;
   subscriptionsPath?: string;
+  /**
+   * Documented path for `listSubscriptionChangeLogs` (admin-supplied from the
+   * Stellr API reference). Uses {customerNo} and {contractNo} placeholders, e.g.
+   * `/reseller/v1/customers/{customerNo}/subscriptions/changelogs?contractNo={contractNo}`.
+   * Used to discover the exact date/quantity of mid-month seat additions on a
+   * co-terminous subscription (which fold into the base line, so their add date
+   * isn't visible on the subscription payload itself).
+   */
+  changeLogsPath?: string;
 }
 
 interface TokenResponse {
