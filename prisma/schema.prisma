@@ -769,6 +769,9 @@ model BillingLine {
   taxStatus    String?
   subtotal     Decimal @db.Decimal(18, 4)
   total        Decimal @db.Decimal(18, 4)
+  // True for a line covering seats added mid-period (pro-rated from the add day),
+  // split off the base subscription line. Shown as its own labeled line item.
+  isProratedAddition Boolean @default(false)
   notes        String?
 
   // Push results.

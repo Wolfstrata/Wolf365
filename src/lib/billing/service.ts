@@ -131,6 +131,7 @@ export async function generateAndSaveBillingRun(
             taxStatus: client.qboCustomer?.taxStatus ?? null,
             subtotal: l.subtotal,
             total: l.total,
+            isProratedAddition: l.isProratedAddition ?? false,
           })),
         },
       },

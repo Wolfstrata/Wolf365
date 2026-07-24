@@ -77,6 +77,7 @@ export default async function BillingRunDetailPage({
     total: Number(l.total),
     taxStatus: l.taxStatus,
     qboItemId: l.qboItemId,
+    isProratedAddition: l.isProratedAddition,
   }));
 
   // Push-eligibility summary: a line is pushable only when it has a mapped QBO

@@ -20,6 +20,18 @@ export interface EditableLine {
   total: number;
   taxStatus: string | null;
   qboItemId: string | null;
+  /** True for a line covering seats added mid-period (pro-rated, its own line). */
+  isProratedAddition?: boolean;
+}
+
+/** Badge marking a pro-rated mid-period seat-addition line. */
+function AdditionBadge({ line }: { line: EditableLine }) {
+  if (!line.isProratedAddition) return null;
+  return (
+    <span className="ml-2 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary align-middle">
+      pro-rated add
+    </span>
+  );
 }
 
 interface Props {
@@ -99,8 +111,11 @@ function PushEligibility({ line, hasQbo }: { line: EditableLine; hasQbo: boolean
 
 function StaticRow({ line, hasQbo }: { line: EditableLine; hasQbo: boolean }) {
   return (
-    <tr className="border-t align-top">
-      <td className="py-2 pr-4">{line.description}</td>
+    <tr className={`border-t align-top ${line.isProratedAddition ? "bg-primary/5" : ""}`}>
+      <td className="py-2 pr-4">
+        {line.description}
+        <AdditionBadge line={line} />
+      </td>
       <td className="py-2 pr-4 tabular-nums">{line.quantity}</td>
       <td className="py-2 pr-4 tabular-nums">{formatCurrency(line.unitPrice)}</td>
       <td className="py-2 pr-4 tabular-nums text-muted-foreground">
@@ -159,8 +174,11 @@ function EditableRow({
 
   if (!editing) {
     return (
-      <tr className="border-t align-top">
-        <td className="py-2 pr-4">{line.description}</td>
+      <tr className={`border-t align-top ${line.isProratedAddition ? "bg-primary/5" : ""}`}>
+        <td className="py-2 pr-4">
+          {line.description}
+          <AdditionBadge line={line} />
+        </td>
         <td className="py-2 pr-4 tabular-nums">{line.quantity}</td>
         <td className="py-2 pr-4 tabular-nums">{formatCurrency(line.unitPrice)}</td>
         <td className="py-2 pr-4 tabular-nums text-muted-foreground">
