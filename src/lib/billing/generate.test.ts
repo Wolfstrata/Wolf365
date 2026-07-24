@@ -90,4 +90,50 @@ describe("generateBillingLines", () => {
     expect(r.lines).toHaveLength(2);
     expect(sumLineTotals(r.lines)).toBe(300); // 250 + 50
   });
+
+  it("splits a mid-period seat addition onto its own pro-rated line", () => {
+    // 31-day January; base 10 seats + 4 added on Jan 17 (activeStart Jan 17 →
+    // billed Jan 17..Feb 1 = 15 days → factor 15/31).
+    const r = generateBillingLines({
+      ...base,
+      subscriptions: [
+        {
+          ...base.subscriptions[0]!,
+          quantity: 14, // total now includes the 4 added
+          monthlyAdditions: [{ date: d("2026-01-17"), seats: 4, note: "Add 4 seats" }],
+        },
+      ],
+    });
+    expect(r.exceptions).toHaveLength(0);
+    expect(r.lines).toHaveLength(2);
+
+    const baseLine = r.lines.find((l) => !l.isProratedAddition)!;
+    expect(baseLine.quantity).toBe(10); // 14 - 4 added
+    expect(baseLine.prorationFactor).toBe(1);
+    expect(baseLine.total).toBe(250); // 10 * 25
+
+    const addLine = r.lines.find((l) => l.isProratedAddition)!;
+    expect(addLine.quantity).toBe(4);
+    expect(addLine.proratedDays).toBe(15);
+    expect(addLine.periodDays).toBe(31);
+    expect(addLine.prorationFactor).toBeCloseTo(15 / 31, 6);
+    expect(addLine.total).toBeCloseTo(4 * 25 * (15 / 31), 2);
+    expect(addLine.description).toContain("added Jan 17");
+  });
+
+  it("omits the base line when every seat was added this period", () => {
+    const r = generateBillingLines({
+      ...base,
+      subscriptions: [
+        {
+          ...base.subscriptions[0]!,
+          quantity: 4,
+          monthlyAdditions: [{ date: d("2026-01-17"), seats: 4, note: "Add 4 seats" }],
+        },
+      ],
+    });
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0]!.isProratedAddition).toBe(true);
+    expect(r.lines[0]!.quantity).toBe(4);
+  });
 });

@@ -50,7 +50,7 @@ const META: Record<string, { title: string; description: string }> = {
   },
   "prorated-additions": {
     title: "Pro-rated licenses added this month",
-    description: "M365 licensing whose TD SYNNEX start date falls in the current month — added mid-month and billed pro-rated for their first month.",
+    description: "M365 seats added mid-month (from the TD SYNNEX change log), billed pro-rated for their first month. One row per seat addition.",
   },
 };
 

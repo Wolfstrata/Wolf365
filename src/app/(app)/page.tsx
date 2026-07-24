@@ -107,20 +107,35 @@ export default async function DashboardPage() {
   ).length;
   const expiredLicenses = allSubs.filter((s) => isExpired(s.renewalDate, s.status, now)).length;
 
-  // Clients that added M365 licensing this calendar month (billed pro-rated for
-  // their first month). Counts distinct clients with ≥1 sub started this month.
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).getTime();
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).getTime();
-  const proratedAdditionClients = clientsWithSubs.filter((c) =>
-    (c.tdSynnexCustomer?.subscriptions ?? []).some(
-      (s) =>
-        !s.archived &&
-        isM365Subscription(s) &&
-        s.startDate != null &&
-        s.startDate.getTime() >= monthStart &&
-        s.startDate.getTime() < monthEnd,
-    ),
-  ).length;
+  // Clients that added M365 seats this calendar month (billed pro-rated for the
+  // first month), from the TD SYNNEX change log — the only source of co-terminous
+  // mid-month adds. Counts distinct clients with ≥1 seat-addition entry.
+  const monthStartD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEndD = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const additionLogs = await prisma.tdSynnexSubscriptionChangeLog.findMany({
+    where: {
+      seatsDelta: { gt: 0 },
+      entryDatetime: { gte: monthStartD, lt: monthEndD },
+      subscription: { archived: false, NOT: { customer: { client: { archived: true } } } },
+    },
+    select: {
+      subscription: {
+        select: {
+          vendor: true,
+          productName: true,
+          productSku: true,
+          customer: { select: { clientId: true } },
+        },
+      },
+    },
+  });
+  const proratedClientIds = new Set<string>();
+  for (const l of additionLogs) {
+    if (!isM365Subscription(l.subscription)) continue;
+    const cid = l.subscription.customer.clientId;
+    if (cid) proratedClientIds.add(cid);
+  }
+  const proratedAdditionClients = proratedClientIds.size;
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },

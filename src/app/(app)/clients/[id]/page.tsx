@@ -219,30 +219,8 @@ export default async function ClientProfilePage({
     if (marginException || (marginDelta != null && marginDelta < 0)) attention = "bad";
     else if (marginDelta != null && marginDelta > 0) attention = "good";
 
-    // Licenses whose start date falls in the current month are pro-rated for
-    // their first month (billed from the add day to month end).
-    const addedThisMonth =
-      s.startDate != null &&
-      s.startDate.getTime() >= monthStart.getTime() &&
-      s.startDate.getTime() < monthEnd.getTime();
-    let proratedFactor: number | null = null;
-    let proratedExtendedPrice: number | null = null;
-    if (addedThisMonth && s.startDate) {
-      // Count from the start of the add day so the add day is billed in full.
-      const activeStart = new Date(
-        Date.UTC(s.startDate.getUTCFullYear(), s.startDate.getUTCMonth(), s.startDate.getUTCDate()),
-      );
-      const pr = computeProration({
-        periodStart: monthStart,
-        periodEnd: monthEnd,
-        activeStart,
-        activeEnd: s.cancellationWindowEnds ?? null,
-      });
-      proratedFactor = pr.factor;
-      proratedExtendedPrice =
-        customerPrice != null ? round2(customerPrice * s.quantity * pr.factor) : null;
-    }
-
+    // Full-subscription rows keep their total quantity; the Existing/Added split
+    // below reduces the base and adds pro-rated lines from the change log.
     return {
       id: s.id,
       sku: s.productSku,
@@ -269,14 +247,78 @@ export default async function ClientProfilePage({
       reducible: s.reducible,
       currency,
       startDate: s.startDate ? s.startDate.toISOString() : null,
-      proratedFactor,
-      proratedExtendedPrice,
+      proratedFactor: null,
+      proratedExtendedPrice: null,
     };
   });
 
-  // Split into existing licensing vs. licenses added (and pro-rated) this month.
-  const addedThisMonthRows = m365Rows.filter((r) => r.proratedFactor != null);
-  const existingRows = m365Rows.filter((r) => r.proratedFactor == null);
+  // Mid-month seat additions from the change log (co-terminous adds fold into a
+  // line's total quantity without changing its start date, so this is the only
+  // source of the real add date + delta). Grouped by subscription for this month.
+  const monthAdds = td
+    ? await prisma.tdSynnexSubscriptionChangeLog.findMany({
+        where: {
+          subscriptionId: { in: visibleSubs.map((s) => s.id) },
+          seatsDelta: { gt: 0 },
+          entryDatetime: { gte: monthStart, lt: monthEnd },
+        },
+        orderBy: { entryDatetime: "asc" },
+        select: { subscriptionId: true, seatsDelta: true, entryDatetime: true },
+      })
+    : [];
+  const addsBySub = new Map<string, { date: Date; seats: number }[]>();
+  for (const a of monthAdds) {
+    const list = addsBySub.get(a.subscriptionId) ?? [];
+    list.push({ date: a.entryDatetime, seats: a.seatsDelta });
+    addsBySub.set(a.subscriptionId, list);
+  }
+  const cancelEndsBySub = new Map(
+    visibleSubs.map((s) => [s.id, s.cancellationWindowEnds ?? null]),
+  );
+
+  // Split into existing licensing (base seats, full month) vs. seats added and
+  // pro-rated this month (one line per addition, from the add day to month end).
+  const existingRows: M365LicensingRow[] = m365Rows
+    .map((row) => {
+      const adds = addsBySub.get(row.id) ?? [];
+      const addedSeats = adds.reduce((acc, a) => acc + a.seats, 0);
+      if (addedSeats <= 0) return row;
+      const base = Math.max(0, row.quantity - addedSeats);
+      return {
+        ...row,
+        quantity: base,
+        extendedCost: row.unitCost != null ? round2(row.unitCost * base) : null,
+        extendedPrice: row.customerPrice != null ? round2(row.customerPrice * base) : null,
+      };
+    })
+    .filter((row) => row.quantity > 0);
+
+  const addedThisMonthRows: M365LicensingRow[] = [];
+  for (const row of m365Rows) {
+    const adds = addsBySub.get(row.id) ?? [];
+    adds.forEach((add, i) => {
+      const activeStart = new Date(
+        Date.UTC(add.date.getUTCFullYear(), add.date.getUTCMonth(), add.date.getUTCDate()),
+      );
+      const pr = computeProration({
+        periodStart: monthStart,
+        periodEnd: monthEnd,
+        activeStart,
+        activeEnd: cancelEndsBySub.get(row.id) ?? null,
+      });
+      addedThisMonthRows.push({
+        ...row,
+        rowKey: `${row.id}:add:${i}`,
+        quantity: add.seats,
+        extendedCost: row.unitCost != null ? round2(row.unitCost * add.seats) : null,
+        extendedPrice: row.customerPrice != null ? round2(row.customerPrice * add.seats) : null,
+        startDate: add.date.toISOString(),
+        proratedFactor: pr.factor,
+        proratedExtendedPrice:
+          row.customerPrice != null ? round2(row.customerPrice * add.seats * pr.factor) : null,
+      });
+    });
+  }
 
   // Per-client attention summary: upcoming renewals + under-cost lines.
   const clientRenewals = m365Rows
@@ -696,11 +738,13 @@ export default async function ClientProfilePage({
                 Pro-rated Licensing Added This Month ({addedThisMonthRows.length})
               </h2>
               <p className="mb-3 text-xs text-muted-foreground">
-                Licenses whose start date falls in {monthLabel}, billed pro-rated from the day
-                they were added through month-end. They roll into Existing Licensing next month.
+                Seats added in {monthLabel} (from the TD SYNNEX change log), billed pro-rated
+                from the day they were added through month-end. Each addition is its own line;
+                the seats roll into Existing Licensing next month. Requires a TD SYNNEX sync with
+                the change-logs path configured.
               </p>
               {addedThisMonthRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No licenses added this month.</p>
+                <p className="text-sm text-muted-foreground">No seats added this month.</p>
               ) : (
                 <M365LicensingTable
                   rows={addedThisMonthRows}

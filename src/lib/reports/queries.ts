@@ -374,31 +374,41 @@ export interface ProratedAdditionRow {
 }
 
 /**
- * M365 licenses whose TD SYNNEX start date falls in the current calendar month —
- * i.e. added mid-month and billed pro-rated for their first month. One row per
- * subscription, sorted by client then product.
+ * M365 seats added mid-month, from the TD SYNNEX change log (co-terminous adds
+ * fold into a subscription's total quantity without changing its start date, so
+ * the change log is the only source of the real add date + delta). One row per
+ * seat-addition entry in the current calendar month, sorted by client then product.
  */
 export async function getProratedAdditions(): Promise<ProratedAdditionRow[]> {
   await ensureArchiveColumn();
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  const subs = await prisma.tdSynnexSubscription.findMany({
+  const logs = await prisma.tdSynnexSubscriptionChangeLog.findMany({
     where: {
-      archived: false,
-      startDate: { gte: monthStart, lt: monthEnd },
-      NOT: { customer: { client: { archived: true } } }, // exclude archived clients
+      seatsDelta: { gt: 0 },
+      entryDatetime: { gte: monthStart, lt: monthEnd },
+      subscription: {
+        archived: false,
+        NOT: { customer: { client: { archived: true } } }, // exclude archived clients
+      },
     },
-    include: { customer: { include: { client: true } } },
-    orderBy: { startDate: "asc" },
+    include: {
+      subscription: { include: { customer: { include: { client: true } } } },
+    },
+    orderBy: { entryDatetime: "asc" },
   });
   const rows: ProratedAdditionRow[] = [];
-  for (const s of subs) {
+  for (const l of logs) {
+    const s = l.subscription;
     if (!isM365Subscription(s)) continue; // M365 only — ignore Cisco et al.
-    if (!s.startDate) continue;
     // Count from the start of the add day so that day is billed in full.
     const activeStart = new Date(
-      Date.UTC(s.startDate.getUTCFullYear(), s.startDate.getUTCMonth(), s.startDate.getUTCDate()),
+      Date.UTC(
+        l.entryDatetime.getUTCFullYear(),
+        l.entryDatetime.getUTCMonth(),
+        l.entryDatetime.getUTCDate(),
+      ),
     );
     const pr = computeProration({
       periodStart: monthStart,
@@ -407,14 +417,14 @@ export async function getProratedAdditions(): Promise<ProratedAdditionRow[]> {
       activeEnd: s.cancellationWindowEnds ?? null,
     });
     const customerPrice = s.customerPrice != null ? Number(s.customerPrice) : null;
-    const fullExt = customerPrice != null ? round2(customerPrice * s.quantity) : null;
+    const fullExt = customerPrice != null ? round2(customerPrice * l.seatsDelta) : null;
     rows.push({
       client: s.customer.client?.name ?? s.customer.name,
       clientId: s.customer.clientId,
       sku: s.productSku ?? "—",
       product: s.productName ?? "—",
-      quantity: s.quantity,
-      addedDate: s.startDate.toISOString().slice(0, 10),
+      quantity: l.seatsDelta,
+      addedDate: l.entryDatetime.toISOString().slice(0, 10),
       prorationPct: Math.round(pr.factor * 1000) / 10,
       proratedExtendedPrice: fullExt != null ? round2(fullExt * pr.factor) : null,
       fullExtendedPrice: fullExt,

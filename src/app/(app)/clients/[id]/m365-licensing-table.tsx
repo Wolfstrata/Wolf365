@@ -8,6 +8,8 @@ import { ArchiveToggle } from "@/components/licensing/archive-toggle";
 
 export interface M365LicensingRow {
   id: string;
+  /** Distinct React key; defaults to id. Set when one subscription yields multiple rows (e.g. several mid-month additions). */
+  rowKey?: string;
   sku: string | null;
   product: string | null;
   contractNo: string | null;
@@ -187,7 +189,7 @@ export function M365LicensingTable({
                   : null;
               return (
                 <tr
-                  key={r.id}
+                  key={r.rowKey ?? r.id}
                   className={`border-t align-top ${
                     r.expired
                       ? "bg-orange-500/15"
