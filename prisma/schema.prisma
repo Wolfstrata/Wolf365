@@ -516,8 +516,39 @@ model TdSynnexSubscription {
   raw                Json?
   lastSyncedAt       DateTime @default(now())
 
+  changeLogs         TdSynnexSubscriptionChangeLog[]
+
   @@index([customerId])
   @@index([productSku])
+}
+
+// Stellr subscription change-log entries (listSubscriptionChangeLogs). Co-terminous
+// seat additions fold into a subscription line's total quantity without changing
+// its start date, so the change log is the ONLY source of the real add date +
+// seat delta. Stored so mid-month additions can be pro-rated on their own line.
+model TdSynnexSubscriptionChangeLog {
+  id                   String @id @default(cuid())
+  subscriptionId       String
+  subscription         TdSynnexSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  stellrSubscriptionId String   // e.g. "411833_1"
+  customerNo           String?
+  contractNo           String?
+  lineNo               Int?
+  activityLog          String?  // e.g. "Update Service (NCE Microsoft 365 Copilot ...)"
+  changeLog            String?  // free-text change, e.g. "Add 3 seats"
+  seatsDelta           Int      @default(0) // parsed signed seat delta (+add / -remove)
+  entryDatetime        DateTime
+  entryBy              String?
+  entrySource          String?
+  raw                  Json?
+  createdAt            DateTime @default(now())
+
+  // The change log has no stable id; a line's entries are unique by their exact
+  // timestamp + text. Prevents duplicate rows on re-sync.
+  @@unique([stellrSubscriptionId, entryDatetime, changeLog], name: "uniq_changelog_entry")
+  @@index([subscriptionId])
+  @@index([entryDatetime])
 }
 
 // Hudu / SuperOps records kept for mapping only (core app does not push to them).

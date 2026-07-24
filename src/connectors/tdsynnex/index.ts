@@ -2,6 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { connectorFetch } from "@/connectors/http";
 import { writeDebugLog } from "@/lib/debug-log";
+import { parseSeatDelta } from "@/lib/billing/changelog";
+import { isM365Subscription } from "@/lib/licensing/vendor";
 import type {
   ConnectorContext,
   ConnectorDefinition,
@@ -205,7 +207,15 @@ export const tdSynnexConnector: ConnectorDefinition<
     // Subscriptions are optional; only sync if the path is configured.
     let subCount = 0;
     let subErrors = 0;
+    let changeLogCount = 0;
+    let changeLogErrors = 0;
     const subsPath = ctx.config.subscriptionsPath;
+    // Mid-month seat additions live only in the change log; sync them when the
+    // path is configured so they can be pro-rated on their own billing line.
+    const changeLogsPath = ctx.config.changeLogsPath;
+    // Only look back to the start of the previous month — enough to pro-rate the
+    // current and prior billing period while keeping the pull bounded.
+    const changeLogWindowStart = changeLogsPath ? previousMonthStartIso() : null;
     if (subsPath) {
       const perCustomer = /\{customerNo\}|\{customerId\}/.test(subsPath);
       if (perCustomer) {
@@ -234,6 +244,20 @@ export const tdSynnexConnector: ConnectorDefinition<
               // Isolate per-customer failures so one bad call doesn't abort all.
               subErrors += 1;
             }
+            // Change-log sync is best-effort and isolated per customer.
+            if (changeLogsPath && changeLogWindowStart) {
+              try {
+                changeLogCount += await syncCustomerChangeLogs(
+                  ctx,
+                  changeLogsPath,
+                  cust.id,
+                  cust.stellrId,
+                  changeLogWindowStart,
+                );
+              } catch {
+                changeLogErrors += 1;
+              }
+            }
           }
         };
         await Promise.all(
@@ -257,6 +281,8 @@ export const tdSynnexConnector: ConnectorDefinition<
         customers: customers.length,
         subscriptions: subCount,
         subscriptionErrors: subErrors,
+        changeLogEntries: changeLogCount,
+        changeLogErrors,
       },
     };
   },
@@ -612,4 +638,141 @@ function parseDate(raw: Record<string, unknown>, keys: string[]): Date | null {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// ---------------------------------------------------------------------------
+// Subscription change logs (mid-month seat additions).
+// ---------------------------------------------------------------------------
+
+/** First day of the previous month as yyyy-MM-dd (UTC), for the change-log window. */
+function previousMonthStartIso(): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Derive the Stellr contract number for a subscription: from the raw payload, or
+ * the subscription id prefix (`411833_1` → `411833`).
+ */
+function deriveContractNoFromSub(
+  raw: unknown,
+  stellrSubscriptionId: string,
+): string | null {
+  if (raw && typeof raw === "object") {
+    const c = pick(raw as Record<string, unknown>, [
+      "contractNo",
+      "contractNumber",
+      "contract",
+      "contractId",
+    ]);
+    if (c) return c;
+  }
+  const prefix = stellrSubscriptionId.split(/[_\-:]/)[0];
+  return prefix || null;
+}
+
+/** Append a startDate=yyyy-MM-dd query param to a path (preserving existing query). */
+function withStartDate(path: string, startDate: string): string {
+  const [p, q = ""] = path.split("?");
+  const sp = new URLSearchParams(q);
+  sp.set("startDate", startDate);
+  return `${p}?${sp.toString()}`;
+}
+
+/**
+ * Fetch and persist change-log entries for one customer's M365 subscriptions.
+ * Change logs are keyed by contract, so we fetch once per unique contract and
+ * match each returned entry back to its subscription line. Returns the number of
+ * entries upserted.
+ */
+async function syncCustomerChangeLogs(
+  ctx: ConnectorContext<StellrConfig, StellrSecrets>,
+  changeLogsPath: string,
+  customerInternalId: string,
+  customerStellrId: string,
+  windowStart: string,
+): Promise<number> {
+  const subs = await prisma.tdSynnexSubscription.findMany({
+    where: { customerId: customerInternalId },
+    select: {
+      id: true,
+      stellrSubscriptionId: true,
+      productName: true,
+      productSku: true,
+      vendor: true,
+      raw: true,
+    },
+  });
+  const m365 = subs.filter((s) => isM365Subscription(s));
+  if (m365.length === 0) return 0;
+
+  const idByStellrSubId = new Map(m365.map((s) => [s.stellrSubscriptionId, s.id]));
+  const contracts = new Set<string>();
+  for (const s of m365) {
+    const c = deriveContractNoFromSub(s.raw, s.stellrSubscriptionId);
+    if (c) contracts.add(c);
+  }
+
+  let count = 0;
+  for (const contractNo of contracts) {
+    const path = withStartDate(
+      fillPath(changeLogsPath, {
+        accountId: ctx.config.accountId,
+        customerNo: customerStellrId,
+        customerId: customerStellrId,
+        contractNo,
+      }),
+      windowStart,
+    );
+    let records: Record<string, unknown>[];
+    try {
+      records = await fetchJsonList(ctx, path, "sync_changelogs");
+    } catch {
+      continue; // isolate a single contract's failure
+    }
+    for (const rec of records) {
+      const stellrSubId = pick(rec, ["subscriptionId"]);
+      if (!stellrSubId) continue;
+      const subId = idByStellrSubId.get(stellrSubId);
+      if (!subId) continue; // entry for a non-M365 or unknown line
+      const entryDatetime = parseDate(rec, ["entryDatetime", "entryDateTime", "entryDate"]);
+      if (!entryDatetime) continue;
+      const changeLog = pick(rec, ["changeLog"]) ?? "";
+      const lineNoNum = pickNumber(rec, ["lineNo"]);
+      await prisma.tdSynnexSubscriptionChangeLog.upsert({
+        where: {
+          uniq_changelog_entry: {
+            stellrSubscriptionId: stellrSubId,
+            entryDatetime,
+            changeLog,
+          },
+        },
+        create: {
+          subscriptionId: subId,
+          stellrSubscriptionId: stellrSubId,
+          customerNo: pick(rec, ["customerNo"]),
+          contractNo: pick(rec, ["contractNo"]),
+          lineNo: lineNoNum != null ? Math.trunc(lineNoNum) : null,
+          activityLog: pick(rec, ["activityLog"]),
+          changeLog,
+          seatsDelta: parseSeatDelta(changeLog),
+          entryDatetime,
+          entryBy: pick(rec, ["entryBy"]),
+          entrySource: pick(rec, ["entrySource"]),
+          raw: rec as Prisma.InputJsonValue,
+        },
+        update: {
+          subscriptionId: subId,
+          seatsDelta: parseSeatDelta(changeLog),
+          activityLog: pick(rec, ["activityLog"]),
+          entryBy: pick(rec, ["entryBy"]),
+          entrySource: pick(rec, ["entrySource"]),
+          raw: rec as Prisma.InputJsonValue,
+        },
+      });
+      count += 1;
+    }
+  }
+  return count;
 }

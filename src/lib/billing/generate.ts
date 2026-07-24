@@ -1,6 +1,7 @@
 import { computeProration } from "@/lib/billing/proration";
 import { computeLine } from "@/lib/billing/line";
 import { resolveUnitPrice, type PriceRuleLike } from "@/lib/billing/pricing";
+import type { SeatAddition } from "@/lib/billing/changelog";
 import type { ExceptionType } from "@prisma/client";
 
 /**
@@ -29,6 +30,12 @@ export interface SubscriptionInput {
   /** Subscription activation within/around the period (for proration). */
   activeStart?: Date | null;
   activeEnd?: Date | null;
+  /**
+   * Seats added mid-period (from the Stellr change log). When present, these
+   * seats are split off the base quantity onto their own pro-rated line(s), and
+   * the base line bills only the seats that were active for the whole period.
+   */
+  monthlyAdditions?: SeatAddition[];
 }
 
 export interface ProductMappingInput {
@@ -50,6 +57,8 @@ export interface GeneratedLine {
   estimatedCost: number | null;
   subtotal: number;
   total: number;
+  /** True for a pro-rated line covering seats added mid-period. */
+  isProratedAddition?: boolean;
 }
 
 export interface GenerationException {
@@ -125,6 +134,22 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
       continue;
     }
 
+    const baseDescription = sub.productName ?? qboItemName ?? `SKU ${sub.sku}`;
+
+    // Seats added within this period bill on their own pro-rated line(s); the
+    // base line then covers only the seats active for the whole period.
+    const additions = (sub.monthlyAdditions ?? []).filter((a) => {
+      const t = a.date.getTime();
+      return (
+        a.seats > 0 &&
+        t >= input.period.start.getTime() &&
+        t < input.period.end.getTime()
+      );
+    });
+    const addedSeats = additions.reduce((acc, a) => acc + a.seats, 0);
+    // Never drive the base line negative if the data disagrees; clamp at 0.
+    const baseQuantity = Math.max(0, sub.quantity - addedSeats);
+
     const proration = computeProration({
       periodStart: input.period.start,
       periodEnd: input.period.end,
@@ -132,32 +157,78 @@ export function generateBillingLines(input: GenerateInput): GenerationResult {
       activeEnd: sub.activeEnd,
     });
 
-    const { subtotal, total } = computeLine({
-      quantity: sub.quantity,
-      unitPrice,
-      prorationFactor: proration.factor,
-    });
+    if (baseQuantity > 0) {
+      const { subtotal, total } = computeLine({
+        quantity: baseQuantity,
+        unitPrice,
+        prorationFactor: proration.factor,
+      });
+      lines.push({
+        tdSynnexSubscriptionId: sub.id,
+        qboItemId,
+        description: baseDescription,
+        quantity: baseQuantity,
+        unitPrice,
+        prorationFactor: proration.factor,
+        proratedDays: proration.billedDays,
+        periodDays: proration.periodDays,
+        discount: 0,
+        adjustment: 0,
+        estimatedCost:
+          sub.unitCost != null
+            ? round2(sub.unitCost * baseQuantity * proration.factor)
+            : null,
+        subtotal,
+        total,
+      });
+    }
 
-    const estimatedCost =
-      sub.unitCost != null
-        ? round2(sub.unitCost * sub.quantity * proration.factor)
-        : null;
-
-    lines.push({
-      tdSynnexSubscriptionId: sub.id,
-      qboItemId,
-      description: sub.productName ?? qboItemName ?? `SKU ${sub.sku}`,
-      quantity: sub.quantity,
-      unitPrice,
-      prorationFactor: proration.factor,
-      proratedDays: proration.billedDays,
-      periodDays: proration.periodDays,
-      discount: 0,
-      adjustment: 0,
-      estimatedCost,
-      subtotal,
-      total,
-    });
+    // One pro-rated line per mid-period seat addition, billed from the day the
+    // seats were added through period end.
+    for (const add of additions) {
+      const activeStart = new Date(
+        Date.UTC(
+          add.date.getUTCFullYear(),
+          add.date.getUTCMonth(),
+          add.date.getUTCDate(),
+        ),
+      );
+      const addProration = computeProration({
+        periodStart: input.period.start,
+        periodEnd: input.period.end,
+        activeStart,
+        activeEnd: sub.activeEnd,
+      });
+      const { subtotal, total } = computeLine({
+        quantity: add.seats,
+        unitPrice,
+        prorationFactor: addProration.factor,
+      });
+      const addedLabel = activeStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+      lines.push({
+        tdSynnexSubscriptionId: sub.id,
+        qboItemId,
+        description: `${baseDescription} — added ${addedLabel} (pro-rated ${addProration.billedDays}/${addProration.periodDays} days)`,
+        quantity: add.seats,
+        unitPrice,
+        prorationFactor: addProration.factor,
+        proratedDays: addProration.billedDays,
+        periodDays: addProration.periodDays,
+        discount: 0,
+        adjustment: 0,
+        estimatedCost:
+          sub.unitCost != null
+            ? round2(sub.unitCost * add.seats * addProration.factor)
+            : null,
+        subtotal,
+        total,
+        isProratedAddition: true,
+      });
+    }
   }
 
   return { lines, exceptions };

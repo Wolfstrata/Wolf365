@@ -8,6 +8,7 @@ import {
   type ProductMappingInput,
   type SubscriptionInput,
 } from "@/lib/billing/generate";
+import type { SeatAddition } from "@/lib/billing/changelog";
 import type { PriceRuleLike } from "@/lib/billing/pricing";
 import { isM365Subscription } from "@/lib/licensing/vendor";
 
@@ -38,6 +39,27 @@ export async function generateAndSaveBillingRun(
   // Bill Microsoft 365 licensing only — TD SYNNEX also resells other vendors
   // (e.g. Cisco), which never belong on an M365 invoice.
   const subs = (client.tdSynnexCustomer?.subscriptions ?? []).filter(isM365Subscription);
+
+  // Load mid-period seat additions from the change log so they can be split onto
+  // their own pro-rated line (they fold into the subscription's total quantity
+  // without changing its start date, so this is the only source of the add date).
+  const additionsBySub = new Map<string, SeatAddition[]>();
+  if (subs.length > 0) {
+    const logs = await prisma.tdSynnexSubscriptionChangeLog.findMany({
+      where: {
+        subscriptionId: { in: subs.map((s) => s.id) },
+        seatsDelta: { gt: 0 },
+        entryDatetime: { gte: params.periodStart, lt: params.periodEnd },
+      },
+      orderBy: { entryDatetime: "asc" },
+    });
+    for (const l of logs) {
+      const list = additionsBySub.get(l.subscriptionId) ?? [];
+      list.push({ date: l.entryDatetime, seats: l.seatsDelta, note: l.changeLog ?? "" });
+      additionsBySub.set(l.subscriptionId, list);
+    }
+  }
+
   const subscriptions: SubscriptionInput[] = subs.map((s) => ({
     id: s.id,
     sku: s.productSku,
@@ -48,6 +70,7 @@ export async function generateAndSaveBillingRun(
     currency: s.currency,
     activeStart: s.startDate,
     activeEnd: s.cancellationWindowEnds,
+    monthlyAdditions: additionsBySub.get(s.id) ?? [],
   }));
 
   // Build SKU -> QBO item mapping from confirmed product mappings.
