@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { buildContext } from "@/connectors/runtime";
 import { connectorFetch } from "@/connectors/http";
+import { getEnvConfig } from "@/lib/connectors/secrets";
 import { safeErrorMessage } from "@/lib/redact";
 import {
   getStellrAccessToken,
@@ -61,25 +62,57 @@ export async function fetchStellrChangeLogs(
     if (!connector) {
       return { ok: false, message: "TD SYNNEX connector is not configured.", ...empty };
     }
-    const ctx = await buildContext(connector);
-    const config = ctx.config as StellrConfig;
-    if (!config.changeLogsPath) {
+
+    // The change-logs path (and the live customer data) live under a specific
+    // environment. buildContext with no override reads whichever environment is
+    // currently active — which may not be the one where the path is saved. Pick
+    // the environment that actually has changeLogsPath configured, preferring
+    // production (where real customer data lives), then build context for it.
+    const storedConfig = (connector.config as Record<string, unknown>) ?? {};
+    const activeEnv =
+      typeof storedConfig.environment === "string" ? storedConfig.environment : null;
+    const envMap =
+      storedConfig.__env && typeof storedConfig.__env === "object"
+        ? (storedConfig.__env as Record<string, unknown>)
+        : {};
+    const candidateEnvs = Array.from(
+      new Set(
+        [activeEnv, "production", "sandbox", ...Object.keys(envMap)].filter(
+          (e): e is string => Boolean(e),
+        ),
+      ),
+    );
+    let chosenEnv: string | null = null;
+    let chosenPath: string | null = null;
+    for (const env of candidateEnvs) {
+      const cfg = getEnvConfig({ ...storedConfig, environment: env }) as StellrConfig;
+      if (cfg.changeLogsPath) {
+        chosenEnv = env;
+        chosenPath = cfg.changeLogsPath;
+        break;
+      }
+    }
+    if (!chosenEnv || !chosenPath) {
       return {
         ok: false,
         message:
-          "No 'Subscription change logs path' is configured on the TD SYNNEX connector. " +
-          "Add it in the connector settings from the Stellr API reference " +
-          "(listSubscriptionChangeLogs), using {customerNo} and {contractNo} placeholders.",
+          "No 'Subscription change logs path' is configured on the TD SYNNEX connector " +
+          "(checked all environments). Add it in the connector settings from the Stellr " +
+          "API reference (listSubscriptionChangeLogs), using {customerNo} and {contractNo} " +
+          "placeholders, and click Save configuration.",
         ...empty,
       };
     }
+
+    const ctx = await buildContext(connector, chosenEnv);
+    const config = ctx.config as StellrConfig;
     const token = await getStellrAccessToken(
       config,
       ctx.secrets as StellrSecrets,
       (next) => ctx.saveSecrets(next as Record<string, unknown>),
     );
     const base = (config.apiBaseUrl ?? "").replace(/\/$/, "");
-    let filled = config.changeLogsPath
+    let filled = chosenPath
       .replace(/\{customerNo\}/g, encodeURIComponent(customerNo))
       .replace(/\{contractNo\}/g, encodeURIComponent(contractNo));
     if (!filled.startsWith("/")) filled = `/${filled}`;
@@ -103,7 +136,9 @@ export async function fetchStellrChangeLogs(
       ok: res.ok,
       status: res.status,
       url,
-      message: res.ok ? `HTTP ${res.status}` : `HTTP ${res.status} — check the change logs path/parameters`,
+      message: res.ok
+        ? `HTTP ${res.status} · ${chosenEnv}`
+        : `HTTP ${res.status} · ${chosenEnv} — check the change logs path/parameters`,
       records: res.ok ? extractRecords(raw) : [],
       raw,
     };
