@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, CalendarX, PiggyBank, ChevronRight } from "lucide-react";
+import { Building2, Plug, Receipt, TriangleAlert, TrendingUp, CalendarClock, CalendarX, CalendarPlus, PiggyBank, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -50,6 +50,7 @@ export default async function DashboardPage() {
                   status: true,
                   currency: true,
                   renewalDate: true,
+                  startDate: true,
                   archived: true,
                   vendor: true,
                   productName: true,
@@ -105,6 +106,21 @@ export default async function DashboardPage() {
       isMarginException(Number(s.unitCost), Number(s.customerPrice)),
   ).length;
   const expiredLicenses = allSubs.filter((s) => isExpired(s.renewalDate, s.status, now)).length;
+
+  // Clients that added M365 licensing this calendar month (billed pro-rated for
+  // their first month). Counts distinct clients with ≥1 sub started this month.
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).getTime();
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).getTime();
+  const proratedAdditionClients = clientsWithSubs.filter((c) =>
+    (c.tdSynnexCustomer?.subscriptions ?? []).some(
+      (s) =>
+        !s.archived &&
+        isM365Subscription(s) &&
+        s.startDate != null &&
+        s.startDate.getTime() >= monthStart &&
+        s.startDate.getTime() < monthEnd,
+    ),
+  ).length;
 
   const stats = [
     { label: "Clients", value: clients, icon: Building2 },
@@ -234,6 +250,31 @@ export default async function DashboardPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     M365 licensing past its term — review or renew.
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+            </Card>
+          </Link>
+          <Link href="/reports/prorated-additions" className="block">
+            <Card
+              className={`flex items-center justify-between transition ${
+                proratedAdditionClients > 0
+                  ? "border-primary/40 bg-primary/5 hover:bg-primary/10"
+                  : "hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <CalendarPlus
+                  className={`h-5 w-5 shrink-0 ${proratedAdditionClients > 0 ? "text-primary" : "text-muted-foreground"}`}
+                />
+                <div>
+                  <p className="text-sm font-semibold">
+                    {proratedAdditionClients} client{proratedAdditionClients === 1 ? "" : "s"} added
+                    pro-rated licenses this month
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    M365 licensing added mid-month, billed pro-rated — view the list.
                   </p>
                 </div>
               </div>

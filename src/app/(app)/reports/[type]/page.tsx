@@ -11,6 +11,7 @@ import {
   getUpcomingRenewals,
   getMarginExceptions,
   getExpiredLicenses,
+  getProratedAdditions,
 } from "@/lib/reports/queries";
 import {
   MarginTableView,
@@ -19,6 +20,7 @@ import {
   RenewalsTableView,
   MarginExceptionsTableView,
   ExpiredTableView,
+  ProratedAdditionsTableView,
 } from "./report-tables";
 
 const META: Record<string, { title: string; description: string }> = {
@@ -45,6 +47,10 @@ const META: Record<string, { title: string; description: string }> = {
   expired: {
     title: "Expired licenses",
     description: "TD SYNNEX (M365) licensing whose term has lapsed — past end date or expired status.",
+  },
+  "prorated-additions": {
+    title: "Pro-rated licenses added this month",
+    description: "M365 licensing whose TD SYNNEX start date falls in the current month — added mid-month and billed pro-rated for their first month.",
   },
 };
 
@@ -90,6 +96,7 @@ export default async function ReportPage({
           {type === "renewals" && <RenewalsTable />}
           {type === "margin-exceptions" && <MarginExceptionsTable />}
           {type === "expired" && <ExpiredTable canArchive={canArchive} />}
+          {type === "prorated-additions" && <ProratedAdditionsTable />}
         </Card>
       </div>
     </div>
@@ -130,6 +137,19 @@ async function ExpiredTable({ canArchive }: { canArchive: boolean }) {
   const rows = await getExpiredLicenses();
   if (rows.length === 0) return <Empty />;
   return <ExpiredTableView rows={rows} canArchive={canArchive} />;
+}
+
+async function ProratedAdditionsTable() {
+  const rows = await getProratedAdditions();
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No pro-rated additions this month"
+        description="No M365 licenses have a TD SYNNEX start date in the current month yet."
+      />
+    );
+  }
+  return <ProratedAdditionsTableView rows={rows} />;
 }
 
 function Empty() {

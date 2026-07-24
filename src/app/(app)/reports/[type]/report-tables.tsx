@@ -11,6 +11,7 @@ import type {
   RenewalReportRow,
   MarginExceptionRow,
   ExpiredLicenseRow,
+  ProratedAdditionRow,
 } from "@/lib/reports/queries";
 
 const RENEWAL_BADGE: Record<number, string> = {
@@ -146,4 +147,36 @@ export function ExpiredTableView({
     { key: "status", label: "Status", sortValue: (r) => r.status.toLowerCase(), render: (r) => r.status },
   ];
   return <SortableTable columns={columns} rows={rows} rowKey={(r) => r.subscriptionId} />;
+}
+
+export function ProratedAdditionsTableView({ rows }: { rows: ProratedAdditionRow[] }) {
+  const columns: SortColumn<ProratedAdditionRow>[] = [
+    { key: "client", label: "Client", sortValue: (r) => r.client.toLowerCase(), render: (r) => clientCell(r.client, r.clientId) },
+    { key: "sku", label: "SKU", sortValue: (r) => r.sku, render: (r) => r.sku },
+    { key: "product", label: "Product", sortValue: (r) => r.product.toLowerCase(), render: (r) => r.product },
+    { key: "quantity", label: "Qty", numeric: true, sortValue: (r) => r.quantity, render: (r) => r.quantity },
+    { key: "addedDate", label: "Added", sortValue: (r) => r.addedDate, render: (r) => r.addedDate },
+    {
+      key: "prorationPct",
+      label: "Pro-rated",
+      numeric: true,
+      sortValue: (r) => r.prorationPct,
+      render: (r) => `${r.prorationPct}%`,
+    },
+    {
+      key: "proratedExtendedPrice",
+      label: "Pro-rated this mo",
+      numeric: true,
+      sortValue: (r) => r.proratedExtendedPrice,
+      render: (r) => (r.proratedExtendedPrice != null ? formatCurrency(r.proratedExtendedPrice) : "—"),
+    },
+    {
+      key: "fullExtendedPrice",
+      label: "Full month",
+      numeric: true,
+      sortValue: (r) => r.fullExtendedPrice,
+      render: (r) => (r.fullExtendedPrice != null ? formatCurrency(r.fullExtendedPrice) : "—"),
+    },
+  ];
+  return <SortableTable columns={columns} rows={rows} rowKey={(_, i) => String(i)} initialSort={{ key: "client", dir: "asc" }} />;
 }
