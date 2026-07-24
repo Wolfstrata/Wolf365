@@ -122,9 +122,9 @@ export const tdSynnexConnector: ConnectorDefinition<
       required: false,
       secret: false,
       placeholder:
-        "/reseller/v1/customers/{customerNo}/subscriptions/changelogs?contractNo={contractNo}",
+        "e.g. /api/v1/cloud/customers/{customerNo}/subscriptions/changelogs?contractNo={contractNo}",
       helpText:
-        "Documented listSubscriptionChangeLogs path (use {customerNo} and {contractNo} placeholders). Used by the Subscription Raw diagnostic to reveal the exact date and quantity of mid-month seat additions.",
+        "TYPE the full listSubscriptionChangeLogs path here (the grey text is only an example — mirror your working Subscriptions resource path). Use {customerNo} and {contractNo} placeholders. Used by the Subscription Raw diagnostic to reveal the exact date and quantity of mid-month seat additions.",
     },
   ],
   secretFields: [
