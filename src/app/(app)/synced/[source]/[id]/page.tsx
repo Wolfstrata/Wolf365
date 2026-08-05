@@ -9,6 +9,7 @@ import { isSourceSlug, SOURCE_LABELS } from "@/lib/connector-sources";
 import { renewalWindow, type RenewalBucket } from "@/lib/licensing/renewal";
 import { previousMonthCosts } from "@/lib/licensing/snapshot";
 import { costChanges, type CostChange } from "@/lib/licensing/cost-change";
+import { SuperOpsDetail } from "./superops-detail";
 
 interface Field {
   label: string;
@@ -184,6 +185,10 @@ export default async function SyncedDetailPage({
             ))}
           </div>
         </Card>
+
+        {source === "superops" && (
+          <SuperOpsDetail superOpsClientId={id} clientId={clientId} timezone={user.timezone} />
+        )}
 
         {source === "td-synnex" && (
           <Card>

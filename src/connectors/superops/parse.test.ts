@@ -1,0 +1,135 @@
+import { describe, it, expect } from "vitest";
+import {
+  firstObjectArray,
+  pickMinutes,
+  pickName,
+  pickAccountId,
+  parseClient,
+  parseContact,
+  parseAsset,
+  parseContract,
+  parseTicket,
+  parseWorklog,
+} from "@/connectors/superops/parse";
+
+describe("firstObjectArray", () => {
+  it("finds a nested array of objects", () => {
+    const data = { getTicketList: { tickets: [{ ticketId: "1" }], listInfo: { totalCount: 1 } } };
+    expect(firstObjectArray(data)?.[0]).toEqual({ ticketId: "1" });
+  });
+  it("returns null when there is no object array", () => {
+    expect(firstObjectArray({ a: 1, b: "x" })).toBeNull();
+  });
+});
+
+describe("pickName", () => {
+  it("reads a plain string", () => {
+    expect(pickName({ technician: "Alice" }, ["technician"])).toBe("Alice");
+  });
+  it("reads a nested object's name/email", () => {
+    expect(pickName({ technician: { name: "Bob" } }, ["technician"])).toBe("Bob");
+    expect(pickName({ owner: { email: "c@x.com" } }, ["owner"])).toBe("c@x.com");
+  });
+});
+
+describe("pickAccountId", () => {
+  it("reads a nested client.accountId", () => {
+    expect(pickAccountId({ client: { accountId: "42" } })).toBe("42");
+  });
+  it("falls back to a flat clientId", () => {
+    expect(pickAccountId({ clientId: "7" })).toBe("7");
+  });
+});
+
+describe("pickMinutes", () => {
+  it("uses explicit minutes", () => {
+    expect(pickMinutes({ minutes: 90 })).toBe(90);
+  });
+  it("converts seconds to minutes", () => {
+    expect(pickMinutes({ timeSpent: 5400 })).toBe(90);
+  });
+  it("converts hours to minutes", () => {
+    expect(pickMinutes({ hours: 1.5 })).toBe(90);
+  });
+  it("returns null when absent", () => {
+    expect(pickMinutes({})).toBeNull();
+  });
+});
+
+describe("entity parsers", () => {
+  it("parses a client with domains + nested account manager", () => {
+    const c = parseClient({
+      accountId: "413704",
+      name: "Alair Homes",
+      stage: "ACTIVE",
+      status: "Active",
+      accountManager: { name: "Jordan" },
+      emailDomains: ["alair.com", "alairhomes.com"],
+    });
+    expect(c).toMatchObject({
+      superOpsId: "413704",
+      name: "Alair Homes",
+      accountManager: "Jordan",
+      emailDomains: ["alair.com", "alairhomes.com"],
+    });
+  });
+
+  it("splits a comma-separated emailDomains string", () => {
+    expect(parseClient({ accountId: "1", name: "X", emailDomains: "a.com, b.com" })?.emailDomains).toEqual([
+      "a.com",
+      "b.com",
+    ]);
+  });
+
+  it("returns null for a client with no id", () => {
+    expect(parseClient({ name: "No Id" })).toBeNull();
+  });
+
+  it("parses a contact", () => {
+    expect(
+      parseContact({ userId: "u1", name: "Sam", email: "s@x.com", contactNumber: "555", role: "Owner" }),
+    ).toEqual({ superOpsId: "u1", name: "Sam", email: "s@x.com", phone: "555", role: "Owner" });
+  });
+
+  it("parses an asset with a last-communicated timestamp", () => {
+    const a = parseAsset({ assetId: "a1", name: "PC", serialNumber: "SN1", platform: "Windows", status: "Online", lastCommunicatedTime: "2026-07-01T00:00:00Z" });
+    expect(a?.serialNumber).toBe("SN1");
+    expect(a?.lastCommunicatedTime?.toISOString()).toBe("2026-07-01T00:00:00.000Z");
+  });
+
+  it("parses a contract with dates", () => {
+    const c = parseContract({ contractId: "k1", name: "MSA", contractStatus: "ACTIVE", startDate: "2026-01-01", endDate: "2026-12-31" });
+    expect(c?.status).toBe("ACTIVE");
+    expect(c?.startDate?.toISOString().slice(0, 10)).toBe("2026-01-01");
+  });
+
+  it("parses a ticket with account + technician + times", () => {
+    const t = parseTicket({
+      ticketId: "t1",
+      displayId: "#101",
+      subject: "Server down",
+      status: { name: "Open" },
+      priority: "High",
+      technician: { name: "Bob" },
+      client: { accountId: "413704" },
+      createdTime: "2026-07-01T10:00:00Z",
+      updatedTime: "2026-07-02T10:00:00Z",
+    });
+    expect(t).toMatchObject({ superOpsId: "t1", accountId: "413704", status: "Open", technician: "Bob", priority: "High" });
+    expect(t?.updatedTime?.toISOString()).toBe("2026-07-02T10:00:00.000Z");
+  });
+
+  it("parses a worklog with ticket link + minutes + billable", () => {
+    const w = parseWorklog({
+      worklogId: "w1",
+      ticket: { ticketId: "t1" },
+      client: { accountId: "413704" },
+      technician: "Bob",
+      timeSpent: 3600,
+      billable: true,
+      notes: "Fixed it",
+      entryTime: "2026-07-01T11:00:00Z",
+    });
+    expect(w).toMatchObject({ superOpsId: "w1", ticketId: "t1", accountId: "413704", minutes: 60, billable: true });
+  });
+});

@@ -58,6 +58,21 @@ export async function GET(request: Request) {
     }
   }
 
+  // SuperOps tickets + worklogs: one bounded chunk of the resumable full-history
+  // backfill per cron run (the account-level entities sync above via runSync).
+  // Best-effort; only when the SuperOps connector is enabled.
+  let superOpsTickets: unknown;
+  if (enabled.some((c) => c.type === "SUPEROPS")) {
+    try {
+      const { runSuperOpsTicketSync } = await import("@/lib/superops/tickets");
+      superOpsTickets = await runSuperOpsTicketSync({ maxTickets: 500, maxWorklogs: 1000 });
+    } catch (err) {
+      superOpsTickets = { ok: false, error: safeErrorMessage(err) };
+    }
+  } else {
+    superOpsTickets = { skipped: "SuperOps connector not enabled" };
+  }
+
   // Refresh discrepancy exceptions after syncs (best-effort).
   let reconciled: { scanned: number; flagged: number } | { error: string };
   try {
@@ -115,6 +130,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     synced: results,
+    superOpsTickets,
     reconciled,
     debugLogsPurged: purged,
     backup,

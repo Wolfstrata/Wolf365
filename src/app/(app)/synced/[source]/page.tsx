@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/data-table";
 import { isSourceSlug, SOURCE_LABELS, SOURCE_BLURB } from "@/lib/connector-sources";
 import { formatSortableDateTime } from "@/lib/utils";
+import { can } from "@/lib/rbac";
+import { SuperOpsSyncControls } from "./superops-sync";
 
 async function loadSource(
   source: string,
@@ -72,16 +74,33 @@ async function loadSource(
       return { columns, rows };
     }
     case "superops": {
-      const list = await prisma.superOpsClient.findMany({ orderBy: { name: "asc" } });
+      const list = await prisma.superOpsClient.findMany({
+        orderBy: { name: "asc" },
+        include: {
+          _count: { select: { sites: true, contacts: true, assets: true, tickets: true } },
+        },
+      });
       const columns: DataColumn[] = [
         { key: "name", label: "Name" },
-        { key: "superOpsId", label: "SuperOps ID" },
+        { key: "stage", label: "Stage" },
+        { key: "status", label: "Status" },
+        { key: "manager", label: "Account manager" },
+        { key: "sites", label: "Sites", numeric: true },
+        { key: "tickets", label: "Tickets", numeric: true },
         { key: "synced", label: "Last synced" },
       ];
       const rows: DataRow[] = list.map((c) => ({
         id: c.id,
         href: `/synced/superops/${c.id}`,
-        cells: { name: c.name, superOpsId: c.superOpsId, synced: synced(c.lastSyncedAt) },
+        cells: {
+          name: c.name,
+          stage: c.stage ?? "—",
+          status: c.status ?? "—",
+          manager: c.accountManager ?? "—",
+          sites: c._count.sites,
+          tickets: c._count.tickets,
+          synced: synced(c.lastSyncedAt),
+        },
       }));
       return { columns, rows };
     }
@@ -114,10 +133,15 @@ export default async function SyncedSourcePage({
   if (!isSourceSlug(source)) notFound();
 
   const { columns, rows } = await loadSource(source, user.timezone);
+  const showSuperOpsSync = source === "superops" && can(user.role, "connectors:sync");
 
   return (
     <div>
-      <PageHeader title={SOURCE_LABELS[source]} description={SOURCE_BLURB[source]} />
+      <PageHeader
+        title={SOURCE_LABELS[source]}
+        description={SOURCE_BLURB[source]}
+        actions={showSuperOpsSync ? <SuperOpsSyncControls /> : undefined}
+      />
       <div className="p-4 sm:p-8">
         {rows.length === 0 ? (
           <EmptyState

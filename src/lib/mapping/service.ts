@@ -100,6 +100,63 @@ export async function materializeClients(actor: {
     );
   }
 
+  // 3) Link each unlinked SuperOps client to a Client with the same normalized
+  // name (created above from TD/QBO), else create its own. Populating
+  // superOpsClient.clientId is what lets SuperOps invoices resolve a client and
+  // the client profile surface SuperOps data. Respects the 1:1 client↔SuperOps
+  // constraint by excluding Clients already matched to a SuperOps client.
+  const soUnlinked = await prisma.superOpsClient.findMany({ where: { clientId: null } });
+  if (soUnlinked.length > 0) {
+    const takenClientIds = new Set(
+      (
+        await prisma.superOpsClient.findMany({
+          where: { clientId: { not: null } },
+          select: { clientId: true },
+        })
+      ).map((r) => r.clientId as string),
+    );
+    const allClients = await prisma.client.findMany({ select: { id: true, name: true } });
+    const clientByNorm = new Map<string, string>();
+    for (const cl of allClients) {
+      if (takenClientIds.has(cl.id)) continue;
+      const norm = normalizeName(cl.name);
+      if (norm && !clientByNorm.has(norm)) clientByNorm.set(norm, cl.id);
+    }
+
+    const soLinks: { id: string; clientId: string }[] = [];
+    const soNewClients: { id: string; name: string }[] = [];
+    const usedForSo = new Set<string>();
+    for (const so of soUnlinked) {
+      const norm = normalizeName(so.name);
+      const match = norm ? clientByNorm.get(norm) : undefined;
+      if (match && !usedForSo.has(match)) {
+        soLinks.push({ id: so.id, clientId: match });
+        usedForSo.add(match);
+        merged += 1;
+      } else {
+        const clientId = randomUUID();
+        soNewClients.push({ id: clientId, name: so.name });
+        soLinks.push({ id: so.id, clientId });
+        usedForSo.add(clientId);
+        if (norm && !clientByNorm.has(norm)) clientByNorm.set(norm, clientId);
+        created += 1;
+      }
+    }
+    if (soNewClients.length) {
+      await prisma.client.createMany({ data: soNewClients });
+    }
+    if (soLinks.length) {
+      await prisma.$transaction(
+        soLinks.map((l) =>
+          prisma.superOpsClient.update({
+            where: { id: l.id },
+            data: { clientId: l.clientId },
+          }),
+        ),
+      );
+    }
+  }
+
   const clients = await prisma.client.count();
   await audit({
     action: "MAPPING_CHANGED",

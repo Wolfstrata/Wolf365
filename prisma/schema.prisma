@@ -568,8 +568,138 @@ model SuperOpsClient {
   client     Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   superOpsId String  @unique
   name       String
+  // Enriched account fields from getClientList/getClient.
+  stage          String?
+  status         String?
+  accountManager String?
+  emailDomains   String[] @default([])
   raw        Json?
   lastSyncedAt DateTime @default(now())
+
+  sites     SuperOpsSite[]
+  contacts  SuperOpsContact[]
+  assets    SuperOpsAsset[]
+  contracts SuperOpsContract[]
+  tickets   SuperOpsTicket[]
+  worklogs  SuperOpsWorklog[]
+
+  @@index([name])
+}
+
+// SuperOps client site (location). Child of SuperOpsClient.
+model SuperOpsSite {
+  id               String @id @default(cuid())
+  superOpsClientId String
+  superOpsClient   SuperOpsClient @relation(fields: [superOpsClientId], references: [id], onDelete: Cascade)
+  superOpsId       String @unique
+  name             String?
+  timezone         String?
+  address          Json?
+  raw              Json?
+  lastSyncedAt     DateTime @default(now())
+
+  @@index([superOpsClientId])
+}
+
+// SuperOps client contact (user). Child of SuperOpsClient.
+model SuperOpsContact {
+  id               String @id @default(cuid())
+  superOpsClientId String
+  superOpsClient   SuperOpsClient @relation(fields: [superOpsClientId], references: [id], onDelete: Cascade)
+  superOpsId       String @unique
+  name             String?
+  email            String?
+  phone            String?
+  role             String?
+  raw              Json?
+  lastSyncedAt     DateTime @default(now())
+
+  @@index([superOpsClientId])
+}
+
+// SuperOps managed asset. Child of SuperOpsClient.
+model SuperOpsAsset {
+  id                   String @id @default(cuid())
+  superOpsClientId     String
+  superOpsClient       SuperOpsClient @relation(fields: [superOpsClientId], references: [id], onDelete: Cascade)
+  superOpsId           String @unique
+  name                 String?
+  serialNumber         String?
+  platform             String?
+  status               String?
+  lastCommunicatedTime DateTime?
+  raw                  Json?
+  lastSyncedAt         DateTime @default(now())
+
+  @@index([superOpsClientId])
+}
+
+// SuperOps client contract / agreement. Child of SuperOpsClient.
+model SuperOpsContract {
+  id               String @id @default(cuid())
+  superOpsClientId String
+  superOpsClient   SuperOpsClient @relation(fields: [superOpsClientId], references: [id], onDelete: Cascade)
+  superOpsId       String @unique
+  name             String?
+  status           String?
+  startDate        DateTime?
+  endDate          DateTime?
+  raw              Json?
+  lastSyncedAt     DateTime @default(now())
+
+  @@index([superOpsClientId])
+}
+
+// SuperOps ticket. Child of SuperOpsClient; parent of worklogs.
+model SuperOpsTicket {
+  id               String @id @default(cuid())
+  superOpsClientId String?
+  superOpsClient   SuperOpsClient? @relation(fields: [superOpsClientId], references: [id], onDelete: SetNull)
+  superOpsId       String @unique
+  displayId        String?
+  subject          String?
+  status           String?
+  priority         String?
+  technician       String?
+  createdTime      DateTime?
+  updatedTime      DateTime?
+  raw              Json?
+  lastSyncedAt     DateTime @default(now())
+
+  worklogs SuperOpsWorklog[]
+
+  @@index([superOpsClientId])
+  @@index([updatedTime])
+  @@index([status])
+}
+
+// SuperOps worklog / timesheet entry. Child of a ticket (and denormalized client).
+model SuperOpsWorklog {
+  id               String @id @default(cuid())
+  ticketId         String?
+  ticket           SuperOpsTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  superOpsClientId String?
+  superOpsClient   SuperOpsClient? @relation(fields: [superOpsClientId], references: [id], onDelete: SetNull)
+  superOpsId       String @unique
+  technician       String?
+  minutes          Int?
+  billable         Boolean?
+  notes            String? @db.Text
+  entryTime        DateTime?
+  raw              Json?
+  lastSyncedAt     DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([superOpsClientId])
+  @@index([entryTime])
+}
+
+// Resumable full-history sync checkpoint (e.g. tickets/worklogs), keyed by entity.
+model SuperOpsSyncState {
+  entity      String    @id // "tickets"
+  cursor      String? // last processed updatedTime/id (ISO or opaque)
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
 }
 
 // SuperOps invoice imported for review + push to QuickBooks. This is a SEPARATE
