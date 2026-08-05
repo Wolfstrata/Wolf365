@@ -159,6 +159,26 @@ async function logSchemaFields(ctx: SuperOpsCtx): Promise<void> {
       /* best-effort diagnostic */
     }
   }
+  // Log the actual shape of a ticket's `client` JSON scalar so child→client
+  // linkage can be wired to the real id key (accountId? id? bare string?).
+  try {
+    const res = await superOpsGraphQL(ctx, "sample_ticket", Q.TICKET_LIST_QUERY, {
+      input: { page: 1, pageSize: 1 },
+    });
+    const rec = (firstObjectArray(res.data) ?? [])[0];
+    if (rec) {
+      await writeDebugLog({
+        type: "SUPEROPS",
+        connectorId: ctx.connectorId,
+        action: "sample_ticket_client_shape",
+        endpoint: "api.superops.ai/msp",
+        outcome: "success",
+        error: `client=${JSON.stringify(rec.client)}`,
+      });
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** Map SuperOps accountId -> internal SuperOpsClient.id. */
@@ -594,12 +614,13 @@ async function upsertSuperOpsInvoice(
     firstObjectArray(inv) ??
     [];
 
-  const lines = rawLines.map((l) => {
+  const lines = rawLines.filter(isObj).map((l) => {
     const quantity = pickNum(l, ["quantity", "qty", "units"]) ?? 1;
     const unitPrice = pickNum(l, ["unitPrice", "rate", "price"]) ?? 0;
     const amount = pickNum(l, ["amount", "total", "lineTotal"]) ?? quantity * unitPrice;
     return {
-      description: pick(l, ["itemName", "description", "name", "productName"]) ?? "Item",
+      description:
+        pick(l, ["details", "itemName", "description", "name", "productName"]) ?? "Item",
       quantity,
       unitPrice,
       amount,

@@ -85,6 +85,7 @@ query getClientContractList($input: ListInfoInput!) {
   getClientContractList(input: $input) {
     clientContracts {
       contractId
+      contract { name }
       contractStatus
       startDate
       endDate
@@ -140,7 +141,7 @@ query getInvoiceList($input: ListInfoInput!) {
       dueDate
       client
       totalAmount
-      items { quantity unitPrice amount }
+      items { itemId details quantity unitPrice amount }
     }
     listInfo { totalCount }
   }
