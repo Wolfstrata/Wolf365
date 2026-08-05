@@ -102,6 +102,78 @@ export async function introspectTypeFields(
     .filter((n): n is string => typeof n === "string" && n.length > 0);
 }
 
+// --- Schema-driven field discovery -----------------------------------------
+// To pull the maximum detail without guessing, we introspect each entity's type
+// and select ALL of its scalar/enum fields (JSON scalars included — that covers
+// association blobs like `client`). Object/list-of-object fields are skipped
+// (they'd need sub-selections). Adapts automatically to the tenant's schema.
+
+interface TypeRef {
+  kind: string;
+  name: string | null;
+  ofType?: TypeRef | null;
+}
+
+const TYPE_REF_FRAGMENT =
+  "kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } }";
+
+/** Unwrap NON_NULL/LIST wrappers to the underlying named type. */
+function unwrapType(t: TypeRef | null | undefined): { kind: string; name: string | null } {
+  let cur: TypeRef | null | undefined = t;
+  while (cur && (cur.kind === "NON_NULL" || cur.kind === "LIST")) cur = cur.ofType;
+  return { kind: cur?.kind ?? "", name: cur?.name ?? null };
+}
+
+interface IntrospectedField {
+  name: string;
+  type: TypeRef;
+}
+
+/** The return type name of a top-level query (e.g. getClientList -> ClientList). */
+export async function introspectQueryReturnType(
+  ctx: SuperOpsCtx,
+  queryName: string,
+): Promise<string | null> {
+  const q = `query { __schema { queryType { fields { name type { ${TYPE_REF_FRAGMENT} } } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_query", q, {});
+  const fields = (res.data as { __schema?: { queryType?: { fields?: IntrospectedField[] } } } | null)
+    ?.__schema?.queryType?.fields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  const f = fields.find((x) => x.name === queryName);
+  return f ? unwrapType(f.type).name : null;
+}
+
+/** The element type name of a wrapper field (e.g. ClientList.clients -> Client). */
+export async function introspectFieldType(
+  ctx: SuperOpsCtx,
+  typeName: string,
+  fieldName: string,
+): Promise<string | null> {
+  const q = `query($n: String!) { __type(name: $n) { fields { name type { ${TYPE_REF_FRAGMENT} } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_field", q, { n: typeName });
+  const fields = (res.data as { __type?: { fields?: IntrospectedField[] } } | null)?.__type?.fields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  const f = fields.find((x) => x.name === fieldName);
+  return f ? unwrapType(f.type).name : null;
+}
+
+/** All SCALAR/ENUM field names of a type (safe to select without sub-selections). */
+export async function introspectScalarFieldNames(
+  ctx: SuperOpsCtx,
+  typeName: string,
+): Promise<string[] | null> {
+  const q = `query($n: String!) { __type(name: $n) { fields { name type { ${TYPE_REF_FRAGMENT} } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_scalars", q, { n: typeName });
+  const fields = (res.data as { __type?: { fields?: IntrospectedField[] } } | null)?.__type?.fields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  const out: string[] = [];
+  for (const f of fields) {
+    const base = unwrapType(f.type);
+    if (base.kind === "SCALAR" || base.kind === "ENUM") out.push(f.name);
+  }
+  return out;
+}
+
 /** Compact human-readable summary of GraphQL errors for logs/messages. */
 export function describeGraphQLErrors(errors: unknown): string {
   if (!Array.isArray(errors)) return "";

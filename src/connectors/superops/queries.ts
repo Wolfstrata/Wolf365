@@ -129,10 +129,12 @@ query getWorklogEntries($input: GetWorklogEntriesInput!) {
       technician
       qty
       billable
+      afterHours
+      revisedQuantity
+      unitPrice
+      status
       notes
       billDateTime
-      ticket
-      client
     }
     listInfo { totalCount }
   }

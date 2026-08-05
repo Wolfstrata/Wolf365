@@ -5,6 +5,9 @@ import {
   superOpsGraphQL,
   describeGraphQLErrors,
   introspectTypeFields,
+  introspectQueryReturnType,
+  introspectFieldType,
+  introspectScalarFieldNames,
   type SuperOpsCtx,
 } from "@/connectors/superops/client";
 import * as Q from "@/connectors/superops/queries";
@@ -137,6 +140,45 @@ async function fetchAll(
 }
 
 /**
+ * Resolve the scalar/enum field names of a list query's item type: query ->
+ * return type -> wrapper field's element type -> its scalar fields. Returns null
+ * if any introspection step is unavailable (falls back to the static query).
+ */
+async function resolveScalarSelection(
+  ctx: SuperOpsCtx,
+  queryName: string,
+  wrapper: string,
+): Promise<string[] | null> {
+  const returnType = await introspectQueryReturnType(ctx, queryName);
+  if (!returnType) return null;
+  const elemType = await introspectFieldType(ctx, returnType, wrapper);
+  if (!elemType) return null;
+  return introspectScalarFieldNames(ctx, elemType);
+}
+
+/**
+ * Build a list query that selects EVERY scalar field of the item type (maximum
+ * detail), plus any `extra` nested selection. Falls back to the hand-written
+ * static query if introspection is unavailable, so the sync never regresses.
+ */
+async function buildListQuery(
+  ctx: SuperOpsCtx,
+  o: { queryName: string; inputType: string; wrapper: string; fallback: string; extra?: string },
+): Promise<string> {
+  const scalars = await resolveScalarSelection(ctx, o.queryName, o.wrapper);
+  if (!scalars || scalars.length === 0) return o.fallback;
+  const sel = [scalars.join("\n      "), o.extra].filter(Boolean).join("\n      ");
+  return `query ($input: ${o.inputType}!) {
+  ${o.queryName}(input: $input) {
+    ${o.wrapper} {
+      ${sel}
+    }
+    listInfo { totalCount }
+  }
+}`;
+}
+
+/**
  * One-time schema diagnostic: introspect the field names of the types whose
  * enrichment fields we couldn't confirm (WorklogEntry id/time/date, ClientSite
  * timezone, ClientContract name, InvoiceItem description) and write them to the
@@ -225,7 +267,13 @@ async function buildClientResolver(): Promise<ClientResolver> {
 
 export async function syncSuperOpsClients(ctx: SuperOpsCtx): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_clients", Q.CLIENT_LIST_QUERY);
+  const query = await buildListQuery(ctx, {
+    queryName: "getClientList",
+    inputType: "ListInfoInput",
+    wrapper: "clients",
+    fallback: Q.CLIENT_LIST_QUERY,
+  });
+  const records = await fetchAll(ctx, "sync_clients", query);
   for (const raw of records) {
     const p = parseClient(raw);
     if (!p) {
@@ -262,7 +310,13 @@ export async function syncSuperOpsClients(ctx: SuperOpsCtx): Promise<Counts> {
 
 export async function syncSuperOpsSites(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_sites", Q.SITE_LIST_QUERY, wrappedListInfoInput);
+  const query = await buildListQuery(ctx, {
+    queryName: "getClientSiteList",
+    inputType: "GetClientSiteListInput",
+    wrapper: "sites",
+    fallback: Q.SITE_LIST_QUERY,
+  });
+  const records = await fetchAll(ctx, "sync_sites", query, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseSite(raw);
     const parent = resolve(raw);
@@ -291,7 +345,13 @@ export async function syncSuperOpsSites(ctx: SuperOpsCtx, resolve: ClientResolve
 
 export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_contacts", Q.CONTACT_LIST_QUERY, wrappedListInfoInput);
+  const query = await buildListQuery(ctx, {
+    queryName: "getClientUserList",
+    inputType: "GetClientUserListInput",
+    wrapper: "userList",
+    fallback: Q.CONTACT_LIST_QUERY,
+  });
+  const records = await fetchAll(ctx, "sync_contacts", query, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseContact(raw);
     const parent = resolve(raw);
@@ -321,7 +381,13 @@ export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientReso
 
 export async function syncSuperOpsAssets(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_assets", Q.ASSET_LIST_QUERY);
+  const query = await buildListQuery(ctx, {
+    queryName: "getAssetList",
+    inputType: "ListInfoInput",
+    wrapper: "assets",
+    fallback: Q.ASSET_LIST_QUERY,
+  });
+  const records = await fetchAll(ctx, "sync_assets", query);
   for (const raw of records) {
     const p = parseAsset(raw);
     const parent = resolve(raw);
@@ -352,7 +418,14 @@ export async function syncSuperOpsAssets(ctx: SuperOpsCtx, resolve: ClientResolv
 
 export async function syncSuperOpsContracts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_contracts", Q.CONTRACT_LIST_QUERY);
+  const query = await buildListQuery(ctx, {
+    queryName: "getClientContractList",
+    inputType: "ListInfoInput",
+    wrapper: "clientContracts",
+    fallback: Q.CONTRACT_LIST_QUERY,
+    extra: "contract { name }",
+  });
+  const records = await fetchAll(ctx, "sync_contracts", query);
   for (const raw of records) {
     const p = parseContract(raw);
     const parent = resolve(raw);
@@ -426,6 +499,18 @@ export async function syncSuperOpsTickets(
   const result: TicketSyncResult = { tickets: 0, worklogs: 0, ticketsDone: false, worklogsDone: false };
 
   const resolve = await buildClientResolver();
+  const ticketQuery = await buildListQuery(ctx, {
+    queryName: "getTicketList",
+    inputType: "ListInfoInput",
+    wrapper: "tickets",
+    fallback: Q.TICKET_LIST_QUERY,
+  });
+  const worklogQuery = await buildListQuery(ctx, {
+    queryName: "getWorklogEntries",
+    inputType: "GetWorklogEntriesInput",
+    wrapper: "entries",
+    fallback: Q.WORKLOG_LIST_QUERY,
+  });
 
   // --- Tickets ---
   try {
@@ -434,7 +519,7 @@ export async function syncSuperOpsTickets(
     let total: number | undefined;
     let prevKey: string | undefined;
     for (; result.tickets < maxTickets && page <= MAX_PAGES; page += 1) {
-      const res = await superOpsGraphQL(ctx, "sync_tickets", Q.TICKET_LIST_QUERY, {
+      const res = await superOpsGraphQL(ctx, "sync_tickets", ticketQuery, {
         input: { page, pageSize: PAGE_SIZE },
       });
       if (!res.ok)
@@ -494,16 +579,19 @@ export async function syncSuperOpsTickets(
   // --- Worklogs (link to already-synced tickets by SuperOps ticket id) ---
   try {
     const ticketRows = await prisma.superOpsTicket.findMany({
-      select: { superOpsId: true, id: true },
+      select: { superOpsId: true, id: true, superOpsClientId: true },
     });
-    const ticketByExternal = new Map(ticketRows.map((t) => [t.superOpsId, t.id]));
+    // WorklogEntry has no client field — derive the client via the linked ticket.
+    const ticketByExternal = new Map(
+      ticketRows.map((t) => [t.superOpsId, { id: t.id, clientId: t.superOpsClientId }]),
+    );
 
     let page = await nextPage("worklogs");
     let done = false;
     let total: number | undefined;
     let prevKey: string | undefined;
     for (; result.worklogs < maxWorklogs && page <= MAX_PAGES; page += 1) {
-      const res = await superOpsGraphQL(ctx, "sync_worklogs", Q.WORKLOG_LIST_QUERY, {
+      const res = await superOpsGraphQL(ctx, "sync_worklogs", worklogQuery, {
         input: { listInfo: { page, pageSize: PAGE_SIZE } },
       });
       if (!res.ok)
@@ -528,9 +616,11 @@ export async function syncSuperOpsTickets(
       for (const raw of records) {
         const p = parseWorklog(raw);
         if (!p) continue;
+        const ticket = p.ticketId ? ticketByExternal.get(p.ticketId) : undefined;
         const data = {
-          ticketId: p.ticketId ? ticketByExternal.get(p.ticketId) ?? null : null,
-          superOpsClientId: resolve(raw),
+          ticketId: ticket?.id ?? null,
+          // No client field on a worklog — inherit it from the linked ticket.
+          superOpsClientId: ticket?.clientId ?? resolve(raw),
           technician: p.technician,
           minutes: p.minutes,
           billable: p.billable,
@@ -576,7 +666,21 @@ export async function syncSuperOpsTickets(
 
 export async function syncSuperOpsInvoices(ctx: SuperOpsCtx): Promise<Counts> {
   const counts = zero();
-  const query = ctx.config.invoicesQuery?.trim() || Q.INVOICE_LIST_QUERY;
+  let query = ctx.config.invoicesQuery?.trim();
+  if (!query) {
+    const itemScalars = await introspectScalarFieldNames(ctx, "InvoiceItem");
+    const itemSel = (itemScalars && itemScalars.length
+      ? itemScalars
+      : ["itemId", "details", "quantity", "unitPrice", "amount"]
+    ).join(" ");
+    query = await buildListQuery(ctx, {
+      queryName: "getInvoiceList",
+      inputType: "ListInfoInput",
+      wrapper: "invoices",
+      fallback: Q.INVOICE_LIST_QUERY,
+      extra: `items { ${itemSel} }`,
+    });
+  }
 
   const soClients = await prisma.superOpsClient.findMany({
     select: { superOpsId: true, clientId: true },

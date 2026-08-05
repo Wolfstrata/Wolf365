@@ -274,8 +274,8 @@ export function parseWorklog(raw: Obj): ParsedWorklog | null {
   const ticketId = isObj(raw.ticket)
     ? pick(raw.ticket, ["ticketId", "id"])
     : isObj(raw.workItem)
-      ? pick(raw.workItem, ["ticketId", "id"])
-      : pick(raw, ["ticketId"]);
+      ? pick(raw.workItem, ["ticketId", "id", "itemId"])
+      : pick(raw, ["ticketId", "workItem"]);
   return {
     superOpsId,
     ticketId,
