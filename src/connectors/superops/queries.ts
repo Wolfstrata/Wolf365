@@ -43,7 +43,6 @@ query getClientSiteList($input: GetClientSiteListInput!) {
     sites {
       id
       name
-      timezone
       client
     }
     listInfo { totalCount }
@@ -86,7 +85,6 @@ query getClientContractList($input: ListInfoInput!) {
   getClientContractList(input: $input) {
     clientContracts {
       contractId
-      contract
       contractStatus
       startDate
       endDate
@@ -142,7 +140,7 @@ query getInvoiceList($input: ListInfoInput!) {
       dueDate
       client
       totalAmount
-      items { itemName quantity unitPrice amount }
+      items { quantity unitPrice amount }
     }
     listInfo { totalCount }
   }
