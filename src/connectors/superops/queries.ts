@@ -118,12 +118,12 @@ export const WORKLOG_LIST_QUERY = `
 query getWorklogEntries($input: GetWorklogEntriesInput!) {
   getWorklogEntries(input: $input) {
     entries {
-      worklogId
+      id
       technician
-      timeSpent
+      timespent
       billable
       notes
-      entryTime
+      createdTime
       ticket
       client
     }
