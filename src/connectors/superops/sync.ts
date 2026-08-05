@@ -181,12 +181,42 @@ async function logSchemaFields(ctx: SuperOpsCtx): Promise<void> {
   }
 }
 
-/** Map SuperOps accountId -> internal SuperOpsClient.id. */
-async function accountMap(): Promise<Map<string, string>> {
+/** Resolves a child record's parent SuperOpsClient.id from its `client` field. */
+export type ClientResolver = (raw: Obj) => string | null;
+
+/**
+ * Build a resolver that maps a child record to its parent SuperOpsClient. Tries
+ * the client accountId first, then falls back to matching the client name — the
+ * name fallback guards against big-integer accountId precision loss (SuperOps
+ * account ids exceed JS safe-integer range if ever returned unquoted).
+ */
+async function buildClientResolver(): Promise<ClientResolver> {
   const rows = await prisma.superOpsClient.findMany({
-    select: { superOpsId: true, id: true },
+    select: { superOpsId: true, id: true, name: true },
   });
-  return new Map(rows.map((r) => [r.superOpsId, r.id]));
+  const norm = (s: string) => s.trim().toLowerCase();
+  const byId = new Map(rows.map((r) => [r.superOpsId, r.id]));
+  const byName = new Map(rows.map((r) => [norm(r.name), r.id]));
+  return (raw: Obj) => {
+    const c = raw.client;
+    let accountId: string | null = null;
+    let name: string | null = null;
+    if (isObj(c)) {
+      accountId = pick(c, ["accountId", "id"]);
+      name = pick(c, ["name", "companyName"]);
+    } else if (typeof c === "string" && c.trim()) {
+      accountId = c;
+    } else if (typeof c === "number") {
+      accountId = String(c);
+    }
+    if (!accountId) accountId = pick(raw, ["accountId", "clientId"]);
+    if (accountId && byId.has(accountId)) return byId.get(accountId) ?? null;
+    if (name) {
+      const id = byName.get(norm(name));
+      if (id) return id;
+    }
+    return null;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,13 +260,12 @@ export async function syncSuperOpsClients(ctx: SuperOpsCtx): Promise<Counts> {
 // Account-level child entities (require a synced parent client)
 // ---------------------------------------------------------------------------
 
-export async function syncSuperOpsSites(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
+export async function syncSuperOpsSites(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
   const records = await fetchAll(ctx, "sync_sites", Q.SITE_LIST_QUERY, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseSite(raw);
-    const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
-    const parent = accountId ? clients.get(accountId) : undefined;
+    const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
       continue;
@@ -260,13 +289,12 @@ export async function syncSuperOpsSites(ctx: SuperOpsCtx, clients: Map<string, s
   return counts;
 }
 
-export async function syncSuperOpsContacts(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
+export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
   const records = await fetchAll(ctx, "sync_contacts", Q.CONTACT_LIST_QUERY, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseContact(raw);
-    const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
-    const parent = accountId ? clients.get(accountId) : undefined;
+    const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
       continue;
@@ -291,13 +319,12 @@ export async function syncSuperOpsContacts(ctx: SuperOpsCtx, clients: Map<string
   return counts;
 }
 
-export async function syncSuperOpsAssets(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
+export async function syncSuperOpsAssets(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
   const records = await fetchAll(ctx, "sync_assets", Q.ASSET_LIST_QUERY);
   for (const raw of records) {
     const p = parseAsset(raw);
-    const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
-    const parent = accountId ? clients.get(accountId) : undefined;
+    const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
       continue;
@@ -323,13 +350,12 @@ export async function syncSuperOpsAssets(ctx: SuperOpsCtx, clients: Map<string, 
   return counts;
 }
 
-export async function syncSuperOpsContracts(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
+export async function syncSuperOpsContracts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
   const records = await fetchAll(ctx, "sync_contracts", Q.CONTRACT_LIST_QUERY);
   for (const raw of records) {
     const p = parseContract(raw);
-    const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
-    const parent = accountId ? clients.get(accountId) : undefined;
+    const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
       continue;
@@ -399,7 +425,7 @@ export async function syncSuperOpsTickets(
   const maxWorklogs = opts.maxWorklogs ?? 1000;
   const result: TicketSyncResult = { tickets: 0, worklogs: 0, ticketsDone: false, worklogsDone: false };
 
-  const clients = await accountMap();
+  const resolve = await buildClientResolver();
 
   // --- Tickets ---
   try {
@@ -433,7 +459,7 @@ export async function syncSuperOpsTickets(
       for (const raw of records) {
         const p = parseTicket(raw);
         if (!p) continue;
-        const soClientId = p.accountId ? clients.get(p.accountId) ?? null : null;
+        const soClientId = resolve(raw);
         const data = {
           superOpsClientId: soClientId,
           displayId: p.displayId,
@@ -504,7 +530,7 @@ export async function syncSuperOpsTickets(
         if (!p) continue;
         const data = {
           ticketId: p.ticketId ? ticketByExternal.get(p.ticketId) ?? null : null,
-          superOpsClientId: p.accountId ? clients.get(p.accountId) ?? null : null,
+          superOpsClientId: resolve(raw),
           technician: p.technician,
           minutes: p.minutes,
           billable: p.billable,
@@ -701,13 +727,13 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
   skipped += clientCounts.skipped;
   if (clientCounts.error) errors.clients = clientCounts.error;
 
-  const clients = await accountMap();
+  const resolve = await buildClientResolver();
   const run = async (
     key: keyof AccountSyncSummary,
-    fn: (ctx: SuperOpsCtx, clients: Map<string, string>) => Promise<Counts>,
+    fn: (ctx: SuperOpsCtx, resolve: ClientResolver) => Promise<Counts>,
   ): Promise<number> => {
     try {
-      const c = await fn(ctx, clients);
+      const c = await fn(ctx, resolve);
       imported += c.imported;
       updated += c.updated;
       skipped += c.skipped;

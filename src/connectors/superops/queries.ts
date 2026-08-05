@@ -43,6 +43,14 @@ query getClientSiteList($input: GetClientSiteListInput!) {
     sites {
       id
       name
+      timezoneCode
+      line1
+      line2
+      line3
+      city
+      stateCode
+      countryCode
+      postalCode
       client
     }
     listInfo { totalCount }
@@ -117,12 +125,12 @@ export const WORKLOG_LIST_QUERY = `
 query getWorklogEntries($input: GetWorklogEntriesInput!) {
   getWorklogEntries(input: $input) {
     entries {
-      id
+      itemId
       technician
-      timespent
+      qty
       billable
       notes
-      createdTime
+      billDateTime
       ticket
       client
     }

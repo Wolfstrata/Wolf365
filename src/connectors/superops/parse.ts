@@ -102,7 +102,7 @@ export function pickMinutes(obj: Obj): number | null {
   if (mins != null) return Math.round(mins);
   const secs = pickNum(obj, ["timeSpent", "timespent", "durationSeconds", "seconds"]);
   if (secs != null) return Math.round(secs / 60);
-  const hrs = pickNum(obj, ["hours", "billableHours"]);
+  const hrs = pickNum(obj, ["hours", "billableHours", "qty", "quantity"]);
   if (hrs != null) return Math.round(hrs * 60);
   return null;
 }
@@ -189,11 +189,28 @@ export function parseClient(raw: Obj): ParsedClient | null {
 export function parseSite(raw: Obj): ParsedSite | null {
   const superOpsId = pick(raw, ["id", "siteId"]);
   if (!superOpsId) return null;
-  const address = isObj(raw.address) ? raw.address : null;
+  // Address arrives as flat fields (line1..line3/city/stateCode/countryCode/postalCode).
+  let address: Obj | null = isObj(raw.address) ? raw.address : null;
+  if (!address) {
+    const flat: Obj = {};
+    for (const [k, aliases] of [
+      ["line1", ["line1", "addressLine1"]],
+      ["line2", ["line2", "addressLine2"]],
+      ["line3", ["line3"]],
+      ["city", ["city"]],
+      ["state", ["stateCode", "state"]],
+      ["country", ["countryCode", "country"]],
+      ["postalCode", ["postalCode", "zip", "zipCode"]],
+    ] as [string, string[]][]) {
+      const v = pick(raw, aliases);
+      if (v) flat[k] = v;
+    }
+    if (Object.keys(flat).length > 0) address = flat;
+  }
   return {
     superOpsId,
     name: pick(raw, ["name", "siteName"]),
-    timezone: pick(raw, ["timezone", "timeZone"]),
+    timezone: pick(raw, ["timezoneCode", "timezone", "timeZone"]),
     address,
   };
 }
@@ -252,11 +269,13 @@ export function parseTicket(raw: Obj): ParsedTicket | null {
 }
 
 export function parseWorklog(raw: Obj): ParsedWorklog | null {
-  const superOpsId = pick(raw, ["worklogId", "id", "entryId"]);
+  const superOpsId = pick(raw, ["worklogId", "itemId", "id", "entryId"]);
   if (!superOpsId) return null;
   const ticketId = isObj(raw.ticket)
     ? pick(raw.ticket, ["ticketId", "id"])
-    : pick(raw, ["ticketId"]);
+    : isObj(raw.workItem)
+      ? pick(raw.workItem, ["ticketId", "id"])
+      : pick(raw, ["ticketId"]);
   return {
     superOpsId,
     ticketId,
@@ -265,6 +284,6 @@ export function parseWorklog(raw: Obj): ParsedWorklog | null {
     minutes: pickMinutes(raw),
     billable: pickBool(raw, ["billable", "isBillable"]),
     notes: pick(raw, ["notes", "description", "comment", "remarks"]),
-    entryTime: pickDate(raw, ["entryTime", "createdTime", "date", "loggedTime", "startTime"]),
+    entryTime: pickDate(raw, ["billDateTime", "entryTime", "createdTime", "date", "loggedTime", "startTime"]),
   };
 }
