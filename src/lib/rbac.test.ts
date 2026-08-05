@@ -74,8 +74,81 @@ describe("RBAC three-role policy", () => {
     expect(can("REVIEWER", "crm:read")).toBe(false);
   });
 
+  it("SilverFang Admin has the whole SilverFang module incl. configuration", () => {
+    for (const p of [
+      "tickets:read",
+      "tickets:write",
+      "tickets:assign",
+      "tickets:close",
+      "time:log",
+      "time:approve",
+      "agreements:read",
+      "agreements:manage",
+      "projects:read",
+      "projects:manage",
+      "silverfang:configure",
+      "clients:read", // needed to choose a ticket's client
+    ] as const) {
+      expect(can("SILVERFANG_ADMIN", p)).toBe(true);
+    }
+    // Deliberately confined to SilverFang — no finance, CRM, or administration.
+    for (const p of [
+      "billing:read",
+      "billing:edit",
+      "crm:read",
+      "connectors:read",
+      "connectors:configure",
+      "users:manage",
+      "audit:read",
+      "backups:manage",
+    ] as const) {
+      expect(can("SILVERFANG_ADMIN", p)).toBe(false);
+    }
+  });
+
+  it("SilverFang User can work tickets and log time but not configure or approve", () => {
+    for (const p of [
+      "tickets:read",
+      "tickets:write",
+      "time:log",
+      "agreements:read",
+      "projects:read",
+      "clients:read",
+    ] as const) {
+      expect(can("SILVERFANG_USER", p)).toBe(true);
+    }
+    // Deliberate denials: no configuration, no approvals, no management.
+    for (const p of [
+      "silverfang:configure",
+      "time:approve",
+      "tickets:assign",
+      "tickets:close",
+      "agreements:manage",
+      "projects:manage",
+      "billing:read",
+      "crm:read",
+      "users:manage",
+    ] as const) {
+      expect(can("SILVERFANG_USER", p)).toBe(false);
+    }
+  });
+
+  it("Power User gets SilverFang except configuration; Sales/Reviewer get none", () => {
+    expect(can("POWER_USER", "tickets:write")).toBe(true);
+    expect(can("POWER_USER", "time:approve")).toBe(true);
+    expect(can("POWER_USER", "silverfang:configure")).toBe(false);
+    // Administrator has everything, including SilverFang configuration.
+    expect(can("ADMINISTRATOR", "silverfang:configure")).toBe(true);
+    // Roles outside service delivery get no ticketing access at all.
+    for (const r of ["SALES", "REVIEWER", "FINANCIAL_POWER_USER"] as const) {
+      expect(can(r, "tickets:read")).toBe(false);
+      expect(can(r, "time:log")).toBe(false);
+    }
+  });
+
   it("denies when role is missing", () => {
     expect(can(null, "billing:read")).toBe(false);
     expect(can(undefined, "clients:read")).toBe(false);
+    expect(can(null, "tickets:read")).toBe(false);
   });
 });

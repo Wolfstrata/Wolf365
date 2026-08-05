@@ -34,6 +34,13 @@ import {
   Banknote,
   Truck,
   Contact,
+  Ticket,
+  UserCheck,
+  Timer,
+  CalendarCheck,
+  FileSignature,
+  FolderKanban,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -71,12 +78,21 @@ const ICONS: Record<string, LucideIcon> = {
   Banknote,
   Truck,
   Contact,
+  Ticket,
+  UserCheck,
+  Timer,
+  CalendarCheck,
+  FileSignature,
+  FolderKanban,
+  SlidersHorizontal,
 };
 
 // Administration + Account are intentionally omitted — Administration items and
 // Settings are surfaced through the account menu in the sidebar footer instead.
+// NOTE: a section missing from this list never renders, even if NAV_ITEMS has it.
 const SECTION_ORDER = [
   "Finance Workspace",
+  "SilverFang",
   "CRM",
   "Reconciliation",
   "Connector Data",

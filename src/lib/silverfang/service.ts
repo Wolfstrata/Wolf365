@@ -1,0 +1,263 @@
+import "server-only";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import {
+  DEFAULT_BOARD_NAME,
+  DEFAULT_BUSINESS_HOURS,
+  DEFAULT_CHARGE_CODES,
+  DEFAULT_SLA_NAME,
+  DEFAULT_SLA_TARGETS,
+  DEFAULT_STATUSES,
+} from "@/lib/silverfang/constants";
+import { computeDueDates, type SlaLike } from "@/lib/silverfang/sla";
+import type { BusinessCalendar } from "@/lib/silverfang/business-hours";
+import { classifyTimeBand } from "@/lib/silverfang/time";
+import { resolveRate, computeAmount, type RateRuleLike } from "@/lib/silverfang/rates";
+
+/**
+ * Server-only SilverFang services: the I/O edges around the pure logic modules.
+ * Seeding, ticket numbering, SLA application and rate resolution live here so
+ * the pure math in sla.ts / rates.ts / business-hours.ts stays dependency-free.
+ */
+
+/** Next ticket number, allocated atomically so numbers never collide. */
+export async function nextTicketNumber(
+  tx: Prisma.TransactionClient = prisma,
+): Promise<number> {
+  const row = await tx.sfCounter.upsert({
+    where: { name: "ticket" },
+    create: { name: "ticket", value: 1000 },
+    update: { value: { increment: 1 } },
+  });
+  return row.value;
+}
+
+/**
+ * Ensure a usable service desk exists: a default SLA (targets + business hours),
+ * a default board with a ConnectWise-like status flow, and the standard charge
+ * codes. Idempotent — safe to call on every setup page load.
+ */
+export async function ensureSilverFangDefaults(): Promise<{
+  boardId: string;
+  slaId: string;
+  created: boolean;
+}> {
+  let created = false;
+
+  let sla = await prisma.sfSla.findUnique({ where: { name: DEFAULT_SLA_NAME } });
+  if (!sla) {
+    created = true;
+    sla = await prisma.sfSla.create({
+      data: {
+        name: DEFAULT_SLA_NAME,
+        description: "Default response/resolution targets measured in business hours.",
+        useBusinessHours: true,
+        targets: {
+          create: DEFAULT_SLA_TARGETS.flatMap((t) => [
+            { priority: t.priority, kind: "RESPONSE" as const, minutes: t.response },
+            { priority: t.priority, kind: "RESOLUTION" as const, minutes: t.resolution },
+          ]),
+        },
+        businessHours: {
+          create: DEFAULT_BUSINESS_HOURS.weekdays.map((weekday) => ({
+            weekday,
+            startMinute: DEFAULT_BUSINESS_HOURS.startMinute,
+            endMinute: DEFAULT_BUSINESS_HOURS.endMinute,
+            timezone: DEFAULT_BUSINESS_HOURS.timezone,
+          })),
+        },
+      },
+    });
+  }
+
+  let board = await prisma.sfBoard.findUnique({ where: { name: DEFAULT_BOARD_NAME } });
+  if (!board) {
+    created = true;
+    board = await prisma.sfBoard.create({
+      data: {
+        name: DEFAULT_BOARD_NAME,
+        description: "Default inbound service queue.",
+        slaId: sla.id,
+        statuses: {
+          create: DEFAULT_STATUSES.map((s) => ({
+            name: s.name,
+            sortOrder: s.sortOrder,
+            isDefault: s.isDefault ?? false,
+            isOpen: s.isOpen,
+            isClosed: s.isClosed ?? false,
+            stopsSlaClock: s.stopsSlaClock ?? false,
+          })),
+        },
+      },
+    });
+  }
+
+  for (const c of DEFAULT_CHARGE_CODES) {
+    const existing = await prisma.sfChargeCode.findUnique({ where: { code: c.code } });
+    if (!existing) {
+      created = true;
+      await prisma.sfChargeCode.create({
+        data: {
+          code: c.code,
+          name: c.name,
+          kind: c.kind,
+          billableDefault: c.billableDefault,
+          defaultMultiplier: c.defaultMultiplier ?? null,
+          sortOrder: c.sortOrder,
+        },
+      });
+    }
+  }
+
+  return { boardId: board.id, slaId: sla.id, created };
+}
+
+/** Load an SLA into the pure-logic shape (targets + business calendar). */
+export async function loadSla(slaId: string | null): Promise<SlaLike | null> {
+  if (!slaId) return null;
+  const sla = await prisma.sfSla.findUnique({
+    where: { id: slaId },
+    include: { targets: true, businessHours: true, holidays: true },
+  });
+  if (!sla) return null;
+  const calendar: BusinessCalendar = {
+    windows: sla.businessHours.map((w) => ({
+      weekday: w.weekday,
+      startMinute: w.startMinute,
+      endMinute: w.endMinute,
+      timezone: w.timezone,
+    })),
+    holidays: sla.holidays.map((h) => h.date),
+    timezone: sla.businessHours[0]?.timezone ?? DEFAULT_BUSINESS_HOURS.timezone,
+  };
+  return {
+    useBusinessHours: sla.useBusinessHours,
+    targets: sla.targets.map((t) => ({
+      priority: t.priority,
+      kind: t.kind,
+      minutes: t.minutes,
+    })),
+    calendar,
+  };
+}
+
+/** The business calendar to use for time banding (falls back to the default SLA). */
+export async function loadDefaultCalendar(): Promise<BusinessCalendar> {
+  const sla = await prisma.sfSla.findFirst({
+    where: { active: true },
+    orderBy: { createdAt: "asc" },
+    include: { businessHours: true, holidays: true },
+  });
+  if (!sla) {
+    return { windows: [], holidays: [], timezone: DEFAULT_BUSINESS_HOURS.timezone };
+  }
+  return {
+    windows: sla.businessHours.map((w) => ({
+      weekday: w.weekday,
+      startMinute: w.startMinute,
+      endMinute: w.endMinute,
+      timezone: w.timezone,
+    })),
+    holidays: sla.holidays.map((h) => h.date),
+    timezone: sla.businessHours[0]?.timezone ?? DEFAULT_BUSINESS_HOURS.timezone,
+  };
+}
+
+/**
+ * SLA due dates for a ticket being opened/re-prioritized. Returns nulls when the
+ * board has no SLA, so callers can store "no target" honestly.
+ */
+export async function slaDueDatesFor(
+  slaId: string | null,
+  priority: "P1" | "P2" | "P3" | "P4",
+  openedAt: Date,
+  pausedMinutes = 0,
+): Promise<{ responseDueAt: Date | null; resolutionDueAt: Date | null }> {
+  const sla = await loadSla(slaId);
+  if (!sla) return { responseDueAt: null, resolutionDueAt: null };
+  return computeDueDates(sla, priority, openedAt, pausedMinutes);
+}
+
+export interface ResolvedRate {
+  rate: number | null;
+  costRate: number | null;
+  amount: number | null;
+  timeBand: "ANY" | "DAY" | "AFTER_HOURS" | "WEEKEND" | "HOLIDAY";
+  source: string;
+}
+
+/**
+ * Resolve the billing rate for a time entry: classify the time band from the
+ * business calendar, then apply the rate-rule precedence with agreement/tech
+ * fallbacks. Returns nulls when nothing resolves so the UI can flag it rather
+ * than invent a number.
+ */
+export async function resolveTimeEntryRate(input: {
+  clientId: string;
+  chargeCodeId: string;
+  agreementId?: string | null;
+  userId: string;
+  workedAt: Date;
+  hours: number;
+  billable: boolean;
+}): Promise<ResolvedRate> {
+  const [calendar, chargeCode, rules, agreement, tech] = await Promise.all([
+    loadDefaultCalendar(),
+    prisma.sfChargeCode.findUnique({ where: { id: input.chargeCodeId } }),
+    prisma.sfRateRule.findMany({ where: { active: true } }),
+    input.agreementId
+      ? prisma.sfAgreement.findUnique({ where: { id: input.agreementId } })
+      : Promise.resolve(null),
+    prisma.sfTechProfile.findUnique({ where: { userId: input.userId } }),
+  ]);
+
+  const timeBand = classifyTimeBand(calendar, input.workedAt);
+  if (!input.billable) {
+    return { rate: null, costRate: null, amount: null, timeBand, source: "non-billable" };
+  }
+
+  const ruleLikes: RateRuleLike[] = rules.map((r) => ({
+    scope: r.scope,
+    clientId: r.clientId,
+    agreementId: r.agreementId,
+    chargeCodeId: r.chargeCodeId,
+    timeBand: r.timeBand,
+    fixedRate: r.fixedRate != null ? Number(r.fixedRate) : null,
+    multiplier: r.multiplier != null ? Number(r.multiplier) : null,
+    costRate: r.costRate != null ? Number(r.costRate) : null,
+    active: r.active,
+  }));
+
+  const resolution = resolveRate({
+    rules: ruleLikes,
+    clientId: input.clientId,
+    chargeCodeId: input.chargeCodeId,
+    agreementId: input.agreementId ?? null,
+    timeBand,
+    techBillRate: tech?.billRate != null ? Number(tech.billRate) : null,
+    agreementStandardRate:
+      agreement?.standardRate != null ? Number(agreement.standardRate) : null,
+    chargeCodeMultiplier:
+      chargeCode?.defaultMultiplier != null ? Number(chargeCode.defaultMultiplier) : null,
+  });
+
+  return {
+    rate: resolution.rate,
+    costRate: resolution.costRate ?? (tech?.costRate != null ? Number(tech.costRate) : null),
+    amount: computeAmount(input.hours, resolution.rate),
+    timeBand,
+    source: resolution.source,
+  };
+}
+
+/** Recompute and store a ticket's actualHours from its time entries. */
+export async function recomputeTicketHours(ticketId: string): Promise<void> {
+  const agg = await prisma.sfTimeEntry.aggregate({
+    where: { ticketId },
+    _sum: { hours: true },
+  });
+  await prisma.sfTicket.update({
+    where: { id: ticketId },
+    data: { actualHours: agg._sum.hours ?? 0 },
+  });
+}

@@ -11,6 +11,7 @@ export interface NavItem {
    *  rendered in the sidebar — they're surfaced via the account menu. */
   section:
     | "Finance Workspace"
+    | "SilverFang"
     | "Connector Data"
     | "CRM"
     | "Reconciliation"
@@ -21,6 +22,15 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "M365 Dashboard", href: "/", icon: "LayoutDashboard", section: "Finance Workspace" },
   { label: "M365 Clients", href: "/clients", icon: "Building2", section: "Finance Workspace", permission: "clients:read" },
   { label: "M365 Archived Clients", href: "/archived-licensing", icon: "Archive", section: "Finance Workspace", permission: "clients:read" },
+  // SilverFang — ticketing / PSA.
+  { label: "Tickets", href: "/silverfang/tickets", icon: "Ticket", section: "SilverFang", permission: "tickets:read" },
+  { label: "My Tickets", href: "/silverfang/my-tickets", icon: "UserCheck", section: "SilverFang", permission: "tickets:read" },
+  { label: "Time Entries", href: "/silverfang/time", icon: "Timer", section: "SilverFang", permission: "time:log" },
+  { label: "Timesheets", href: "/silverfang/timesheets", icon: "CalendarCheck", section: "SilverFang", permission: "time:log" },
+  { label: "Agreements", href: "/silverfang/agreements", icon: "FileSignature", section: "SilverFang", permission: "agreements:read" },
+  { label: "Projects", href: "/silverfang/projects", icon: "FolderKanban", section: "SilverFang", permission: "projects:read" },
+  { label: "Contacts", href: "/silverfang/contacts", icon: "Contact", section: "SilverFang", permission: "tickets:read" },
+  { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },
   { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },

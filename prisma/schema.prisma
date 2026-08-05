@@ -28,6 +28,8 @@ enum Role {
   POWER_USER // Operate billing & run syncs/tests, but cannot change connector credentials or admin settings
   FINANCIAL_POWER_USER // Like Power User but Finance/CRM/Reconciliation/Connector-Data only — no Administration
   SALES // CRM only — manage opportunities and view the sales forecast
+  SILVERFANG_ADMIN // Full control of the SilverFang ticketing/PSA module, incl. its configuration
+  SILVERFANG_USER // Work tickets and log time in SilverFang; no configuration or approvals
   REVIEWER // Read-only — view numbers, charts and reports; no changes, no billing, no syncs
 }
 
@@ -54,6 +56,15 @@ model User {
   createdBackups       Backup[]         @relation("BackupCreator")
   salesQuotas          SalesQuota[]     @relation("SalesQuotaUser")
   salesRepComp         SalesRepComp?    @relation("SalesRepCompUser")
+
+  // SilverFang (ticketing / PSA).
+  sfTechProfile        SfTechProfile?
+  sfAssignedTickets    SfTicket[]     @relation("SfTicketAssignee")
+  sfCreatedTickets     SfTicket[]     @relation("SfTicketCreator")
+  sfTimeEntries        SfTimeEntry[]  @relation("SfTimeEntryUser")
+  sfTimesheets         SfTimesheet[]  @relation("SfTimesheetUser")
+  sfManagedProjects    SfProject[]    @relation("SfProjectManager")
+  sfAssignedTasks      SfProjectTask[] @relation("SfTaskAssignee")
 
   @@index([role])
 }
@@ -271,6 +282,21 @@ enum AuditAction {
   CLIENT_UNARCHIVED
   VIEW_AS_STARTED
   VIEW_AS_STOPPED
+  // SilverFang (ticketing / PSA).
+  TICKET_CREATED
+  TICKET_UPDATED
+  TICKET_ASSIGNED
+  TICKET_CLOSED
+  TICKET_NOTE_ADDED
+  TIME_LOGGED
+  TIME_ENTRY_UPDATED
+  TIMESHEET_SUBMITTED
+  TIMESHEET_APPROVED
+  AGREEMENT_CREATED
+  AGREEMENT_UPDATED
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  SILVERFANG_CONFIG_CHANGED
 }
 
 model AuditLog {
@@ -322,6 +348,12 @@ model Client {
   exceptions  Exception[]
   superOpsInvoices SuperOpsInvoice[]
   crmOpportunities CrmOpportunity[]
+
+  // SilverFang (ticketing / PSA).
+  sfContacts   SfContact[]
+  sfTickets    SfTicket[]
+  sfAgreements SfAgreement[]
+  sfProjects   SfProject[]
 
   @@index([name])
   @@index([parentClientId])
@@ -1195,4 +1227,820 @@ model M365CostSnapshot {
   @@unique([periodMonth, stellrSubscriptionId])
   @@index([stellrSubscriptionId, periodMonth])
   @@index([customerId, periodMonth])
+}
+
+// ---------------------------------------------------------------------------
+// SilverFang — first-party ticketing / PSA (ConnectWise-style).
+//
+// Replaces the read-only SuperOps mirror with Wolf365's own service-delivery
+// system: tickets on configurable boards, time entries against charge codes and
+// rate tables, agreements (block time / managed services / NOC), SLAs computed
+// from business hours, and projects built from templates.
+//
+// Conventions follow the rest of this schema: cuid ids, createdAt/updatedAt,
+// Decimal(18,4) for money and hours, Cascade for owned children, SetNull for
+// cross-domain links, denormalized actor email on history rows so the trail
+// survives user deletion, and an index on every foreign key.
+// ---------------------------------------------------------------------------
+
+enum SfTicketPriority {
+  P1 // Critical — business down
+  P2 // High — major impact
+  P3 // Normal — default
+  P4 // Low — scheduled / whenever
+}
+
+enum SfTicketSource {
+  PORTAL // raised in Wolf365 by a technician
+  EMAIL // inbound email
+  PHONE
+  ALERT // monitoring/RMM alert
+  PROJECT // generated from a project task
+  RECURRING // generated from a schedule
+}
+
+enum SfAgreementType {
+  BLOCK_TIME // prepaid hours drawn down by time entries
+  MANAGED_SERVICES // recurring all-in support
+  MANAGED_NOC // recurring NOC/monitoring
+  PROJECT // fixed-scope project work
+  TIME_AND_MATERIALS // billed as worked, no inclusions
+}
+
+enum SfAgreementStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum SfTimeEntryStatus {
+  DRAFT // being worked on, editable by the tech
+  SUBMITTED // on a submitted timesheet, awaiting approval
+  APPROVED // approved, billable to an invoice
+  REJECTED // sent back to the tech
+  INVOICED // already pushed to an invoice — locked
+}
+
+enum SfTimesheetStatus {
+  OPEN
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum SfProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum SfTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+}
+
+// Rate resolution precedence, most specific first. Mirrors PriceRuleScope so the
+// same "most specific wins, unresolved rather than invented" algorithm applies.
+enum SfRateScope {
+  AGREEMENT_SERVICE // this agreement + this charge code
+  AGREEMENT // this agreement, any charge code
+  CLIENT_SERVICE // this client + this charge code
+  CLIENT // this client, any charge code
+  SERVICE // this charge code, any client
+  GLOBAL // fallback default
+}
+
+// When the work happened, for time-of-day rate banding.
+enum SfTimeBand {
+  ANY // applies regardless of time
+  DAY // within business hours
+  AFTER_HOURS // outside business hours on a business day
+  WEEKEND
+  HOLIDAY
+}
+
+enum SfSlaTargetKind {
+  RESPONSE // first meaningful reply
+  RESOLUTION // ticket resolved
+}
+
+enum SfChargeCodeKind {
+  BILLABLE_WORK // onsite, remote, after-hours, project
+  NON_BILLABLE_WORK // presales, internal, warranty
+  ADMIN // admin/meetings
+  TIME_OFF // vacation, sick, holiday
+}
+
+// A service board (queue), e.g. "Service Desk", "Projects", "NOC".
+model SfBoard {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  active      Boolean @default(true)
+  // Default SLA applied to tickets opened on this board.
+  slaId       String?
+  sla         SfSla?  @relation(fields: [slaId], references: [id], onDelete: SetNull)
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  statuses SfStatus[]
+  tickets  SfTicket[]
+
+  @@index([slaId])
+}
+
+// A configurable ticket status within a board. Kept as a table (not an enum) so
+// the workflow can be tailored per board without a migration.
+model SfStatus {
+  id      String  @id @default(cuid())
+  boardId String
+  board   SfBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  name      String
+  sortOrder Int     @default(0)
+  // Lifecycle semantics used by queues, SLA clocks and reporting.
+  isDefault Boolean @default(false) // applied to new tickets
+  isOpen    Boolean @default(true) // counts as an open ticket
+  isClosed  Boolean @default(false) // terminal
+  // True for "waiting on client"-style statuses that pause the SLA clock.
+  stopsSlaClock Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets SfTicket[]
+
+  @@unique([boardId, name])
+  @@index([boardId, sortOrder])
+}
+
+// A client contact — first-party, so SilverFang does not depend on the SuperOps
+// mirror it replaces.
+model SfContact {
+  id       String  @id @default(cuid())
+  clientId String
+  client   Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  firstName String
+  lastName  String?
+  email     String?
+  phone     String?
+  mobile    String?
+  title     String?
+  isPrimary Boolean @default(false)
+  active    Boolean @default(true)
+  notes     String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets SfTicket[]
+
+  @@index([clientId])
+  @@index([email])
+}
+
+model SfTicket {
+  id     String @id @default(cuid())
+  // Human-facing sequential number (e.g. 1042), unique across the system.
+  number Int    @unique
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  contactId String?
+  contact   SfContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  boardId String
+  board   SfBoard @relation(fields: [boardId], references: [id], onDelete: Restrict)
+
+  statusId String
+  status   SfStatus @relation(fields: [statusId], references: [id], onDelete: Restrict)
+
+  priority SfTicketPriority @default(P3)
+  source   SfTicketSource   @default(PORTAL)
+
+  // Free-form classification (ConnectWise type/subtype/item).
+  type    String?
+  subtype String?
+
+  summary     String
+  description String? @db.Text
+
+  assigneeId String?
+  assignee   User?   @relation("SfTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  // Optional links: what pays for this work, and project context.
+  agreementId String?
+  agreement   SfAgreement? @relation(fields: [agreementId], references: [id], onDelete: SetNull)
+
+  projectId String?
+  project   SfProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  projectTaskId String?
+  projectTask   SfProjectTask? @relation(fields: [projectTaskId], references: [id], onDelete: SetNull)
+
+  // Estimates and rollups (hours kept at 4dp like other quantities).
+  estimatedHours Decimal? @db.Decimal(18, 4)
+  actualHours    Decimal  @default(0) @db.Decimal(18, 4)
+
+  // SLA tracking. Due timestamps are computed from the board's SLA + business
+  // hours at open time; the *At fields record what actually happened.
+  slaId              String?
+  sla                SfSla?    @relation(fields: [slaId], references: [id], onDelete: SetNull)
+  responseDueAt      DateTime?
+  resolutionDueAt    DateTime?
+  firstRespondedAt   DateTime?
+  resolvedAt         DateTime?
+  slaResponseBreached Boolean  @default(false)
+  slaResolutionBreached Boolean @default(false)
+  // Accumulated paused time (minutes) while in a stopsSlaClock status.
+  slaPausedMinutes   Int       @default(0)
+  slaPausedAt        DateTime?
+
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+
+  createdById    String?
+  createdBy      User?   @relation("SfTicketCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notes       SfTicketNote[]
+  messages    SfTicketMessage[]
+  history     SfTicketHistory[]
+  timeEntries SfTimeEntry[]
+  slaEvents   SfSlaEvent[]
+  calendarLinks SfCalendarLink[]
+
+  @@index([clientId])
+  @@index([boardId, statusId])
+  @@index([assigneeId])
+  @@index([statusId, createdAt])
+  @@index([priority, openedAt])
+  @@index([agreementId])
+  @@index([projectId])
+}
+
+// A note on a ticket. `internalOnly` notes must NEVER be exposed to a client —
+// enforced at the query layer, not just hidden in the UI.
+model SfTicketNote {
+  id       String   @id @default(cuid())
+  ticketId String
+  ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  body         String  @db.Text
+  internalOnly Boolean @default(true)
+  // True when this note was emailed to the contact (never for internal notes).
+  emailedAt    DateTime?
+
+  authorId    String?
+  authorEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ticketId, createdAt])
+}
+
+// An email tied to a ticket, inbound or outbound. Threading headers are stored
+// so replies land on the right ticket.
+model SfTicketMessage {
+  id       String   @id @default(cuid())
+  ticketId String
+  ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  direction  String // "INBOUND" | "OUTBOUND"
+  fromAddress String
+  toAddresses String[] @default([])
+  ccAddresses String[] @default([])
+  subject    String?
+  bodyText   String? @db.Text
+  bodyHtml   String? @db.Text
+
+  // RFC 5322 threading.
+  messageId  String? @unique
+  inReplyTo  String?
+  references String?
+
+  sentAt     DateTime?
+  receivedAt DateTime?
+  // Provider/Graph id, for dedupe on re-ingest.
+  externalId String?
+  raw        Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+  @@index([externalId])
+}
+
+// Immutable field-level change trail for a ticket (mirrors BillingLineEdit).
+model SfTicketHistory {
+  id       String   @id @default(cuid())
+  ticketId String
+  ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  field    String
+  oldValue String?
+  newValue String?
+
+  changedById    String?
+  changedByEmail String?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+// A work/charge code: onsite, remote, after-hours, presales, admin, vacation…
+model SfChargeCode {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+  kind SfChargeCodeKind @default(BILLABLE_WORK)
+  // Default billability for time logged against this code.
+  billableDefault Boolean @default(true)
+  // Default multiplier (e.g. 1.5 for after-hours) applied when no rate rule
+  // provides one. Kept at 3dp like other multipliers in this schema.
+  defaultMultiplier Decimal? @db.Decimal(6, 3)
+  active Boolean @default(true)
+  sortOrder Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeEntries SfTimeEntry[]
+  rateRules   SfRateRule[]
+  techDefaults SfTechProfile[]
+
+  @@index([active, sortOrder])
+}
+
+// A rate rule. Resolution picks the most specific matching active rule (see
+// SfRateScope) and prefers a fixedRate over a multiplier, exactly like PriceRule.
+model SfRateRule {
+  id    String      @id @default(cuid())
+  scope SfRateScope
+  // Scope keys — which are set depends on `scope`.
+  clientId     String?
+  agreementId  String?
+  agreement    SfAgreement? @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  chargeCodeId String?
+  chargeCode   SfChargeCode? @relation(fields: [chargeCodeId], references: [id], onDelete: Cascade)
+
+  timeBand SfTimeBand @default(ANY)
+
+  // An hourly rate, or a multiplier applied to the next-less-specific rate.
+  fixedRate  Decimal? @db.Decimal(18, 4)
+  multiplier Decimal? @db.Decimal(6, 3)
+  // Internal cost rate, for margin reporting.
+  costRate   Decimal? @db.Decimal(18, 4)
+
+  active    Boolean @default(true)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scope, active])
+  @@index([clientId])
+  @@index([agreementId])
+  @@index([chargeCodeId])
+}
+
+// Weekly timesheet container for a technician.
+model SfTimesheet {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("SfTimesheetUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Monday of the week (UTC), so a week is identified unambiguously.
+  weekStart DateTime
+  status    SfTimesheetStatus @default(OPEN)
+
+  submittedAt   DateTime?
+  approvedAt    DateTime?
+  approvedById  String?
+  approvedByEmail String?
+  rejectionNote String? @db.Text
+
+  totalHours    Decimal @default(0) @db.Decimal(18, 4)
+  billableHours Decimal @default(0) @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries SfTimeEntry[]
+
+  @@unique([userId, weekStart])
+  @@index([status, weekStart])
+}
+
+model SfTimeEntry {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("SfTimeEntryUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  ticketId String?
+  ticket   SfTicket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  projectTaskId String?
+  projectTask   SfProjectTask? @relation(fields: [projectTaskId], references: [id], onDelete: SetNull)
+
+  agreementId String?
+  agreement   SfAgreement? @relation(fields: [agreementId], references: [id], onDelete: SetNull)
+
+  chargeCodeId String
+  chargeCode   SfChargeCode @relation(fields: [chargeCodeId], references: [id], onDelete: Restrict)
+
+  timesheetId String?
+  timesheet   SfTimesheet? @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
+
+  // The work date (date-only semantics, stored UTC midnight) plus optional
+  // start/end for techs who track precisely.
+  workDate  DateTime
+  startedAt DateTime?
+  endedAt   DateTime?
+  hours     Decimal @db.Decimal(18, 4)
+
+  notes        String? @db.Text
+  internalOnly Boolean @default(false) // keep these notes off client-facing output
+
+  billable  Boolean @default(true)
+  timeBand  SfTimeBand @default(ANY)
+  // Resolved at log time so later rate changes don't rewrite history.
+  rate      Decimal? @db.Decimal(18, 4)
+  costRate  Decimal? @db.Decimal(18, 4)
+  amount    Decimal? @db.Decimal(18, 4)
+
+  status SfTimeEntryStatus @default(DRAFT)
+  // Set once the entry has been pushed onto an invoice.
+  invoicedAt   DateTime?
+  qboInvoiceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  blockDraws SfAgreementBlockDraw[]
+
+  @@index([userId, workDate])
+  @@index([ticketId])
+  @@index([status, workDate])
+  @@index([agreementId])
+  @@index([timesheetId])
+}
+
+model SfAgreement {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  name   String
+  type   SfAgreementType
+  status SfAgreementStatus @default(DRAFT)
+
+  startDate DateTime
+  endDate   DateTime?
+  autoRenew Boolean  @default(false)
+
+  // Recurring billing (managed services / NOC).
+  billingFrequency String? // "MONTHLY" | "YEARLY" — string per house precedent
+  monthlyAmount    Decimal? @db.Decimal(18, 2)
+  // Hours included per period before overage applies.
+  includedHours    Decimal? @db.Decimal(18, 4)
+  overageRate      Decimal? @db.Decimal(18, 4)
+  // Default rate when no rate rule matches.
+  standardRate     Decimal? @db.Decimal(18, 4)
+
+  notes String? @db.Text
+
+  createdById    String?
+  createdByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  blocks     SfAgreementBlock[]
+  tickets    SfTicket[]
+  projects   SfProject[]
+  timeEntries SfTimeEntry[]
+  rateRules  SfRateRule[]
+
+  @@index([clientId, status])
+  @@index([type, status])
+}
+
+// A purchased block of prepaid hours. Balance is derived from the draw ledger so
+// it is always auditable rather than a mutable counter.
+model SfAgreementBlock {
+  id          String      @id @default(cuid())
+  agreementId String
+  agreement   SfAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+
+  purchasedHours Decimal   @db.Decimal(18, 4)
+  rate           Decimal?  @db.Decimal(18, 4)
+  amount         Decimal?  @db.Decimal(18, 2)
+  purchasedAt    DateTime  @default(now())
+  expiresAt      DateTime?
+  poNumber       String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  draws SfAgreementBlockDraw[]
+
+  @@index([agreementId, purchasedAt])
+}
+
+// One drawdown of block hours by a time entry (append-only ledger).
+model SfAgreementBlockDraw {
+  id      String           @id @default(cuid())
+  blockId String
+  block   SfAgreementBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  timeEntryId String?
+  timeEntry   SfTimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+
+  hours     Decimal  @db.Decimal(18, 4)
+  createdAt DateTime @default(now())
+
+  @@index([blockId, createdAt])
+  @@index([timeEntryId])
+}
+
+model SfSla {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  active      Boolean @default(true)
+  // When false, SLA clocks run on calendar time instead of business hours.
+  useBusinessHours Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  targets       SfSlaTarget[]
+  businessHours SfBusinessHours[]
+  holidays      SfHoliday[]
+  boards        SfBoard[]
+  tickets       SfTicket[]
+
+  @@index([active])
+}
+
+// Response/resolution target per priority, in minutes.
+model SfSlaTarget {
+  id    String @id @default(cuid())
+  slaId String
+  sla   SfSla  @relation(fields: [slaId], references: [id], onDelete: Cascade)
+
+  priority SfTicketPriority
+  kind     SfSlaTargetKind
+  minutes  Int
+
+  @@unique([slaId, priority, kind])
+  @@index([slaId])
+}
+
+// Business-hours window for one weekday (0=Sunday … 6=Saturday), in the SLA's
+// timezone. Minutes-from-midnight avoids any date/DST ambiguity.
+model SfBusinessHours {
+  id    String @id @default(cuid())
+  slaId String
+  sla   SfSla  @relation(fields: [slaId], references: [id], onDelete: Cascade)
+
+  weekday     Int // 0-6
+  startMinute Int // e.g. 480 = 08:00
+  endMinute   Int // e.g. 1020 = 17:00
+  timezone    String @default("America/Winnipeg")
+
+  @@unique([slaId, weekday])
+  @@index([slaId])
+}
+
+model SfHoliday {
+  id    String @id @default(cuid())
+  slaId String
+  sla   SfSla  @relation(fields: [slaId], references: [id], onDelete: Cascade)
+
+  name String
+  // Date-only (UTC midnight).
+  date DateTime
+
+  @@unique([slaId, date])
+  @@index([slaId, date])
+}
+
+// SLA clock event trail for a ticket: started, paused, resumed, met, breached.
+model SfSlaEvent {
+  id       String   @id @default(cuid())
+  ticketId String
+  ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  kind      String // "STARTED" | "PAUSED" | "RESUMED" | "RESPONDED" | "RESOLVED" | "BREACHED"
+  targetKind SfSlaTargetKind?
+  note      String?
+  occurredAt DateTime @default(now())
+
+  @@index([ticketId, occurredAt])
+}
+
+model SfProject {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  agreementId String?
+  agreement   SfAgreement? @relation(fields: [agreementId], references: [id], onDelete: SetNull)
+
+  name        String
+  description String? @db.Text
+  status      SfProjectStatus @default(PLANNED)
+
+  managerId String?
+  manager   User?   @relation("SfProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+
+  startDate DateTime?
+  dueDate   DateTime?
+  closedAt  DateTime?
+
+  estimatedHours Decimal? @db.Decimal(18, 4)
+  budgetAmount   Decimal? @db.Decimal(18, 2)
+
+  // Set when instantiated from a template, for reporting.
+  templateId String?
+  template   SfProjectTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  createdById    String?
+  createdByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks   SfProjectTask[]
+  tickets SfTicket[]
+
+  @@index([clientId, status])
+  @@index([managerId])
+  @@index([status, dueDate])
+}
+
+// A project task ("ticklet"): the unit of work techs log time against.
+model SfProjectTask {
+  id        String    @id @default(cuid())
+  projectId String
+  project   SfProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  phase     String?
+  name      String
+  description String? @db.Text
+  sortOrder Int     @default(0)
+  status    SfTaskStatus @default(NOT_STARTED)
+
+  assigneeId String?
+  assignee   User?   @relation("SfTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  estimatedHours Decimal? @db.Decimal(18, 4)
+  actualHours    Decimal  @default(0) @db.Decimal(18, 4)
+
+  startDate   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeEntries SfTimeEntry[]
+  tickets     SfTicket[]
+
+  @@index([projectId, sortOrder])
+  @@index([assigneeId])
+  @@index([status])
+}
+
+model SfProjectTemplate {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String? @db.Text
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks    SfProjectTemplateTask[]
+  projects SfProject[]
+
+  @@index([active])
+}
+
+model SfProjectTemplateTask {
+  id         String            @id @default(cuid())
+  templateId String
+  template   SfProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  phase          String?
+  name           String
+  description    String? @db.Text
+  sortOrder      Int     @default(0)
+  estimatedHours Decimal? @db.Decimal(18, 4)
+  // Days after project start that this task is due (relative scheduling).
+  dueOffsetDays  Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId, sortOrder])
+}
+
+// Automatic email/notification rules (e.g. acknowledge on create, notify on
+// status change). Bodies are templates rendered at send time.
+model SfAutoResponseRule {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  active Boolean @default(true)
+
+  // "TICKET_CREATED" | "STATUS_CHANGED" | "NOTE_ADDED" | "SLA_BREACHED"
+  trigger String
+  // Optional narrowing.
+  boardId  String?
+  statusId String?
+  priority SfTicketPriority?
+
+  // "CONTACT" | "ASSIGNEE" | "BOTH"
+  audience String @default("CONTACT")
+
+  subjectTemplate String
+  bodyTemplate    String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, trigger])
+}
+
+// Per-technician SilverFang settings. One row per Wolf365 user who works tickets.
+model SfTechProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  displayName String?
+  // Default charge code applied to new time entries.
+  defaultChargeCodeId String?
+  defaultChargeCode   SfChargeCode? @relation(fields: [defaultChargeCodeId], references: [id], onDelete: SetNull)
+
+  // Per-tech overrides used when no rate rule provides a rate.
+  billRate Decimal? @db.Decimal(18, 4)
+  costRate Decimal? @db.Decimal(18, 4)
+
+  // Mailbox/UPN used for Outlook calendar sync via Microsoft Graph.
+  calendarMailbox String?
+  calendarSyncEnabled Boolean @default(false)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([defaultChargeCodeId])
+}
+
+// Link between a SilverFang record and an Outlook calendar event, so sync can
+// update/delete the right event rather than creating duplicates.
+model SfCalendarLink {
+  id       String    @id @default(cuid())
+  ticketId String?
+  ticket   SfTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // Graph event identity.
+  mailbox  String
+  eventId  String
+  iCalUid  String?
+
+  startAt  DateTime
+  endAt    DateTime
+  syncedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mailbox, eventId])
+  @@index([ticketId])
+}
+
+// Monotonic ticket-number source, so numbers don't depend on row counts.
+model SfCounter {
+  name  String @id // e.g. "ticket"
+  value Int    @default(0)
 }

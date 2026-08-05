@@ -1,0 +1,255 @@
+"use client";
+
+import { useActionState, useState } from "react";
+import type { ReactNode } from "react";
+import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/silverfang/constants";
+import type { SfActionResult } from "./actions";
+
+export interface TicketFormValues {
+  id?: string;
+  clientId: string;
+  contactId: string;
+  boardId: string;
+  statusId: string;
+  priority: string;
+  source: string;
+  summary: string;
+  description: string;
+  assigneeId: string;
+  agreementId: string;
+  type: string;
+  subtype: string;
+  estimatedHours: string;
+}
+
+export interface TicketFormOptions {
+  boards: { id: string; name: string; statuses: { id: string; name: string }[] }[];
+  clients: { id: string; name: string }[];
+  users: { id: string; name: string | null; email: string }[];
+  contactsByClient: Record<string, { id: string; name: string }[]>;
+  agreementsByClient: Record<string, { id: string; name: string }[]>;
+}
+
+const inputCls =
+  "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+function Field({
+  label,
+  required,
+  help,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  help?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium">
+        {label}
+        {required && <span className="ml-1 text-danger">*</span>}
+      </label>
+      {children}
+      {help && <p className="mt-1 text-xs text-muted-foreground">{help}</p>}
+    </div>
+  );
+}
+
+/**
+ * Shared create/edit ticket form. The action is passed in so one form serves
+ * both routes; identity travels in a hidden `id` field.
+ */
+export function TicketForm({
+  values,
+  options,
+  saveAction,
+  submitLabel,
+}: {
+  values: TicketFormValues;
+  options: TicketFormOptions;
+  saveAction: (
+    prev: SfActionResult | null,
+    formData: FormData,
+  ) => Promise<SfActionResult>;
+  submitLabel: string;
+}) {
+  const [result, action, pending] = useActionState(saveAction, null);
+
+  // Client drives which contacts/agreements are selectable; board drives statuses.
+  const [clientId, setClientId] = useState(values.clientId);
+  const [boardId, setBoardId] = useState(values.boardId);
+
+  const contacts = options.contactsByClient[clientId] ?? [];
+  const agreements = options.agreementsByClient[clientId] ?? [];
+  const statuses = options.boards.find((b) => b.id === boardId)?.statuses ?? [];
+
+  return (
+    <form action={action} className="space-y-6">
+      {values.id && <input type="hidden" name="id" value={values.id} />}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Client" required>
+          <select
+            name="clientId"
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            className={inputCls}
+            required
+          >
+            <option value="">Select a client…</option>
+            {options.clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
+          label="Contact"
+          help={
+            clientId && contacts.length === 0
+              ? "This client has no SilverFang contacts yet."
+              : undefined
+          }
+        >
+          <select name="contactId" defaultValue={values.contactId} className={inputCls}>
+            <option value="">No contact</option>
+            {contacts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Board" required>
+          <select
+            name="boardId"
+            value={boardId}
+            onChange={(e) => setBoardId(e.target.value)}
+            className={inputCls}
+            required
+          >
+            {options.boards.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Status" help="Defaults to the board's default status for new tickets.">
+          <select name="statusId" defaultValue={values.statusId} className={inputCls}>
+            <option value="">Board default</option>
+            {statuses.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Priority" required>
+          <select name="priority" defaultValue={values.priority} className={inputCls}>
+            {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Source" required>
+          <select name="source" defaultValue={values.source} className={inputCls}>
+            {Object.entries(SOURCE_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Assignee">
+          <select name="assigneeId" defaultValue={values.assigneeId} className={inputCls}>
+            <option value="">Unassigned</option>
+            {options.users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name ?? u.email}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Agreement" help="Determines which rates apply to time logged.">
+          <select name="agreementId" defaultValue={values.agreementId} className={inputCls}>
+            <option value="">None</option>
+            {agreements.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Type">
+          <input name="type" defaultValue={values.type} className={inputCls} placeholder="e.g. Incident" />
+        </Field>
+
+        <Field label="Subtype">
+          <input
+            name="subtype"
+            defaultValue={values.subtype}
+            className={inputCls}
+            placeholder="e.g. Email"
+          />
+        </Field>
+
+        <Field label="Estimated hours">
+          <input
+            type="number"
+            step="0.25"
+            min="0"
+            name="estimatedHours"
+            defaultValue={values.estimatedHours}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+
+      <Field label="Summary" required>
+        <input
+          name="summary"
+          defaultValue={values.summary}
+          className={inputCls}
+          maxLength={300}
+          required
+          placeholder="One line describing the issue"
+        />
+      </Field>
+
+      <Field label="Description">
+        <textarea
+          name="description"
+          defaultValue={values.description}
+          rows={8}
+          className={inputCls}
+          placeholder="What was reported, what's been tried, what's needed."
+        />
+      </Field>
+
+      {result && !result.ok && (
+        <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{result.message}</p>
+      )}
+
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : submitLabel}
+      </button>
+    </form>
+  );
+}
