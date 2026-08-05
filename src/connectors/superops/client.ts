@@ -174,6 +174,33 @@ export async function introspectScalarFieldNames(
   return out;
 }
 
+export interface DetailedField {
+  name: string;
+  /** True if the field requires arguments (can't be selected without them). */
+  requiredArgs: boolean;
+  base: { kind: string; name: string | null };
+}
+
+/** Field names + kinds + arg-requirements for a type (for recursive selection). */
+export async function introspectTypeFieldsDetailed(
+  ctx: SuperOpsCtx,
+  typeName: string,
+): Promise<DetailedField[] | null> {
+  const q = `query($n: String!) { __type(name: $n) { fields { name args { type { kind } } type { ${TYPE_REF_FRAGMENT} } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_detail", q, { n: typeName });
+  const fields = (
+    res.data as {
+      __type?: { fields?: { name: string; args?: { type?: { kind?: string } }[]; type: TypeRef }[] };
+    } | null
+  )?.__type?.fields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  return fields.map((f) => ({
+    name: f.name,
+    requiredArgs: Array.isArray(f.args) && f.args.some((a) => a?.type?.kind === "NON_NULL"),
+    base: unwrapType(f.type),
+  }));
+}
+
 /** Compact human-readable summary of GraphQL errors for logs/messages. */
 export function describeGraphQLErrors(errors: unknown): string {
   if (!Array.isArray(errors)) return "";

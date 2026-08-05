@@ -8,6 +8,7 @@ import {
   introspectQueryReturnType,
   introspectFieldType,
   introspectScalarFieldNames,
+  introspectTypeFieldsDetailed,
   type SuperOpsCtx,
 } from "@/connectors/superops/client";
 import * as Q from "@/connectors/superops/queries";
@@ -154,6 +155,33 @@ async function resolveScalarSelection(
   const elemType = await introspectFieldType(ctx, returnType, wrapper);
   if (!elemType) return null;
   return introspectScalarFieldNames(ctx, elemType);
+}
+
+/**
+ * Recursively build a GraphQL selection for a type: all its scalar/enum fields,
+ * plus nested object fields expanded to `depth` more levels (so nested detail
+ * like contract billing/line-item amounts is pulled). Skips fields that require
+ * arguments and guards against type cycles. Depth-limited to bound query size.
+ */
+async function buildTypeSelection(
+  ctx: SuperOpsCtx,
+  typeName: string,
+  depth: number,
+  seen: Set<string>,
+): Promise<string> {
+  const fields = await introspectTypeFieldsDetailed(ctx, typeName);
+  if (!fields) return "";
+  const parts: string[] = [];
+  for (const f of fields) {
+    if (f.requiredArgs) continue;
+    if (f.base.kind === "SCALAR" || f.base.kind === "ENUM") {
+      parts.push(f.name);
+    } else if (f.base.kind === "OBJECT" && depth > 0 && f.base.name && !seen.has(f.base.name)) {
+      const sub = await buildTypeSelection(ctx, f.base.name, depth - 1, new Set([...seen, f.base.name]));
+      if (sub) parts.push(`${f.name} { ${sub} }`);
+    }
+  }
+  return parts.join(" ");
 }
 
 /**
@@ -418,12 +446,18 @@ export async function syncSuperOpsAssets(ctx: SuperOpsCtx, resolve: ClientResolv
 
 export async function syncSuperOpsContracts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
+  // The contract's pricing/terms live in the nested `contract` object (and its
+  // line items), so expand that object one level deep instead of just its name.
+  const contractType = await introspectFieldType(ctx, "ClientContract", "contract");
+  const contractSel = contractType
+    ? await buildTypeSelection(ctx, contractType, 1, new Set([contractType]))
+    : "";
   const query = await buildListQuery(ctx, {
     queryName: "getClientContractList",
     inputType: "ListInfoInput",
     wrapper: "clientContracts",
     fallback: Q.CONTRACT_LIST_QUERY,
-    extra: "contract { name }",
+    extra: `contract { ${contractSel || "name"} }`,
   });
   const records = await fetchAll(ctx, "sync_contracts", query);
   for (const raw of records) {
