@@ -26,7 +26,7 @@ query getClientList($input: ListInfoInput!) {
       stage
       status
       emailDomains
-      accountManager { name }
+      accountManager
     }
     listInfo { totalCount }
   }
@@ -101,7 +101,7 @@ query getTicketList($input: ListInfoInput!) {
       subject
       status
       priority
-      technician { name }
+      technician
       client { accountId name }
       createdTime
       updatedTime
@@ -115,7 +115,7 @@ query getWorklogEntries($input: ListInfoInput!) {
   getWorklogEntries(input: $input) {
     worklogEntries {
       worklogId
-      technician { name }
+      technician
       timeSpent
       billable
       notes
