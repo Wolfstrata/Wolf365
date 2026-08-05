@@ -140,21 +140,15 @@ async function fetchAll(
   return all;
 }
 
-/**
- * Resolve the scalar/enum field names of a list query's item type: query ->
- * return type -> wrapper field's element type -> its scalar fields. Returns null
- * if any introspection step is unavailable (falls back to the static query).
- */
-async function resolveScalarSelection(
+/** Resolve a list query's item type: query -> return type -> wrapper element type. */
+async function resolveElementType(
   ctx: SuperOpsCtx,
   queryName: string,
   wrapper: string,
-): Promise<string[] | null> {
+): Promise<string | null> {
   const returnType = await introspectQueryReturnType(ctx, queryName);
   if (!returnType) return null;
-  const elemType = await introspectFieldType(ctx, returnType, wrapper);
-  if (!elemType) return null;
-  return introspectScalarFieldNames(ctx, elemType);
+  return introspectFieldType(ctx, returnType, wrapper);
 }
 
 /**
@@ -185,25 +179,54 @@ async function buildTypeSelection(
 }
 
 /**
- * Build a list query that selects EVERY scalar field of the item type (maximum
- * detail), plus any `extra` nested selection. Falls back to the hand-written
- * static query if introspection is unavailable, so the sync never regresses.
+ * Build a list query for maximum detail. Selects every scalar field of the item
+ * type; when `depth`/`extra` enrich it with nested objects, the richer query is
+ * validated with a 1-record probe and used only if the tenant accepts it —
+ * otherwise it falls back to the flat scalar query, then the static query. So a
+ * too-complex enrichment can never break a working entity.
  */
 async function buildListQuery(
   ctx: SuperOpsCtx,
-  o: { queryName: string; inputType: string; wrapper: string; fallback: string; extra?: string },
+  o: {
+    queryName: string;
+    inputType: string;
+    wrapper: string;
+    fallback: string;
+    extra?: string;
+    depth?: number;
+    buildInput?: (page: number, pageSize: number) => Record<string, unknown>;
+  },
 ): Promise<string> {
-  const scalars = await resolveScalarSelection(ctx, o.queryName, o.wrapper);
-  if (!scalars || scalars.length === 0) return o.fallback;
-  const sel = [scalars.join("\n      "), o.extra].filter(Boolean).join("\n      ");
-  return `query ($input: ${o.inputType}!) {
-  ${o.queryName}(input: $input) {
-    ${o.wrapper} {
-      ${sel}
-    }
-    listInfo { totalCount }
+  const elemType = await resolveElementType(ctx, o.queryName, o.wrapper);
+  if (!elemType) return o.fallback;
+  const buildInput = o.buildInput ?? listInfoInput;
+  const wrap = (sel: string) =>
+    `query ($input: ${o.inputType}!) { ${o.queryName}(input: $input) { ${o.wrapper} { ${sel} } listInfo { totalCount } } }`;
+
+  const scalars = await introspectScalarFieldNames(ctx, elemType);
+  const flatQuery = scalars && scalars.length ? wrap(scalars.join(" ")) : o.fallback;
+
+  // Build the enriched candidate (deep nested selection and/or an explicit extra).
+  let candidateSel = "";
+  if (o.depth && o.depth >= 1) {
+    candidateSel = await buildTypeSelection(ctx, elemType, o.depth, new Set([elemType]));
+  } else if (scalars && scalars.length) {
+    candidateSel = scalars.join(" ");
   }
-}`;
+  candidateSel = [candidateSel, o.extra].filter(Boolean).join(" ");
+  if (!candidateSel.trim() || (!o.depth && !o.extra)) return flatQuery;
+
+  // Probe the richer query with a single record; use it only if accepted.
+  const candidate = wrap(candidateSel);
+  try {
+    const res = await superOpsGraphQL(ctx, `${o.queryName}_probe`, candidate, {
+      input: buildInput(1, 1),
+    });
+    if (res.ok) return candidate;
+  } catch {
+    /* fall through to flat */
+  }
+  return flatQuery;
 }
 
 /**
@@ -538,6 +561,7 @@ export async function syncSuperOpsTickets(
     inputType: "ListInfoInput",
     wrapper: "tickets",
     fallback: Q.TICKET_LIST_QUERY,
+    depth: 1, // pull nested ticket detail (requester, site, status, resolution, …)
   });
   const worklogQuery = await buildListQuery(ctx, {
     queryName: "getWorklogEntries",
