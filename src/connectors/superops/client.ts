@@ -84,6 +84,24 @@ export async function superOpsGraphQL(
   };
 }
 
+/**
+ * Introspect a GraphQL type's field names. Returns null if introspection is
+ * disabled or the type is unknown. Used to discover the exact field names a
+ * tenant exposes (instead of guessing) for enrichment fields.
+ */
+export async function introspectTypeFields(
+  ctx: SuperOpsCtx,
+  typeName: string,
+): Promise<string[] | null> {
+  const query = `query Introspect($n: String!) { __type(name: $n) { fields { name } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect", query, { n: typeName });
+  const t = (res.data as { __type?: { fields?: { name?: unknown }[] } } | null)?.__type;
+  if (!res.ok || !t?.fields) return null;
+  return t.fields
+    .map((f) => f.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+}
+
 /** Compact human-readable summary of GraphQL errors for logs/messages. */
 export function describeGraphQLErrors(errors: unknown): string {
   if (!Array.isArray(errors)) return "";

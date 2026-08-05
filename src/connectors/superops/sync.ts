@@ -4,6 +4,7 @@ import { writeDebugLog } from "@/lib/debug-log";
 import {
   superOpsGraphQL,
   describeGraphQLErrors,
+  introspectTypeFields,
   type SuperOpsCtx,
 } from "@/connectors/superops/client";
 import * as Q from "@/connectors/superops/queries";
@@ -81,6 +82,31 @@ async function fetchAll(
     if (records.length < PAGE_SIZE) break;
   }
   return all;
+}
+
+/**
+ * One-time schema diagnostic: introspect the field names of the types whose
+ * enrichment fields we couldn't confirm (WorklogEntry id/time/date, ClientSite
+ * timezone, ClientContract name, InvoiceItem description) and write them to the
+ * debug-log viewer so the exact names can be wired up without guessing. No-ops
+ * gracefully if the tenant disables introspection.
+ */
+async function logSchemaFields(ctx: SuperOpsCtx): Promise<void> {
+  for (const typeName of ["WorklogEntry", "ClientSite", "ClientContract", "InvoiceItem"]) {
+    try {
+      const fields = await introspectTypeFields(ctx, typeName);
+      await writeDebugLog({
+        type: "SUPEROPS",
+        connectorId: ctx.connectorId,
+        action: `introspect_${typeName}`,
+        endpoint: "api.superops.ai/msp",
+        outcome: fields ? "success" : "failure",
+        error: fields ? fields.join(", ") : "introspection unavailable for this type",
+      });
+    } catch {
+      /* best-effort diagnostic */
+    }
+  }
 }
 
 /** Map SuperOps accountId -> internal SuperOpsClient.id. */
@@ -551,6 +577,9 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
   let imported = 0;
   let updated = 0;
   let skipped = 0;
+
+  // One-time schema diagnostic (best-effort) to reveal remaining field names.
+  await logSchemaFields(ctx);
 
   const clientCounts = await syncSuperOpsClients(ctx);
   imported += clientCounts.imported;
