@@ -228,7 +228,7 @@ export function parseContract(raw: Obj): ParsedContract | null {
   if (!superOpsId) return null;
   return {
     superOpsId,
-    name: pick(raw, ["name", "contractName", "displayName"]),
+    name: pickName(raw, ["name", "contractName", "displayName", "contract"]),
     status: pick(raw, ["contractStatus", "status", "state"]),
     startDate: pickDate(raw, ["startDate", "effectiveDate", "fromDate"]),
     endDate: pickDate(raw, ["endDate", "expiryDate", "toDate"]),

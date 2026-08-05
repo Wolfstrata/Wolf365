@@ -1,14 +1,19 @@
 /**
  * SuperOps GraphQL queries.
  *
- * Field/argument names follow the documented MSP schema. If a tenant's schema
- * differs, the real GraphQL error surfaces (we never fake success) and the
- * defensive parser in parse.ts still maps whatever fields are returned. The
- * invoice query stays overridable via the connector's "Invoices GraphQL query".
+ * Field/argument names are pinned to what this tenant's schema actually accepts
+ * (verified via the GraphQL validation errors surfaced in the debug logs), which
+ * differs from the public docs in places:
+ *  - association fields (`client`, `accountManager`, `technician`, `ticket`) are
+ *    JSON scalars, so they are selected WITHOUT a sub-selection; the defensive
+ *    parser reads ids/names out of the JSON value.
+ *  - list wrappers vary (`clientContracts`, `entries`, `sites`, `userList`).
+ *  - sites/contacts/worklogs take entity-specific `Get*Input!` types.
+ * If a tenant differs, the real GraphQL error surfaces (we never fake success)
+ * and the parser still maps whatever fields come back.
  */
 
-/** Minimal probe for Test Connection — proves auth/connectivity without depending
- * on enriched fields whose shape varies by tenant. */
+/** Minimal probe for Test Connection — proves auth/connectivity only. */
 export const CLIENT_PROBE_QUERY = `
 query getClientList($input: ListInfoInput!) {
   getClientList(input: $input) {
@@ -33,21 +38,20 @@ query getClientList($input: ListInfoInput!) {
 }`;
 
 export const SITE_LIST_QUERY = `
-query getClientSiteList($input: ListInfoInput!) {
+query getClientSiteList($input: GetClientSiteListInput!) {
   getClientSiteList(input: $input) {
-    clientSites {
+    sites {
       id
       name
       timezone
-      client { accountId }
-      address { line1 line2 city state countryCode postalCode }
+      client
     }
     listInfo { totalCount }
   }
 }`;
 
 export const CONTACT_LIST_QUERY = `
-query getClientUserList($input: ListInfoInput!) {
+query getClientUserList($input: GetClientUserListInput!) {
   getClientUserList(input: $input) {
     userList {
       userId
@@ -55,7 +59,7 @@ query getClientUserList($input: ListInfoInput!) {
       email
       contactNumber
       role
-      client { accountId }
+      client
     }
     listInfo { totalCount }
   }
@@ -71,7 +75,7 @@ query getAssetList($input: ListInfoInput!) {
       platform
       status
       lastCommunicatedTime
-      client { accountId }
+      client
     }
     listInfo { totalCount }
   }
@@ -80,13 +84,13 @@ query getAssetList($input: ListInfoInput!) {
 export const CONTRACT_LIST_QUERY = `
 query getClientContractList($input: ListInfoInput!) {
   getClientContractList(input: $input) {
-    contracts {
+    clientContracts {
       contractId
-      name
+      contract
       contractStatus
       startDate
       endDate
-      client { accountId }
+      client
     }
     listInfo { totalCount }
   }
@@ -102,7 +106,7 @@ query getTicketList($input: ListInfoInput!) {
       status
       priority
       technician
-      client { accountId name }
+      client
       createdTime
       updatedTime
     }
@@ -111,17 +115,17 @@ query getTicketList($input: ListInfoInput!) {
 }`;
 
 export const WORKLOG_LIST_QUERY = `
-query getWorklogEntries($input: ListInfoInput!) {
+query getWorklogEntries($input: GetWorklogEntriesInput!) {
   getWorklogEntries(input: $input) {
-    worklogEntries {
+    entries {
       worklogId
       technician
       timeSpent
       billable
       notes
       entryTime
-      ticket { ticketId }
-      client { accountId }
+      ticket
+      client
     }
     listInfo { totalCount }
   }
@@ -136,9 +140,7 @@ query getInvoiceList($input: ListInfoInput!) {
       statusEnum
       invoiceDate
       dueDate
-      client { accountId name }
-      subTotalAmount
-      taxAmount
+      client
       totalAmount
       items { itemName quantity unitPrice amount }
     }

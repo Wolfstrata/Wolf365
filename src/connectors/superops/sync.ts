@@ -49,12 +49,27 @@ async function logEntity(
   });
 }
 
+/** Default GraphQL input: ListInfoInput-shaped `{ page, pageSize }`. */
+const listInfoInput = (page: number, pageSize: number): Record<string, unknown> => ({
+  page,
+  pageSize,
+});
+/** Get*Input-shaped input that wraps pagination under `listInfo`. */
+const wrappedListInfoInput = (page: number, pageSize: number): Record<string, unknown> => ({
+  listInfo: { page, pageSize },
+});
+
 /** Fetch every page of a SuperOps list query, defensively unwrapping the array. */
-async function fetchAll(ctx: SuperOpsCtx, action: string, query: string): Promise<Obj[]> {
+async function fetchAll(
+  ctx: SuperOpsCtx,
+  action: string,
+  query: string,
+  buildInput: (page: number, pageSize: number) => Record<string, unknown> = listInfoInput,
+): Promise<Obj[]> {
   const all: Obj[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const res = await superOpsGraphQL(ctx, action, query, {
-      input: { page, pageSize: PAGE_SIZE },
+      input: buildInput(page, PAGE_SIZE),
     });
     if (!res.ok) {
       throw new Error(
@@ -119,7 +134,7 @@ export async function syncSuperOpsClients(ctx: SuperOpsCtx): Promise<Counts> {
 
 export async function syncSuperOpsSites(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_sites", Q.SITE_LIST_QUERY);
+  const records = await fetchAll(ctx, "sync_sites", Q.SITE_LIST_QUERY, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseSite(raw);
     const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
@@ -149,7 +164,7 @@ export async function syncSuperOpsSites(ctx: SuperOpsCtx, clients: Map<string, s
 
 export async function syncSuperOpsContacts(ctx: SuperOpsCtx, clients: Map<string, string>): Promise<Counts> {
   const counts = zero();
-  const records = await fetchAll(ctx, "sync_contacts", Q.CONTACT_LIST_QUERY);
+  const records = await fetchAll(ctx, "sync_contacts", Q.CONTACT_LIST_QUERY, wrappedListInfoInput);
   for (const raw of records) {
     const p = parseContact(raw);
     const accountId = isObj(raw.client) ? pick(raw.client, ["accountId", "id"]) : pick(raw, ["accountId"]);
@@ -347,7 +362,7 @@ export async function syncSuperOpsTickets(
     let done = false;
     for (; result.worklogs < maxWorklogs && page <= MAX_PAGES; page += 1) {
       const res = await superOpsGraphQL(ctx, "sync_worklogs", Q.WORKLOG_LIST_QUERY, {
-        input: { page, pageSize: PAGE_SIZE },
+        input: { listInfo: { page, pageSize: PAGE_SIZE } },
       });
       if (!res.ok)
         throw new Error(
