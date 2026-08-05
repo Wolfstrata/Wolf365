@@ -50,6 +50,40 @@ async function logEntity(
   });
 }
 
+/** Find `listInfo.totalCount` anywhere in a GraphQL result (the true row count). */
+function findTotalCount(data: unknown): number | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  for (const v of Object.values(data as Record<string, unknown>)) {
+    if (v && typeof v === "object") {
+      const li = (v as Record<string, unknown>).listInfo;
+      if (li && typeof li === "object" && typeof (li as Record<string, unknown>).totalCount === "number") {
+        return (li as Record<string, unknown>).totalCount as number;
+      }
+      const nested = findTotalCount(v);
+      if (nested != null) return nested;
+    }
+  }
+  return undefined;
+}
+
+/** Stable-ish identity of the first record in a page, to detect non-advancing pagination. */
+function firstRecordKey(records: Obj[]): string | undefined {
+  const r = records[0];
+  if (!r) return undefined;
+  return (
+    pick(r, [
+      "id",
+      "accountId",
+      "ticketId",
+      "contractId",
+      "assetId",
+      "userId",
+      "invoiceId",
+      "worklogId",
+    ]) ?? JSON.stringify(r).slice(0, 80)
+  );
+}
+
 /** Default GraphQL input: ListInfoInput-shaped `{ page, pageSize }`. */
 const listInfoInput = (page: number, pageSize: number): Record<string, unknown> => ({
   page,
@@ -68,6 +102,8 @@ async function fetchAll(
   buildInput: (page: number, pageSize: number) => Record<string, unknown> = listInfoInput,
 ): Promise<Obj[]> {
   const all: Obj[] = [];
+  let total: number | undefined;
+  let prevKey: string | undefined;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const res = await superOpsGraphQL(ctx, action, query, {
       input: buildInput(page, PAGE_SIZE),
@@ -78,8 +114,24 @@ async function fetchAll(
       );
     }
     const records = firstObjectArray(res.data) ?? [];
+    const t = findTotalCount(res.data);
+    if (t != null) total = t;
+    if (records.length === 0) break; // no more rows
+
+    // Guard: if a page repeats the previous page's first record, the API isn't
+    // honoring `page` — stop rather than loop/duplicate.
+    const key = firstRecordKey(records);
+    if (key !== undefined && key === prevKey) break;
+    prevKey = key;
+
     all.push(...records);
-    if (records.length < PAGE_SIZE) break;
+
+    // Prefer the reported total; fall back to a short page only when it's unknown.
+    if (total != null) {
+      if (all.length >= total) break;
+    } else if (records.length < PAGE_SIZE) {
+      break;
+    }
   }
   return all;
 }
@@ -333,6 +385,8 @@ export async function syncSuperOpsTickets(
   try {
     let page = await nextPage("tickets");
     let done = false;
+    let total: number | undefined;
+    let prevKey: string | undefined;
     for (; result.tickets < maxTickets && page <= MAX_PAGES; page += 1) {
       const res = await superOpsGraphQL(ctx, "sync_tickets", Q.TICKET_LIST_QUERY, {
         input: { page, pageSize: PAGE_SIZE },
@@ -342,6 +396,20 @@ export async function syncSuperOpsTickets(
           `SuperOps sync_tickets failed (HTTP ${res.status})${res.errors ? `: ${describeGraphQLErrors(res.errors)}` : ""}`,
         );
       const records = firstObjectArray(res.data) ?? [];
+      const t = findTotalCount(res.data);
+      if (t != null) total = t;
+      if (records.length === 0) {
+        done = true;
+        page += 1;
+        break;
+      }
+      const key = firstRecordKey(records);
+      if (key !== undefined && key === prevKey) {
+        done = true;
+        page += 1;
+        break;
+      }
+      prevKey = key;
       for (const raw of records) {
         const p = parseTicket(raw);
         if (!p) continue;
@@ -365,9 +433,9 @@ export async function syncSuperOpsTickets(
         });
         result.tickets += 1;
       }
-      if (records.length < PAGE_SIZE) {
+      if (total != null ? page * PAGE_SIZE >= total : records.length < PAGE_SIZE) {
         done = true;
-        page += 1; // so the checkpoint below records "past the end"
+        page += 1; // checkpoint past the end
         break;
       }
     }
@@ -386,6 +454,8 @@ export async function syncSuperOpsTickets(
 
     let page = await nextPage("worklogs");
     let done = false;
+    let total: number | undefined;
+    let prevKey: string | undefined;
     for (; result.worklogs < maxWorklogs && page <= MAX_PAGES; page += 1) {
       const res = await superOpsGraphQL(ctx, "sync_worklogs", Q.WORKLOG_LIST_QUERY, {
         input: { listInfo: { page, pageSize: PAGE_SIZE } },
@@ -395,6 +465,20 @@ export async function syncSuperOpsTickets(
           `SuperOps sync_worklogs failed (HTTP ${res.status})${res.errors ? `: ${describeGraphQLErrors(res.errors)}` : ""}`,
         );
       const records = firstObjectArray(res.data) ?? [];
+      const t = findTotalCount(res.data);
+      if (t != null) total = t;
+      if (records.length === 0) {
+        done = true;
+        page += 1;
+        break;
+      }
+      const key = firstRecordKey(records);
+      if (key !== undefined && key === prevKey) {
+        done = true;
+        page += 1;
+        break;
+      }
+      prevKey = key;
       for (const raw of records) {
         const p = parseWorklog(raw);
         if (!p) continue;
@@ -416,7 +500,7 @@ export async function syncSuperOpsTickets(
         });
         result.worklogs += 1;
       }
-      if (records.length < PAGE_SIZE) {
+      if (total != null ? page * PAGE_SIZE >= total : records.length < PAGE_SIZE) {
         done = true;
         page += 1;
         break;
@@ -454,6 +538,9 @@ export async function syncSuperOpsInvoices(ctx: SuperOpsCtx): Promise<Counts> {
   const clientByAccount = new Map(soClients.map((c) => [c.superOpsId, c.clientId]));
 
   try {
+    let total: number | undefined;
+    let prevKey: string | undefined;
+    let seen = 0;
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       const res = await superOpsGraphQL(ctx, "sync_invoices", query, {
         input: { page, pageSize: PAGE_SIZE },
@@ -463,14 +550,20 @@ export async function syncSuperOpsInvoices(ctx: SuperOpsCtx): Promise<Counts> {
         break;
       }
       const invoices = firstObjectArray(res.data) ?? [];
+      const t = findTotalCount(res.data);
+      if (t != null) total = t;
       if (invoices.length === 0) break;
+      const key = firstRecordKey(invoices);
+      if (key !== undefined && key === prevKey) break;
+      prevKey = key;
       for (const inv of invoices) {
         const r = await upsertSuperOpsInvoice(inv, clientByAccount);
         if (r === "created") counts.imported += 1;
         else if (r === "updated") counts.updated += 1;
         else counts.skipped += 1;
       }
-      if (invoices.length < PAGE_SIZE) break;
+      seen += invoices.length;
+      if (total != null ? seen >= total : invoices.length < PAGE_SIZE) break;
     }
   } catch (err) {
     counts.error = err instanceof Error ? err.message : "invoice sync error";
