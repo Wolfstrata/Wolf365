@@ -5,10 +5,11 @@ import type {
 } from "@/connectors/types";
 import {
   superOpsGraphQL,
+  describeGraphQLErrors,
   type SuperOpsConfig,
   type SuperOpsSecrets,
 } from "@/connectors/superops/client";
-import { CLIENT_LIST_QUERY } from "@/connectors/superops/queries";
+import { CLIENT_PROBE_QUERY } from "@/connectors/superops/queries";
 import { syncSuperOpsAccountData } from "@/connectors/superops/sync";
 
 /**
@@ -90,14 +91,15 @@ export const superOpsConnector: ConnectorDefinition<
   async testConnection(ctx): Promise<ConnectorTestResult> {
     const start = Date.now();
     // Request a single client page as a safe read-only probe.
-    const res = await superOpsGraphQL(ctx, "test_connection", CLIENT_LIST_QUERY, {
+    const res = await superOpsGraphQL(ctx, "test_connection", CLIENT_PROBE_QUERY, {
       input: { page: 1, pageSize: 1 },
     });
     const durationMs = Date.now() - start;
     if (!res.ok) {
+      const detail = describeGraphQLErrors(res.errors);
       return {
         ok: false,
-        message: `SuperOps GraphQL error (HTTP ${res.status})`,
+        message: `SuperOps GraphQL error (HTTP ${res.status})${detail ? `: ${detail}` : ""}`,
         durationMs,
       };
     }

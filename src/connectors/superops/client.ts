@@ -1,4 +1,5 @@
 import { connectorFetch } from "@/connectors/http";
+import { writeDebugLog } from "@/lib/debug-log";
 import type { ConnectorContext } from "@/connectors/types";
 
 /**
@@ -61,6 +62,20 @@ export async function superOpsGraphQL(
   const parsed = res.body
     ? (JSON.parse(res.body) as { data?: unknown; errors?: unknown })
     : {};
+  // A GraphQL error arrives as HTTP 200 with a non-empty `errors` array, so
+  // connectorFetch logs it as a success. Record a redacted failure entry with
+  // the GraphQL message(s) so the exact bad field shows in the debug-log viewer.
+  if (parsed.errors) {
+    await writeDebugLog({
+      type: "SUPEROPS",
+      connectorId: ctx.connectorId,
+      action: `${action}_graphql_error`,
+      endpoint: "api.superops.ai/msp",
+      httpStatus: res.status,
+      outcome: "failure",
+      error: describeGraphQLErrors(parsed.errors) || "GraphQL error",
+    });
+  }
   return {
     ok: res.ok && !parsed.errors,
     status: res.status,

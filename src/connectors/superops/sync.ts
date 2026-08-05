@@ -296,7 +296,10 @@ export async function syncSuperOpsTickets(
       const res = await superOpsGraphQL(ctx, "sync_tickets", Q.TICKET_LIST_QUERY, {
         input: { page, pageSize: PAGE_SIZE },
       });
-      if (!res.ok) throw new Error(`SuperOps sync_tickets failed (HTTP ${res.status})`);
+      if (!res.ok)
+        throw new Error(
+          `SuperOps sync_tickets failed (HTTP ${res.status})${res.errors ? `: ${describeGraphQLErrors(res.errors)}` : ""}`,
+        );
       const records = firstObjectArray(res.data) ?? [];
       for (const raw of records) {
         const p = parseTicket(raw);
@@ -346,7 +349,10 @@ export async function syncSuperOpsTickets(
       const res = await superOpsGraphQL(ctx, "sync_worklogs", Q.WORKLOG_LIST_QUERY, {
         input: { page, pageSize: PAGE_SIZE },
       });
-      if (!res.ok) throw new Error(`SuperOps sync_worklogs failed (HTTP ${res.status})`);
+      if (!res.ok)
+        throw new Error(
+          `SuperOps sync_worklogs failed (HTTP ${res.status})${res.errors ? `: ${describeGraphQLErrors(res.errors)}` : ""}`,
+        );
       const records = firstObjectArray(res.data) ?? [];
       for (const raw of records) {
         const p = parseWorklog(raw);
@@ -412,7 +418,7 @@ export async function syncSuperOpsInvoices(ctx: SuperOpsCtx): Promise<Counts> {
         input: { page, pageSize: PAGE_SIZE },
       });
       if (!res.ok) {
-        counts.error = `SuperOps invoice query failed (HTTP ${res.status})`;
+        counts.error = `SuperOps invoice query failed (HTTP ${res.status})${res.errors ? `: ${describeGraphQLErrors(res.errors)}` : ""}`;
         break;
       }
       const invoices = firstObjectArray(res.data) ?? [];

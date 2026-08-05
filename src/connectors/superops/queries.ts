@@ -7,6 +7,16 @@
  * invoice query stays overridable via the connector's "Invoices GraphQL query".
  */
 
+/** Minimal probe for Test Connection — proves auth/connectivity without depending
+ * on enriched fields whose shape varies by tenant. */
+export const CLIENT_PROBE_QUERY = `
+query getClientList($input: ListInfoInput!) {
+  getClientList(input: $input) {
+    clients { accountId }
+    listInfo { totalCount }
+  }
+}`;
+
 export const CLIENT_LIST_QUERY = `
 query getClientList($input: ListInfoInput!) {
   getClientList(input: $input) {
@@ -16,7 +26,7 @@ query getClientList($input: ListInfoInput!) {
       stage
       status
       emailDomains
-      accountManager { name email }
+      accountManager { name }
     }
     listInfo { totalCount }
   }
@@ -91,7 +101,7 @@ query getTicketList($input: ListInfoInput!) {
       subject
       status
       priority
-      technician { name email }
+      technician { name }
       client { accountId name }
       createdTime
       updatedTime
@@ -105,7 +115,7 @@ query getWorklogEntries($input: ListInfoInput!) {
   getWorklogEntries(input: $input) {
     worklogEntries {
       worklogId
-      technician { name email }
+      technician { name }
       timeSpent
       billable
       notes
