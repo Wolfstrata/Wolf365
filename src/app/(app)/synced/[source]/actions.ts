@@ -21,9 +21,23 @@ export async function syncSuperOpsAction(
     const r = await runSync("SUPEROPS", "manual", user.id);
     const s = (r.summary ?? {}) as Record<string, unknown>;
     revalidatePath("/synced/superops");
+
+    // A zero that means "the API returned none" and a zero that means "hundreds
+    // came back and none could be stored" used to read identically. Name the
+    // skips so a silent drop can't hide behind a clean-looking count.
+    const skipped = (s.skippedByEntity ?? {}) as Record<string, number>;
+    const skipNote = Object.entries(skipped)
+      .filter(([, n]) => n > 0)
+      .map(([entity, n]) => `${n} ${entity}`)
+      .join(", ");
+
     return {
       ok: true,
-      message: `Synced ${s.clients ?? 0} clients, ${s.sites ?? 0} sites, ${s.contacts ?? 0} contacts, ${s.assets ?? 0} assets, ${s.contracts ?? 0} contracts, ${s.invoices ?? 0} invoices.`,
+      message:
+        `Synced ${s.clients ?? 0} clients, ${s.sites ?? 0} sites, ${s.contacts ?? 0} contacts, ${s.assets ?? 0} assets, ${s.contracts ?? 0} contracts, ${s.invoices ?? 0} invoices.` +
+        (skipNote
+          ? ` Could not store: ${skipNote} — see Debug Logs for the "_skip_shape" entry, which records why.`
+          : ""),
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

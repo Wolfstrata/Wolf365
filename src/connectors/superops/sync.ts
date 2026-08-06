@@ -302,7 +302,20 @@ async function buildClientResolver(): Promise<ClientResolver> {
     } else if (typeof c === "number") {
       accountId = String(c);
     }
-    if (!accountId) accountId = pick(raw, ["accountId", "clientId"]);
+    if (!accountId) accountId = pick(raw, ["accountId", "clientId", "clientAccountId"]);
+    if (!name) name = pick(raw, ["clientName", "companyName"]);
+    // Some child records carry the client only via their site.
+    const site = raw.site;
+    if ((!accountId || !byId.has(accountId)) && isObj(site)) {
+      const siteClient = site.client;
+      if (isObj(siteClient)) {
+        accountId = pick(siteClient, ["accountId", "id"]) ?? accountId;
+        name = name ?? pick(siteClient, ["name", "companyName"]);
+      } else if (typeof siteClient === "string" && siteClient.trim()) {
+        accountId = siteClient;
+      }
+      name = name ?? pick(site, ["clientName"]);
+    }
     if (accountId && byId.has(accountId)) return byId.get(accountId) ?? null;
     if (name) {
       const id = byName.get(norm(name));
@@ -310,6 +323,36 @@ async function buildClientResolver(): Promise<ClientResolver> {
     }
     return null;
   };
+}
+
+/**
+ * Record the *shape* of a record the resolver couldn't place, so a skip storm
+ * explains itself instead of costing another sync-and-ask cycle. Field names and
+ * the client-ish field structure only — never values, which carry PII.
+ */
+async function logSkipShape(ctx: SuperOpsCtx, action: string, raw: Obj): Promise<void> {
+  const describe = (v: unknown): string => {
+    if (v === undefined) return "absent";
+    if (v === null) return "null";
+    if (Array.isArray(v)) return `array[${v.length}]`;
+    if (isObj(v)) return `object{${Object.keys(v).join(",")}}`;
+    return typeof v;
+  };
+  try {
+    await writeDebugLog({
+      type: "SUPEROPS",
+      connectorId: ctx.connectorId,
+      action: `${action}_skip_shape`,
+      endpoint: "api.superops.ai/msp",
+      outcome: "failure",
+      error:
+        `could not link record to a client. keys=[${Object.keys(raw).join(",")}] ` +
+        `client=${describe(raw.client)} site=${describe(raw.site)} ` +
+        `accountId=${describe(raw.accountId)} clientId=${describe(raw.clientId)}`,
+    });
+  } catch {
+    /* best-effort diagnostic */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,13 +444,24 @@ export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientReso
     inputType: "GetClientUserListInput",
     wrapper: "userList",
     fallback: Q.CONTACT_LIST_QUERY,
+    // A flat scalar-only selection omits any OBJECT-typed `client` field, which
+    // leaves the parent resolver nothing to match on and skips every record.
+    // Depth 1 expands it whatever its shape, and the probe falls back to flat if
+    // the tenant rejects the richer query.
+    depth: 1,
+    buildInput: wrappedListInfoInput,
   });
   const records = await fetchAll(ctx, "sync_contacts", query, wrappedListInfoInput);
+  let loggedShape = false;
   for (const raw of records) {
     const p = parseContact(raw);
     const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
+      if (!loggedShape) {
+        loggedShape = true;
+        await logSkipShape(ctx, "sync_contacts", raw);
+      }
       continue;
     }
     const data = {
@@ -437,13 +491,21 @@ export async function syncSuperOpsAssets(ctx: SuperOpsCtx, resolve: ClientResolv
     inputType: "ListInfoInput",
     wrapper: "assets",
     fallback: Q.ASSET_LIST_QUERY,
+    // Same reason as contacts: without the nested client the resolver can't place
+    // an asset, which is why only one of them ever landed.
+    depth: 1,
   });
   const records = await fetchAll(ctx, "sync_assets", query);
+  let loggedShape = false;
   for (const raw of records) {
     const p = parseAsset(raw);
     const parent = resolve(raw);
     if (!p || !parent) {
       counts.skipped += 1;
+      if (!loggedShape) {
+        loggedShape = true;
+        await logSkipShape(ctx, "sync_assets", raw);
+      }
       continue;
     }
     const data = {
@@ -862,6 +924,12 @@ export interface AccountSyncSummary {
   contracts: number;
   invoices: number;
   errors: Record<string, string>;
+  /**
+   * Records the API returned that could not be stored, per entity. Reported
+   * because "0 contacts" and "0 contacts, 312 skipped" are completely different
+   * problems and used to look identical.
+   */
+  skippedByEntity: Record<string, number>;
 }
 
 /**
@@ -890,6 +958,7 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
   if (clientCounts.error) errors.clients = clientCounts.error;
 
   const resolve = await buildClientResolver();
+  const skippedByEntity: Record<string, number> = {};
   const run = async (
     key: keyof AccountSyncSummary,
     fn: (ctx: SuperOpsCtx, resolve: ClientResolver) => Promise<Counts>,
@@ -899,6 +968,7 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
       imported += c.imported;
       updated += c.updated;
       skipped += c.skipped;
+      if (c.skipped > 0) skippedByEntity[key] = c.skipped;
       if (c.error) errors[key] = c.error;
       return c.imported + c.updated;
     } catch (err) {
@@ -920,6 +990,7 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
     updated += inv.updated;
     skipped += inv.skipped;
     invoices = inv.imported + inv.updated;
+    if (inv.skipped > 0) skippedByEntity.invoices = inv.skipped;
     if (inv.error) errors.invoices = inv.error;
   } catch (err) {
     errors.invoices = err instanceof Error ? err.message : "invoice sync error";
@@ -937,6 +1008,10 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
       contracts,
       invoices,
       errors,
+      skippedByEntity: {
+        ...(clientCounts.skipped > 0 ? { clients: clientCounts.skipped } : {}),
+        ...skippedByEntity,
+      },
     },
   };
 }
