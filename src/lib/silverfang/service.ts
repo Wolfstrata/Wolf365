@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
+  DEFAULT_AUTO_RESPONSES,
   DEFAULT_BOARD_NAME,
   DEFAULT_BUSINESS_HOURS,
   DEFAULT_CHARGE_CODES,
@@ -104,6 +105,25 @@ export async function ensureSilverFangDefaults(): Promise<{
           billableDefault: c.billableDefault,
           defaultMultiplier: c.defaultMultiplier ?? null,
           sortOrder: c.sortOrder,
+        },
+      });
+    }
+  }
+
+  // Auto-response templates, seeded switched OFF so setup never starts mailing
+  // clients on its own. An admin enables them on SilverFang → Email.
+  for (const rule of DEFAULT_AUTO_RESPONSES) {
+    const existing = await prisma.sfAutoResponseRule.findUnique({ where: { name: rule.name } });
+    if (!existing) {
+      created = true;
+      await prisma.sfAutoResponseRule.create({
+        data: {
+          name: rule.name,
+          trigger: rule.trigger,
+          audience: rule.audience,
+          subjectTemplate: rule.subjectTemplate,
+          bodyTemplate: rule.bodyTemplate,
+          active: false,
         },
       });
     }

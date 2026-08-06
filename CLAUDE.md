@@ -97,6 +97,16 @@ npm run db:studio      # prisma studio
   `unitCost` = our cost (margin = price − cost).
 - **SuperOps billing is separate** from M365 agreement billing (its own
   import → review → push pipeline and DB models).
+- **SilverFang ticket email:** threading is **subject-tag-first**
+  (`[SF-1042]`), backed by the `x-silverfang-ticket` header, with RFC
+  In-Reply-To/References only as a fallback. This is not a style choice — Graph's
+  `sendMail` accepts custom `internetMessageHeaders` **only when they start with
+  `x-`**, so In-Reply-To cannot be set on the Graph path. Auto-submitted mail
+  (OOO, bounces) must never open a ticket or trigger an auto-response, or two
+  robots mail each other forever. Auto-response rules seed **inactive**. Mail is
+  sent before the message row is written, so the timeline never shows a reply the
+  provider refused. The poll watermark advances past *decided* messages
+  (including skips) — dedupe by `messageId`, not the watermark, prevents doubles.
 - **Static IP / proxy:** `connectorFetch` uses **undici's own `fetch`** + a
   `ProxyAgent` with an **explicit Basic auth token** (undici ignores
   URL-embedded creds). Degrade to no-proxy on a malformed proxy URL.

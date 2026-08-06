@@ -167,3 +167,64 @@ export const DEFAULT_BUSINESS_HOURS = {
 
 export const DEFAULT_BOARD_NAME = "Service Desk";
 export const DEFAULT_SLA_NAME = "Standard SLA";
+
+/**
+ * Starter auto-response templates. Seeded **inactive**: mail to a client should
+ * only start flowing when an admin deliberately switches a rule on, never as a
+ * side effect of running setup.
+ */
+export const DEFAULT_AUTO_RESPONSES: {
+  name: string;
+  trigger: "TICKET_CREATED" | "STATUS_CHANGED" | "NOTE_ADDED" | "SLA_BREACHED";
+  audience: "CONTACT" | "ASSIGNEE" | "BOTH";
+  subjectTemplate: string;
+  bodyTemplate: string;
+}[] = [
+  {
+    name: "Ticket received acknowledgement",
+    trigger: "TICKET_CREATED",
+    audience: "CONTACT",
+    subjectTemplate: "{{ticket.summary}}",
+    bodyTemplate: [
+      "Hello,",
+      "",
+      "Thanks for getting in touch — we have logged your request as ticket #{{ticket.number}} and a technician will review it shortly.",
+      "",
+      "Summary: {{ticket.summary}}",
+      "Priority: {{ticket.priority}}",
+      "",
+      "You can reply to this email at any time and your reply will be added to the ticket.",
+    ].join("\n"),
+  },
+  {
+    name: "Assignment notice to technician",
+    trigger: "TICKET_CREATED",
+    audience: "ASSIGNEE",
+    subjectTemplate: "New ticket: {{ticket.summary}}",
+    bodyTemplate: [
+      "A new ticket has been opened.",
+      "",
+      "Ticket: #{{ticket.number}} — {{ticket.summary}}",
+      "Client: {{client.name}}",
+      "Priority: {{ticket.priority}}",
+      "Status: {{ticket.status}}",
+      "",
+      "{{ticket.url}}",
+    ].join("\n"),
+  },
+  {
+    name: "SLA breach alert to technician",
+    trigger: "SLA_BREACHED",
+    audience: "ASSIGNEE",
+    subjectTemplate: "SLA breached: {{ticket.summary}}",
+    bodyTemplate: [
+      "An SLA target has been breached.",
+      "",
+      "Ticket: #{{ticket.number}} — {{ticket.summary}}",
+      "Client: {{client.name}}",
+      "Priority: {{ticket.priority}}",
+      "",
+      "{{ticket.url}}",
+    ].join("\n"),
+  },
+];

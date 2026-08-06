@@ -715,6 +715,222 @@ export async function saveClientProfileAction(
 }
 
 // ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+
+const replySchema = z.object({
+  ticketId: z.string().min(1),
+  to: z.string().trim().min(1, "Add at least one recipient"),
+  cc: z.preprocess(emptyToUndefined, z.string().max(2_000).optional()),
+  subject: z.preprocess(emptyToUndefined, z.string().max(300).optional()),
+  body: z.string().trim().min(1, "The message body is empty").max(50_000),
+});
+
+/**
+ * Email a ticket reply to the client. The mail is sent before anything is
+ * recorded, so the timeline never shows a reply the provider refused.
+ */
+export async function sendTicketEmailAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = replySchema.parse({
+      ticketId: formValue(formData, "ticketId"),
+      to: formValue(formData, "to"),
+      cc: formValue(formData, "cc"),
+      subject: formValue(formData, "subject"),
+      body: formValue(formData, "body"),
+    });
+
+    const { sendTicketReply } = await import("@/lib/silverfang/email-send");
+    const result = await sendTicketReply({
+      ticketId: input.ticketId,
+      to: input.to.split(/[,;]/),
+      cc: input.cc ? input.cc.split(/[,;]/) : [],
+      subject: input.subject ?? null,
+      body: input.body,
+      actor: { id: user.id, email: user.email },
+    });
+    if (!result.ok) return result;
+
+    await audit({
+      action: "TICKET_EMAIL_SENT",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfTicket:${input.ticketId}`,
+      metadata: { firstResponse: result.firstResponse ?? false },
+    });
+    revalidatePath(`/silverfang/tickets/${input.ticketId}`);
+    return { ok: true, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+const mailboxSchema = z.object({
+  id: optionalId,
+  address: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[^\s@]+@[^\s@.]+\.[^\s@]+$/, "Enter a valid mailbox address"),
+  name: z.preprocess(emptyToUndefined, z.string().max(200).optional()),
+  boardId: optionalId,
+  fallbackClientId: optionalId,
+  defaultPriority: z.enum(SfTicketPriority),
+  provider: z.enum(["GRAPH", "RESEND"]),
+  inbound: z.coerce.boolean(),
+  outbound: z.coerce.boolean(),
+  active: z.coerce.boolean(),
+  signature: z.preprocess(emptyToUndefined, z.string().max(4_000).optional()),
+});
+
+/** Create or update a support mailbox. */
+export async function saveMailboxAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const input = mailboxSchema.parse({
+      id: formValue(formData, "id"),
+      address: formValue(formData, "address"),
+      name: formValue(formData, "name"),
+      boardId: formValue(formData, "boardId"),
+      fallbackClientId: formValue(formData, "fallbackClientId"),
+      defaultPriority: formValue(formData, "defaultPriority"),
+      provider: formValue(formData, "provider"),
+      inbound: formData.get("inbound") === "on",
+      outbound: formData.get("outbound") === "on",
+      active: formData.get("active") === "on",
+      signature: formValue(formData, "signature"),
+    });
+
+    // RESEND cannot receive mail, so accepting inbound on it would be a lie.
+    const inbound = input.provider === "RESEND" ? false : input.inbound;
+    const data = {
+      address: input.address,
+      name: input.name ?? null,
+      boardId: input.boardId ?? null,
+      fallbackClientId: input.fallbackClientId ?? null,
+      defaultPriority: input.defaultPriority,
+      provider: input.provider,
+      inbound,
+      outbound: input.outbound,
+      active: input.active,
+      signature: input.signature ?? null,
+    };
+
+    const saved = input.id
+      ? await prisma.sfMailbox.update({ where: { id: input.id }, data })
+      : await prisma.sfMailbox.create({ data });
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `silverfang:mailbox:${saved.id}`,
+      metadata: {
+        address: saved.address,
+        provider: saved.provider,
+        inbound: saved.inbound,
+        outbound: saved.outbound,
+        active: saved.active,
+      },
+    });
+    revalidatePath("/silverfang/email");
+    return {
+      ok: true,
+      message:
+        input.provider === "RESEND" && input.inbound
+          ? "Mailbox saved. Inbound was turned off — the Resend provider can only send."
+          : "Mailbox saved.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/** Poll every inbound mailbox now, rather than waiting for the cron. */
+export async function pollMailboxesAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { pollAllMailboxes } = await import("@/lib/silverfang/email-ingest");
+    const results = await pollAllMailboxes(25);
+    if (results.length === 0) {
+      return { ok: false, message: "No active inbound mailbox is configured." };
+    }
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:mailbox-poll",
+      metadata: { mailboxes: results.length },
+    });
+    revalidatePath("/silverfang/email");
+    revalidatePath("/silverfang/tickets");
+
+    const failed = results.filter((r) => !r.ok);
+    const totals = results.reduce(
+      (a, r) => ({
+        fetched: a.fetched + r.fetched,
+        created: a.created + r.created,
+        appended: a.appended + r.appended,
+        deduped: a.deduped + r.deduped,
+      }),
+      { fetched: 0, created: 0, appended: 0, deduped: 0 },
+    );
+    const skipped = results.flatMap((r) =>
+      Object.entries(r.skipped).map(([reason, count]) => `${count} ${reason}`),
+    );
+    const parts = [
+      `${totals.fetched} fetched`,
+      `${totals.created} new ticket(s)`,
+      `${totals.appended} appended`,
+    ];
+    if (totals.deduped > 0) parts.push(`${totals.deduped} already seen`);
+    if (skipped.length > 0) parts.push(`skipped: ${skipped.join(", ")}`);
+    const summary = parts.join(", ") + ".";
+
+    return failed.length > 0
+      ? {
+          ok: false,
+          message: `${summary} ${failed.length} mailbox(es) failed: ${failed
+            .map((f) => `${f.mailbox} — ${f.error ?? "unknown error"}`)
+            .join("; ")}`,
+        }
+      : { ok: true, message: summary };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/** Turn an auto-response rule on or off. */
+export async function toggleAutoResponseAction(formData: FormData): Promise<void> {
+  const user = await requirePermission("silverfang:configure");
+  const id = z.string().min(1).parse(formData.get("ruleId"));
+  const rule = await prisma.sfAutoResponseRule.findUnique({ where: { id } });
+  if (!rule) return;
+  await prisma.sfAutoResponseRule.update({
+    where: { id },
+    data: { active: !rule.active },
+  });
+  await audit({
+    action: "SILVERFANG_CONFIG_CHANGED",
+    actorId: user.id,
+    actorEmail: user.email,
+    target: `silverfang:autoResponse:${id}`,
+    metadata: { name: rule.name, active: !rule.active },
+  });
+  revalidatePath("/silverfang/email");
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 

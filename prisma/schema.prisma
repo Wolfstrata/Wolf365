@@ -288,6 +288,8 @@ enum AuditAction {
   TICKET_ASSIGNED
   TICKET_CLOSED
   TICKET_NOTE_ADDED
+  TICKET_EMAIL_SENT
+  TICKET_EMAIL_RECEIVED
   TIME_LOGGED
   TIME_ENTRY_UPDATED
   TIMESHEET_SUBMITTED
@@ -355,6 +357,8 @@ model Client {
   sfTickets    SfTicket[]
   sfAgreements SfAgreement[]
   sfProjects   SfProject[]
+  // Mailboxes that file unrecognised senders against this client.
+  sfMailboxFallbacks SfMailbox[]
 
   @@index([name])
   @@index([parentClientId])
@@ -1354,6 +1358,7 @@ model SfBoard {
   statuses SfStatus[]
   tickets  SfTicket[]
   clientProfiles SfClientProfile[]
+  mailboxes SfMailbox[]
 
   @@index([slaId])
 }
@@ -1549,12 +1554,63 @@ model SfTicketNote {
   @@index([ticketId, createdAt])
 }
 
+// A support mailbox SilverFang sends from and receives into. Inbound mail is
+// polled from here (Microsoft Graph) or POSTed to the ingest webhook; outbound
+// replies are sent from the same address so the client sees one conversation.
+model SfMailbox {
+  id      String  @id @default(cuid())
+  /// Mailbox address, always stored lowercased (e.g. support@wolfstrata.com).
+  address String  @unique
+  name    String?
+
+  /// Board new tickets from this mailbox land on. Falls back to the default board.
+  boardId String?
+  board   SfBoard? @relation(fields: [boardId], references: [id], onDelete: SetNull)
+
+  /// Where a ticket goes when the sender matches no known contact or domain.
+  /// Without one, unrecognised senders are refused and counted rather than
+  /// filed against a guessed client.
+  fallbackClientId String?
+  fallbackClient   Client? @relation(fields: [fallbackClientId], references: [id], onDelete: SetNull)
+
+  defaultPriority SfTicketPriority @default(P3)
+
+  /// "GRAPH" (Microsoft 365 shared mailbox) or "RESEND" (outbound only).
+  provider String @default("GRAPH")
+
+  inbound  Boolean @default(true)
+  outbound Boolean @default(true)
+  active   Boolean @default(true)
+
+  /// Appended to outbound replies, after a separator.
+  signature String? @db.Text
+
+  /// Poll bookkeeping. `lastMessageAt` is the receivedDateTime watermark — only
+  /// mail newer than this is fetched, and dedupe still guards re-delivery.
+  lastPolledAt  DateTime?
+  lastMessageAt DateTime?
+  lastPollError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SfTicketMessage[]
+
+  @@index([active, inbound])
+  @@index([boardId])
+  @@index([fallbackClientId])
+}
+
 // An email tied to a ticket, inbound or outbound. Threading headers are stored
 // so replies land on the right ticket.
 model SfTicketMessage {
   id       String   @id @default(cuid())
   ticketId String
   ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  /// Which mailbox sent or received this message (null for legacy/unknown).
+  mailboxId String?
+  mailbox   SfMailbox? @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
 
   direction  String // "INBOUND" | "OUTBOUND"
   fromAddress String
@@ -1579,6 +1635,7 @@ model SfTicketMessage {
 
   @@index([ticketId, createdAt])
   @@index([externalId])
+  @@index([mailboxId, receivedAt])
 }
 
 // Immutable field-level change trail for a ticket (mirrors BillingLineEdit).

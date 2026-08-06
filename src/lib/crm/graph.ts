@@ -1,5 +1,6 @@
 import "server-only";
 import { resolveSso } from "@/lib/auth/sso";
+import { safeErrorMessage } from "@/lib/redact";
 
 /**
  * Minimal app-only Microsoft Graph client (boundary A of the M365 integration).
@@ -89,6 +90,75 @@ export async function graphGet<T>(
   } catch {
     return null;
   }
+}
+
+/**
+ * Result of a Graph call that reports *why* it failed, unlike `graphGet` which
+ * collapses every failure to null. SilverFang mail needs the reason so an admin
+ * can see "insufficient privileges" rather than a silent no-op.
+ */
+export interface GraphResult<T> {
+  ok: boolean;
+  status: number;
+  data?: T;
+  /** Redacted Graph error message, when the call failed. */
+  error?: string;
+}
+
+async function graphRequest<T>(
+  token: string,
+  method: "GET" | "POST" | "PATCH",
+  pathAndQuery: string,
+  body?: unknown,
+): Promise<GraphResult<T>> {
+  const url = pathAndQuery.startsWith("http") ? pathAndQuery : `${GRAPH_BASE}${pathAndQuery}`;
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, status: res.status, error: safeErrorMessage(text || res.statusText, 300) };
+    }
+    // sendMail and friends answer 202 with no body.
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return { ok: true, status: res.status };
+    }
+    const text = await res.text();
+    if (!text) return { ok: true, status: res.status };
+    return { ok: true, status: res.status, data: JSON.parse(text) as T };
+  } catch (err) {
+    return { ok: false, status: 0, error: safeErrorMessage(err, 300) };
+  }
+}
+
+/** GET a Graph resource, reporting the failure reason. */
+export function graphGetChecked<T>(token: string, pathAndQuery: string): Promise<GraphResult<T>> {
+  return graphRequest<T>(token, "GET", pathAndQuery);
+}
+
+/** POST to Graph (e.g. /users/{mailbox}/sendMail). */
+export function graphPost<T>(
+  token: string,
+  pathAndQuery: string,
+  body: unknown,
+): Promise<GraphResult<T>> {
+  return graphRequest<T>(token, "POST", pathAndQuery, body);
+}
+
+/** PATCH a Graph resource (e.g. marking a message read). */
+export function graphPatch<T>(
+  token: string,
+  pathAndQuery: string,
+  body: unknown,
+): Promise<GraphResult<T>> {
+  return graphRequest<T>(token, "PATCH", pathAndQuery, body);
 }
 
 /** The domain part of an email address, lowercased; null when unparseable. */

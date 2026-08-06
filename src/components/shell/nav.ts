@@ -33,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Timesheets", href: "/silverfang/timesheets", icon: "CalendarCheck", section: "SilverFang", permission: "time:log" },
   { label: "Agreements", href: "/silverfang/agreements", icon: "FileSignature", section: "SilverFang", permission: "agreements:read" },
   { label: "Projects", href: "/silverfang/projects", icon: "FolderKanban", section: "SilverFang", permission: "projects:read" },
+  { label: "Email", href: "/silverfang/email", icon: "Inbox", section: "SilverFang", permission: "silverfang:configure" },
   { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },

@@ -69,6 +69,12 @@ const serverSchema = z.object({
   // /api/leads. The endpoint refuses all requests until this is set.
   WOLF365_LEADS_TOKEN: z.string().optional(),
 
+  // Bearer token for the SilverFang inbound-email webhook
+  // (/api/silverfang/email), used by a mail forwarder or Power Automate flow.
+  // The endpoint refuses all requests until this is set. Not needed when mail is
+  // polled from a Microsoft 365 mailbox via Graph instead.
+  WOLF365_SILVERFANG_EMAIL_TOKEN: z.string().optional(),
+
   // Resend transactional email (M365 renewal + cost-change alert digest). When
   // RESEND_API_KEY is unset, alert emails are skipped (the digest still computes
   // and is reported in the cron result). Sender/recipients default to the shared

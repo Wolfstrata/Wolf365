@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Lock, Pencil } from "lucide-react";
+import { ArrowLeft, Lock, Mail, MailOpen, Pencil } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -11,7 +11,9 @@ import { formatHours } from "@/lib/silverfang/time";
 import { timeEntryEditable } from "@/lib/silverfang/status";
 import { evaluateTarget } from "@/lib/silverfang/sla";
 import { loadSla } from "@/lib/silverfang/service";
+import { defaultReplyRecipients } from "@/lib/silverfang/email-send";
 import { setTicketStatusAction, assignTicketAction } from "../../actions";
+import { EmailForm } from "./email-form";
 import { NoteForm } from "./note-form";
 import { TimeCard, type TimeEntryRow } from "./time-card";
 
@@ -81,6 +83,7 @@ export default async function TicketDetailPage({
       agreement: { select: { id: true, name: true, type: true } },
       project: { select: { id: true, name: true } },
       notes: { orderBy: { createdAt: "desc" } },
+      messages: { orderBy: { createdAt: "desc" }, take: 100 },
       history: { orderBy: { createdAt: "desc" }, take: 50 },
       timeEntries: {
         orderBy: { workDate: "desc" },
@@ -93,7 +96,7 @@ export default async function TicketDetailPage({
   });
   if (!ticket) notFound();
 
-  const [sla, chargeCodes, users] = await Promise.all([
+  const [sla, chargeCodes, users, outboundMailbox, replyTo] = await Promise.all([
     loadSla(ticket.slaId),
     prisma.sfChargeCode.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     prisma.user.findMany({
@@ -101,6 +104,12 @@ export default async function TicketDetailPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true },
     }),
+    prisma.sfMailbox.findFirst({
+      where: { active: true, outbound: true },
+      orderBy: { createdAt: "asc" },
+      select: { address: true },
+    }),
+    defaultReplyRecipients(id),
   ]);
 
   const now = new Date();
@@ -142,9 +151,18 @@ export default async function TicketDetailPage({
   const totalHours = timeRows.reduce((a, e) => a + e.hours, 0);
   const billableHours = timeRows.filter((e) => e.billable).reduce((a, e) => a + e.hours, 0);
 
-  // Merge notes + history into one reverse-chronological activity feed.
+  // Merge notes + email + history into one reverse-chronological activity feed.
   type Activity =
     | { kind: "note"; at: Date; body: string; internalOnly: boolean; author: string | null }
+    | {
+        kind: "email";
+        at: Date;
+        inbound: boolean;
+        body: string;
+        subject: string | null;
+        author: string | null;
+        recipients: string[];
+      }
     | { kind: "history"; at: Date; field: string; from: string | null; to: string | null; author: string | null };
   const activity: Activity[] = [
     ...ticket.notes.map((n) => ({
@@ -153,6 +171,15 @@ export default async function TicketDetailPage({
       body: n.body,
       internalOnly: n.internalOnly,
       author: n.authorEmail,
+    })),
+    ...ticket.messages.map((m) => ({
+      kind: "email" as const,
+      at: m.receivedAt ?? m.sentAt ?? m.createdAt,
+      inbound: m.direction === "INBOUND",
+      body: m.bodyText ?? "(no text body)",
+      subject: m.subject,
+      author: m.fromAddress,
+      recipients: m.toAddresses,
     })),
     ...ticket.history.map((h) => ({
       kind: "history" as const,
@@ -342,8 +369,17 @@ export default async function TicketDetailPage({
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Activity ({activity.length})</h2>
           {canWrite && (
-            <div className="mb-5 border-b pb-5">
+            <div className="mb-5 space-y-4 border-b pb-5">
               <NoteForm ticketId={ticket.id} />
+              <div className="border-t pt-4">
+                <EmailForm
+                  ticketId={ticket.id}
+                  defaultTo={replyTo.join(", ")}
+                  defaultSubject={ticket.summary}
+                  mailbox={outboundMailbox?.address ?? null}
+                  firstResponsePending={ticket.firstRespondedAt == null}
+                />
+              </div>
             </div>
           )}
           {activity.length === 0 ? (
@@ -354,7 +390,11 @@ export default async function TicketDetailPage({
                 <li
                   key={i}
                   className={`rounded-md border p-3 text-sm ${
-                    a.kind === "note" && a.internalOnly ? "border-warning/40 bg-warning/5" : ""
+                    a.kind === "note" && a.internalOnly
+                      ? "border-warning/40 bg-warning/5"
+                      : a.kind === "email"
+                        ? "border-primary/30 bg-primary/5"
+                        : ""
                   }`}
                 >
                   <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -370,9 +410,30 @@ export default async function TicketDetailPage({
                         Client visible
                       </span>
                     )}
+                    {a.kind === "email" && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 font-medium text-primary">
+                        {a.inbound ? (
+                          <>
+                            <MailOpen className="h-3 w-3" /> Email received
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="h-3 w-3" /> Email sent
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {a.kind === "email" && a.recipients.length > 0 && (
+                      <span>to {a.recipients.join(", ")}</span>
+                    )}
                   </div>
                   {a.kind === "note" ? (
                     <p className="whitespace-pre-wrap">{a.body}</p>
+                  ) : a.kind === "email" ? (
+                    <>
+                      {a.subject && <p className="mb-1 font-medium">{a.subject}</p>}
+                      <p className="whitespace-pre-wrap">{a.body}</p>
+                    </>
                   ) : (
                     <p className="text-muted-foreground">
                       Changed <span className="font-medium text-foreground">{a.field}</span>
