@@ -368,6 +368,7 @@ model Client {
   sfProjects   SfProject[]
   // Mailboxes that file unrecognised senders against this client.
   sfMailboxFallbacks SfMailbox[]
+  sfBillingRuns SfBillingRun[]
 
   @@index([name])
   @@index([parentClientId])
@@ -1796,6 +1797,8 @@ model SfChargeCode {
   timeEntries SfTimeEntry[]
   rateRules   SfRateRule[]
   techDefaults SfTechProfile[]
+  billingLines SfBillingLine[]
+  itemMap      SfChargeCodeItemMap?
 
   @@index([active, sortOrder])
 }
@@ -1909,6 +1912,7 @@ model SfTimeEntry {
   updatedAt DateTime @updatedAt
 
   blockDraws SfAgreementBlockDraw[]
+  billingLines SfBillingLineTimeEntry[]
 
   @@index([userId, workDate])
   @@index([ticketId])
@@ -1953,6 +1957,7 @@ model SfAgreement {
   timeEntries SfTimeEntry[]
   rateRules  SfRateRule[]
   clientProfiles SfClientProfile[]
+  billingLines SfBillingLine[]
 
   @@index([clientId, status])
   @@index([type, status])
@@ -1973,10 +1978,17 @@ model SfAgreementBlock {
   poNumber       String?
   notes          String?
 
+  /// Set once the block purchase itself has been billed. Prepaid hours are paid
+  /// for when the block is bought, so without this a run would either bill the
+  /// block twice or never bill it at all.
+  invoicedAt   DateTime?
+  qboInvoiceId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   draws SfAgreementBlockDraw[]
+  billingLines SfBillingLine[]
 
   @@index([agreementId, purchasedAt])
 }
@@ -2124,9 +2136,14 @@ model SfProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// How far the fixed-fee schedule has been billed. Advanced only when a fee
+  /// line is actually pushed, so a failed push cannot skip a period.
+  feeBilledThroughAt DateTime?
+
   phases  SfProjectPhase[]
   tasks   SfProjectTask[]
   tickets SfTicket[]
+  billingLines SfBillingLine[]
 
   @@index([clientId, status])
   @@index([managerId])
@@ -2364,4 +2381,182 @@ model SfEmailPolicy {
 model SfCounter {
   name  String @id // e.g. "ticket"
   value Int    @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// SilverFang Billing
+//
+// A separate pipeline from the M365 (TD SYNNEX → QBO) billing runs, deliberately
+// so: the sources are different (time, agreements, projects rather than
+// subscriptions), and merging them would make one screen answer two unrelated
+// questions. It mirrors the M365 pipeline's shape — DRAFT → REVIEWED → APPROVED
+// → PUSHED, with a field-level edit trail — because the review discipline is the
+// part worth reusing.
+//
+// Invoices are NEVER pushed automatically. A run reaches QBO only when it is
+// APPROVED (or a PARTIALLY_FAILED retry) and a human triggered it.
+// ---------------------------------------------------------------------------
+
+enum SfBillingRunStatus {
+  DRAFT
+  REVIEWED
+  APPROVED
+  PUSHED
+  PARTIALLY_FAILED
+  CANCELLED
+}
+
+/// What a billing line is for. Kept explicit because the money means different
+/// things: prepaid hours were already paid for when the block was bought, a
+/// fixed-fee project fee is not hours at all, and overage is the only part of
+/// covered time that bills.
+enum SfBillingLineKind {
+  TIME             // billable hours on time-and-materials or no agreement
+  OVERAGE          // hours beyond an agreement's inclusions or prepaid balance
+  RECURRING        // an agreement's periodic fee
+  BLOCK_PURCHASE   // a prepaid hours block bought in the period
+  PROJECT_FEE      // a fixed-fee project's fee for the interval(s) due
+  PROJECT_DEPOSIT  // an up-front project deposit
+  MANUAL           // added by hand during review
+}
+
+model SfBillingRun {
+  id      String             @id @default(cuid())
+  status  SfBillingRunStatus @default(DRAFT)
+  version Int                @default(1)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime
+  periodEnd   DateTime
+  invoiceDate DateTime
+
+  createdById    String?
+  createdByEmail String?
+  approvedById   String?
+  approvedAt     DateTime?
+  pushedAt       DateTime?
+
+  /// The QBO invoice this run created — one invoice per run.
+  qboInvoiceId String?
+  pushError    String? @db.Text
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines SfBillingLine[]
+  edits SfBillingLineEdit[]
+
+  @@index([status, createdAt])
+  @@index([clientId, periodStart])
+}
+
+model SfBillingLine {
+  id    String       @id @default(cuid())
+  runId String
+  run   SfBillingRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  kind        SfBillingLineKind
+  description String            @db.Text
+
+  /// Hours for a time line, periods for a recurring/fee line, 1 for a deposit.
+  quantity  Decimal @db.Decimal(18, 4)
+  unitPrice Decimal @db.Decimal(18, 4)
+  discount   Decimal @default(0) @db.Decimal(18, 4)
+  adjustment Decimal @default(0) @db.Decimal(18, 4)
+  subtotal   Decimal @db.Decimal(18, 4)
+  total      Decimal @db.Decimal(18, 4)
+  /// Our cost for the hours on this line, for margin reporting.
+  estimatedCost Decimal? @db.Decimal(18, 4)
+  taxStatus     String?
+
+  /// Where the money came from, so a line can always be traced back.
+  agreementId String?
+  agreement   SfAgreement? @relation(fields: [agreementId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     SfProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  blockId     String?
+  block       SfAgreementBlock? @relation(fields: [blockId], references: [id], onDelete: SetNull)
+  chargeCodeId String?
+  chargeCode   SfChargeCode? @relation(fields: [chargeCodeId], references: [id], onDelete: SetNull)
+
+  /// FALSE when the client must never see hours behind this line (a fixed-fee
+  /// project). The pushed description is built accordingly.
+  hoursVisible Boolean @default(true)
+
+  qboItemId String?
+  /// Stamped when this line reached QBO.
+  qboInvoiceId String?
+  pushError    String? @db.Text
+
+  notes String?
+
+  timeEntries SfBillingLineTimeEntry[]
+  edits       SfBillingLineEdit[]
+
+  @@index([runId])
+  @@index([agreementId])
+  @@index([projectId])
+}
+
+/// Which time entries a line consumed. A join table rather than a column on the
+/// entry, because one line rolls up many entries and the mapping is what proves
+/// no hour was billed twice or silently dropped.
+model SfBillingLineTimeEntry {
+  lineId String
+  line   SfBillingLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  timeEntryId String
+  timeEntry   SfTimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  hours Decimal @db.Decimal(18, 4)
+
+  @@id([lineId, timeEntryId])
+  @@index([timeEntryId])
+}
+
+/// Append-only edit trail, so "who changed this line, from what" survives.
+model SfBillingLineEdit {
+  id    String       @id @default(cuid())
+  runId String
+  run   SfBillingRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  lineId String?
+  line   SfBillingLine? @relation(fields: [lineId], references: [id], onDelete: SetNull)
+
+  field         String
+  oldValue      String?
+  newValue      String?
+  editedById    String?
+  editedByEmail String?
+  createdAt     DateTime @default(now())
+
+  @@index([runId, createdAt])
+}
+
+/// Charge code → QuickBooks item. Without a mapping a line cannot be pushed; it
+/// is skipped and the run goes PARTIALLY_FAILED rather than the line being
+/// silently dropped.
+model SfChargeCodeItemMap {
+  id           String @id @default(cuid())
+  chargeCodeId String @unique
+  chargeCode   SfChargeCode @relation(fields: [chargeCodeId], references: [id], onDelete: Cascade)
+
+  qboItemId   String?
+  qboItemName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// QuickBooks items for the line kinds that are not hours — a recurring fee, a
+/// block purchase, a project fee, a deposit. One row, keyed by kind.
+model SfBillingKindItemMap {
+  kind        SfBillingLineKind @id
+  qboItemId   String?
+  qboItemName String?
+  updatedAt   DateTime          @updatedAt
 }

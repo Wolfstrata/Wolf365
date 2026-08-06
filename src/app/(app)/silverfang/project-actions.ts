@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { SfProjectBillingType, SfProjectStatus, SfTaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
@@ -93,6 +94,10 @@ export async function saveProjectAction(
   formData: FormData,
 ): Promise<SfActionResult> {
   const user = await requirePermission("projects:manage");
+  // Set on creation so the caller lands on the new project instead of having to
+  // go and find it. The redirect happens after the try, since Next signals it by
+  // throwing and a catch would swallow it.
+  let createdId: string | null = null;
   try {
     const input = projectSchema.parse({
       id: formValue(formData, "id"),
@@ -266,23 +271,20 @@ export async function saveProjectAction(
     revalidatePath(`/silverfang/projects/${saved.id}`);
     revalidatePath(`/silverfang/clients/${input.clientId}`);
 
-    const created = [
-      phasesCreated > 0 ? `${phasesCreated} phase(s)` : null,
-      tasksCreated > 0 ? `${tasksCreated} task(s) from the template` : null,
-    ].filter(Boolean);
-    return {
-      ok: true,
-      message: input.id
-        ? changes.length === 0
-          ? "No changes to save."
-          : `Saved ${describeChanges(changes)}.`
-        : created.length > 0
-          ? `Project created with ${created.join(" and ")}.`
-          : "Project created.",
-    };
+    if (!input.id) {
+      createdId = saved.id;
+    } else {
+      return {
+        ok: true,
+        message:
+          changes.length === 0 ? "No changes to save." : `Saved ${describeChanges(changes)}.`,
+      };
+    }
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }
+  // Outside the try so Next's redirect control-flow isn't caught as an error.
+  redirect(`/silverfang/projects/${createdId}`);
 }
 
 // ---------------------------------------------------------------------------

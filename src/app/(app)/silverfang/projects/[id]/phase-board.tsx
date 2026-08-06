@@ -136,18 +136,25 @@ export function PhaseBoard({
                   pending={pending}
                   onCancel={() => setEditing(null)}
                 />
-                {p.tickets.length === 0 && p.taskCount === 0 && p.loggedHours === 0 && (
-                  <form action={deleteAction} className="mt-2">
-                    <button
-                      type="submit"
-                      name="id"
-                      value={p.id}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-danger/40 px-2.5 py-1 text-xs font-medium text-danger transition hover:bg-danger/10"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" /> Delete phase
-                    </button>
-                  </form>
-                )}
+                <form action={deleteAction} className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="submit"
+                    name="id"
+                    value={p.id}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-danger/40 px-2.5 py-1 text-xs font-medium text-danger transition hover:bg-danger/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete phase
+                  </button>
+                  {/* Offered whatever the phase holds, so the button is where you
+                      expect it; the action refuses and says why when work would
+                      be cut loose. */}
+                  {(p.tickets.length > 0 || p.taskCount > 0 || p.loggedHours > 0) && (
+                    <span className="text-xs text-muted-foreground">
+                      Holds {p.tickets.length} ticket(s), {p.taskCount} task(s) and{" "}
+                      {formatHours(p.loggedHours)} — move them to another phase first.
+                    </span>
+                  )}
+                </form>
               </div>
             ) : (
               <div className="px-3 py-2">
@@ -176,16 +183,30 @@ export function PhaseBoard({
                       <Ticket className="h-3.5 w-3.5" /> New project ticket
                     </Link>
                     {canManage && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditing(p.id);
-                          setAdding(false);
-                        }}
-                        className="rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
-                      >
-                        Edit
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditing(p.id);
+                            setAdding(false);
+                          }}
+                          className="rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
+                        >
+                          Edit
+                        </button>
+                        <form action={deleteAction}>
+                          <button
+                            type="submit"
+                            name="id"
+                            value={p.id}
+                            title="Delete this phase"
+                            aria-label={`Delete ${p.name}`}
+                            className="rounded-md border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </form>
+                      </>
                     )}
                   </span>
                 </div>

@@ -266,10 +266,18 @@ export default async function SilverFangClientPage({
 
         {/* Tickets */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">
-            Tickets ({client._count.sfTickets}
-            {tickets.length < client._count.sfTickets ? `, showing ${tickets.length}` : ""})
-          </h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">
+              Tickets ({client._count.sfTickets}
+              {tickets.length < client._count.sfTickets ? `, showing ${tickets.length}` : ""})
+            </h2>
+            <Link
+              href={`/silverfang/tickets?view=all&client=${client.id}`}
+              className="text-sm text-primary hover:underline"
+            >
+              All tickets for this client →
+            </Link>
+          </div>
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">No tickets for this client yet.</p>
           ) : (
@@ -279,9 +287,19 @@ export default async function SilverFangClientPage({
 
         {/* Agreements */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">
-            Agreements ({client.sfAgreements.length})
-          </h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">
+              Agreements ({client.sfAgreements.length})
+            </h2>
+            {canConfigure && (
+              <Link
+                href={`/silverfang/agreements/new?client=${client.id}`}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+              >
+                <Plus className="h-4 w-4" /> Add agreement
+              </Link>
+            )}
+          </div>
           {client.sfAgreements.length === 0 ? (
             <p className="text-sm text-muted-foreground">No agreements for this client.</p>
           ) : (
@@ -307,7 +325,14 @@ export default async function SilverFangClientPage({
                     }));
                     return (
                       <tr key={a.id} className="border-t align-top">
-                        <td className="py-1.5 pr-4 font-medium">{a.name}</td>
+                        <td className="py-1.5 pr-4 font-medium">
+                          <Link
+                            href={`/silverfang/agreements/${a.id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {a.name}
+                          </Link>
+                        </td>
                         <td className="py-1.5 pr-4">{AGREEMENT_TYPE_LABELS[a.type]}</td>
                         <td className="py-1.5 pr-4">{AGREEMENT_STATUS_LABELS[a.status]}</td>
                         <td className="py-1.5 pr-4 text-right tabular-nums">
@@ -327,19 +352,44 @@ export default async function SilverFangClientPage({
 
         {/* Projects */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Projects ({client.sfProjects.length})</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">Projects ({client.sfProjects.length})</h2>
+            {canConfigure && (
+              <Link
+                href={`/silverfang/projects/new?client=${client.id}`}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+              >
+                <Plus className="h-4 w-4" /> Add project
+              </Link>
+            )}
+          </div>
           {client.sfProjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No projects for this client.</p>
           ) : (
-            <ul className="space-y-1.5 text-sm">
+            <ul className="divide-y text-sm">
               {client.sfProjects.map((p) => (
-                <li key={p.id} className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{p.name}</span>
+                <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                  <Link
+                    href={`/silverfang/projects/${p.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {p.name}
+                  </Link>
                   <span className="text-xs text-muted-foreground">
                     {PROJECT_STATUS_LABELS[p.status]}
                   </span>
+                  <span className="text-xs text-muted-foreground">
+                    {p.billingType === "FIXED_FEE" ? "fixed fee" : "time and materials"}
+                  </span>
+                  {/* Hours are safe to show here: this is an internal view, and the
+                      fixed-fee rule is about what reaches the client. */}
+                  {p.contractedHours != null && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {formatHours(Number(p.contractedHours))} sold
+                    </span>
+                  )}
                   {p.dueDate && (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="ml-auto text-xs text-muted-foreground">
                       due <LocalTime value={p.dueDate.toISOString()} dateOnly />
                     </span>
                   )}
