@@ -10,9 +10,11 @@ import type {
  * uncontrolled-friendly and the server action does the parsing/validation.
  */
 
-export function blankTicketValues(defaults: { boardId?: string } = {}): TicketFormValues {
+export function blankTicketValues(
+  defaults: { boardId?: string; clientId?: string; agreementId?: string } = {},
+): TicketFormValues {
   return {
-    clientId: "",
+    clientId: defaults.clientId ?? "",
     contactId: "",
     boardId: defaults.boardId ?? "",
     statusId: "",
@@ -21,11 +23,49 @@ export function blankTicketValues(defaults: { boardId?: string } = {}): TicketFo
     summary: "",
     description: "",
     assigneeId: "",
-    agreementId: "",
+    agreementId: defaults.agreementId ?? "",
     type: "",
     subtype: "",
     estimatedHours: "",
   };
+}
+
+/**
+ * Starting values for a brand-new ticket. `requestedClientId` comes from the
+ * caller (the "New ticket" button on a client page passes `?client=`); when it
+ * names a real client, that client's SilverFang profile supplies the default
+ * board and agreement.
+ */
+export async function newTicketValues(
+  options: TicketFormOptions,
+  requestedClientId?: string,
+): Promise<TicketFormValues> {
+  const firstBoardId = options.boards[0]?.id;
+  const clientId =
+    requestedClientId && options.clients.some((c) => c.id === requestedClientId)
+      ? requestedClientId
+      : "";
+  if (!clientId) return blankTicketValues({ boardId: firstBoardId });
+
+  const profile = await prisma.sfClientProfile.findUnique({
+    where: { clientId },
+    select: { defaultBoardId: true, defaultAgreementId: true },
+  });
+
+  // Only honour defaults that are still selectable — a board can be deactivated
+  // or an agreement expire after the profile was saved.
+  const boardId =
+    profile?.defaultBoardId && options.boards.some((b) => b.id === profile.defaultBoardId)
+      ? profile.defaultBoardId
+      : firstBoardId;
+  const defaultAgreementId = profile?.defaultAgreementId;
+  const agreementId =
+    defaultAgreementId &&
+    (options.agreementsByClient[clientId] ?? []).some((a) => a.id === defaultAgreementId)
+      ? defaultAgreementId
+      : undefined;
+
+  return blankTicketValues({ clientId, boardId, agreementId });
 }
 
 /** Options for the ticket form's selects, including per-client dependent lists. */

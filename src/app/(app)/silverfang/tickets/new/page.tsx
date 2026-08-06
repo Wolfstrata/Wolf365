@@ -2,15 +2,21 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
-import { blankTicketValues, getTicketFormData } from "@/lib/silverfang/form";
+import { getTicketFormData, newTicketValues } from "@/lib/silverfang/form";
 import { TicketForm } from "../../ticket-form";
 import { saveTicketAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewTicketPage() {
+/** `?client=<id>` preselects that client (and its profile defaults). */
+export default async function NewTicketPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   await requirePermission("tickets:write");
-  const options = await getTicketFormData();
+  const [options, sp] = await Promise.all([getTicketFormData(), searchParams]);
+  const values = await newTicketValues(options, sp.client);
 
   return (
     <div>
@@ -35,7 +41,7 @@ export default async function NewTicketPage() {
             />
           ) : (
             <TicketForm
-              values={blankTicketValues({ boardId: options.boards[0]?.id })}
+              values={values}
               options={options}
               saveAction={saveTicketAction}
               submitLabel="Create ticket"
