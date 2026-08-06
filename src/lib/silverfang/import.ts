@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { materializeClients } from "@/lib/mapping/service";
-import { splitName } from "@/lib/silverfang/contacts";
+import { contactImportDecision, splitName } from "@/lib/silverfang/contacts";
 
 /**
  * Import SuperOps clients + contacts into SilverFang.
@@ -28,10 +28,19 @@ export interface ImportResult {
   clientsMatched: number;
   contactsImported: number;
   contactsUpdated: number;
+  /** Contacts left alone because they were edited by hand in Wolf365. */
+  contactsPreserved: number;
   /** Contacts skipped because their SuperOps client has no linked Client. */
   skippedNoClient: number;
   /** Contacts skipped because they have no usable name. */
   skippedNoName: number;
+  /**
+   * How many SuperOpsContact rows exist at all. Zero means the *connector* sync
+   * brought none across, which is a different problem from an import that had
+   * data and couldn't place it — and the two used to look identical ("0
+   * contacts imported").
+   */
+  sourceContactsAvailable: number;
 }
 
 export async function importSuperOpsClients(actor: {
@@ -67,8 +76,10 @@ export async function importSuperOpsClients(actor: {
     clientsMatched: materialized.merged,
     contactsImported: 0,
     contactsUpdated: 0,
+    contactsPreserved: 0,
     skippedNoClient: 0,
     skippedNoName: 0,
+    sourceContactsAvailable: await prisma.superOpsContact.count(),
   };
 
   // Contacts whose SuperOps client never materialized can't be placed.
@@ -102,20 +113,27 @@ export async function importSuperOpsClients(actor: {
             externalId: c.superOpsId,
           },
         },
-        select: { id: true },
+        select: { id: true, locallyModifiedAt: true },
       });
-      if (existing) {
-        await prisma.sfContact.update({ where: { id: existing.id }, data });
-        result.contactsUpdated += 1;
-      } else {
-        await prisma.sfContact.create({
-          data: {
-            ...data,
-            sourceSystem: SUPEROPS_SOURCE,
-            externalId: c.superOpsId,
-          },
-        });
-        result.contactsImported += 1;
+      switch (contactImportDecision(existing)) {
+        case "preserve":
+          // Edited by hand in Wolf365 — SilverFang is the source of truth now.
+          result.contactsPreserved += 1;
+          break;
+        case "update":
+          await prisma.sfContact.update({ where: { id: existing!.id }, data });
+          result.contactsUpdated += 1;
+          break;
+        case "create":
+          await prisma.sfContact.create({
+            data: {
+              ...data,
+              sourceSystem: SUPEROPS_SOURCE,
+              externalId: c.superOpsId,
+            },
+          });
+          result.contactsImported += 1;
+          break;
       }
     }
   }
@@ -169,10 +187,25 @@ export function describeImport(r: ImportResult): string {
   const parts = [
     `${r.clientsLinked} client${r.clientsLinked === 1 ? "" : "s"} linked`,
   ];
+  // Say which of the two zero-contact situations this is, rather than reporting
+  // "0 imported" and leaving the operator to guess where the data went.
+  if (r.sourceContactsAvailable === 0) {
+    if (r.clientsCreated > 0) parts.push(`${r.clientsCreated} created`);
+    if (r.clientsMatched > 0) parts.push(`${r.clientsMatched} matched by name`);
+    return (
+      `${parts.join(", ")}. No contacts were imported because Wolf365 has no SuperOps ` +
+      `contacts stored — the SuperOps sync itself brought none across. Check Connector ` +
+      `Data → Debug Logs for the "sync_contacts" entry: it records how many records the ` +
+      `API returned and how many were skipped.`
+    );
+  }
   if (r.clientsCreated > 0) parts.push(`${r.clientsCreated} created`);
   if (r.clientsMatched > 0) parts.push(`${r.clientsMatched} matched by name`);
   parts.push(`${r.contactsImported} contact${r.contactsImported === 1 ? "" : "s"} imported`);
   if (r.contactsUpdated > 0) parts.push(`${r.contactsUpdated} updated`);
+  if (r.contactsPreserved > 0) {
+    parts.push(`${r.contactsPreserved} left as edited in Wolf365`);
+  }
   if (r.skippedNoClient > 0) {
     parts.push(`${r.skippedNoClient} contact(s) skipped (client not linked)`);
   }

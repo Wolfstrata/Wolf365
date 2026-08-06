@@ -28,6 +28,23 @@ export function splitName(full: string | null | undefined): SplitName | null {
 }
 
 /**
+ * What an import should do with a contact it has a source record for.
+ *
+ * `preserve` is the important case: once someone corrects a contact by hand in
+ * Wolf365, a later import must not revert it. SilverFang is replacing SuperOps,
+ * so the local record wins — but the skip is counted and reported rather than
+ * silently passed over.
+ */
+export type ImportDecision = "create" | "update" | "preserve";
+
+export function contactImportDecision(
+  existing: { locallyModifiedAt?: Date | null } | null | undefined,
+): ImportDecision {
+  if (!existing) return "create";
+  return existing.locallyModifiedAt ? "preserve" : "update";
+}
+
+/**
  * A display name for a contact, tolerant of a missing surname. Falls back to the
  * email local part and finally a placeholder, so lists never render blanks.
  */

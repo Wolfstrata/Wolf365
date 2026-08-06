@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, Star } from "lucide-react";
+import { ArrowLeft, ExternalLink, Plus, Star } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -168,13 +168,23 @@ export default async function SilverFangClientPage({
 
         {/* Contacts */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Contacts ({client.sfContacts.length})</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">Contacts ({client.sfContacts.length})</h2>
+            {canWrite && (
+              <Link
+                href={`/silverfang/contacts/new?client=${client.id}`}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+              >
+                <Plus className="h-4 w-4" /> Add contact
+              </Link>
+            )}
+          </div>
           {client.sfContacts.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No contacts yet.{" "}
-              {canConfigure
-                ? "Use “Import from SuperOps” on the Clients page to bring them across."
-                : "Ask a SilverFang administrator to import them from SuperOps."}
+              {canWrite
+                ? "Add one above, or use “Import from SuperOps” on the Clients page."
+                : "Ask a SilverFang administrator to add or import them."}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -192,14 +202,21 @@ export default async function SilverFangClientPage({
                   {client.sfContacts.map((c) => (
                     <tr key={c.id} className="border-t align-top">
                       <td className="py-1.5 pr-4">
-                        {contactDisplayName(c)}
+                        <Link
+                          href={`/silverfang/contacts/${c.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {contactDisplayName(c)}
+                        </Link>
                         {c.isPrimary && (
                           <span className="ml-2 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground">
                             primary
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5 pr-4">{c.email ?? "—"}</td>
+                      <td className="py-1.5 pr-4">
+                        {c.email ?? <span className="text-warning">no email</span>}
+                      </td>
                       <td className="py-1.5 pr-4">{c.phone ?? c.mobile ?? "—"}</td>
                       <td className="py-1.5 pr-4">{c.title ?? "—"}</td>
                       <td className="py-1.5 pr-4 text-muted-foreground">

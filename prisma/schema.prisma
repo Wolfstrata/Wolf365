@@ -1412,6 +1412,11 @@ model SfContact {
   externalId      String? // the source system's contact id
   sourceUpdatedAt DateTime?
 
+  /// Set when a human edits this contact inside Wolf365. Once set, the SuperOps
+  /// import skips the row, so local corrections are never overwritten by a
+  /// re-import. Mirrors CrmOpportunity.locallyModifiedAt.
+  locallyModifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

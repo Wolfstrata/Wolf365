@@ -1,0 +1,135 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, ExternalLink } from "lucide-react";
+import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
+import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { LocalTime } from "@/components/ui/local-time";
+import { contactDisplayName } from "@/lib/silverfang/contacts";
+import { getTicketRows } from "@/lib/silverfang/queries";
+import { TicketsTable } from "../../tickets/tickets-table";
+import { ContactForm } from "../contact-form";
+
+export const dynamic = "force-dynamic";
+
+export default async function ContactDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const user = await requireUser();
+  if (!can(user.role, "tickets:read")) notFound();
+  const { id } = await params;
+
+  const contact = await prisma.sfContact.findUnique({
+    where: { id },
+    include: {
+      client: { select: { id: true, name: true } },
+      _count: { select: { tickets: true } },
+    },
+  });
+  if (!contact) notFound();
+
+  const [clients, tickets] = await Promise.all([
+    prisma.client.findMany({
+      where: { archived: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+      take: 2000,
+    }),
+    getTicketRows({ contactId: id, view: "all" }, 50),
+  ]);
+
+  const canWrite = can(user.role, "tickets:write");
+
+  return (
+    <div>
+      <PageHeader
+        title={contactDisplayName(contact)}
+        description={`Contact at ${contact.client.name}`}
+      />
+      <div className="space-y-6 p-4 sm:p-8">
+        <div className="flex flex-wrap items-center gap-4">
+          <Link
+            href="/silverfang/contacts"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Contacts
+          </Link>
+          <Link
+            href={`/silverfang/clients/${contact.client.id}`}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {contact.client.name}
+          </Link>
+        </div>
+
+        <Card>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatItem label="Tickets" value={contact._count.tickets} />
+            <StatItem label="Primary" value={contact.isPrimary ? "Yes" : "No"} />
+            <StatItem label="Active" value={contact.active ? "Yes" : "No"} />
+            <StatItem label="Source" value={contact.sourceSystem ?? "Created in Wolf365"} />
+            {contact.sourceUpdatedAt && (
+              <StatItem
+                label="Source last synced"
+                value={<LocalTime value={contact.sourceUpdatedAt.toISOString()} />}
+              />
+            )}
+            {contact.locallyModifiedAt && (
+              <StatItem
+                label="Edited here"
+                value={<LocalTime value={contact.locallyModifiedAt.toISOString()} />}
+              />
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <h2 className="mb-4 text-sm font-semibold">Details</h2>
+          {canWrite ? (
+            <ContactForm
+              values={{
+                id: contact.id,
+                clientId: contact.clientId,
+                firstName: contact.firstName,
+                lastName: contact.lastName ?? "",
+                email: contact.email ?? "",
+                phone: contact.phone ?? "",
+                mobile: contact.mobile ?? "",
+                title: contact.title ?? "",
+                isPrimary: contact.isPrimary,
+                active: contact.active,
+                notes: contact.notes ?? "",
+              }}
+              clients={clients}
+              submitLabel="Save contact"
+              canDelete={can(user.role, "silverfang:configure")}
+              source={contact.sourceSystem}
+              lockedFromImport={Boolean(contact.locallyModifiedAt)}
+            />
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatItem label="Email" value={contact.email ?? "—"} />
+              <StatItem label="Phone" value={contact.phone ?? "—"} />
+              <StatItem label="Mobile" value={contact.mobile ?? "—"} />
+              <StatItem label="Title" value={contact.title ?? "—"} />
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">Tickets ({contact._count.tickets})</h2>
+          {tickets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No tickets have been raised by this contact.
+            </p>
+          ) : (
+            <TicketsTable rows={tickets} />
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}

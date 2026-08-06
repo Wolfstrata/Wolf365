@@ -16,6 +16,7 @@ export interface TicketFilters {
   statusId?: string;
   assigneeId?: string;
   clientId?: string;
+  contactId?: string;
   priority?: string;
   /** "open" (default) | "closed" | "all" */
   view?: string;
@@ -32,6 +33,7 @@ export function buildTicketWhere(f: TicketFilters): Prisma.SfTicketWhereInput {
   if (f.statusId) where.statusId = f.statusId;
   if (f.assigneeId) where.assigneeId = f.assigneeId;
   if (f.clientId) where.clientId = f.clientId;
+  if (f.contactId) where.contactId = f.contactId;
   if (f.priority) {
     where.priority = f.priority as Prisma.SfTicketWhereInput["priority"];
   }

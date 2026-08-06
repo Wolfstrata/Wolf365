@@ -715,6 +715,175 @@ export async function saveClientProfileAction(
 }
 
 // ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+const contactSchema = z.object({
+  id: optionalId,
+  clientId: z.string().min(1, "Select a client"),
+  firstName: z.string().trim().min(1, "First name is required").max(120),
+  lastName: z.preprocess(emptyToUndefined, z.string().max(120).optional()),
+  email: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[^\s@]+@[^\s@.]+\.[^\s@]+$/, "Enter a valid email address")
+      .optional(),
+  ),
+  phone: z.preprocess(emptyToUndefined, z.string().max(60).optional()),
+  mobile: z.preprocess(emptyToUndefined, z.string().max(60).optional()),
+  title: z.preprocess(emptyToUndefined, z.string().max(160).optional()),
+  isPrimary: z.coerce.boolean(),
+  active: z.coerce.boolean(),
+  notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
+});
+
+/**
+ * Create or update a contact. Editing stamps `locallyModifiedAt`, which makes the
+ * SuperOps import leave the row alone from then on — SilverFang owns it.
+ */
+export async function saveContactAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = contactSchema.parse({
+      id: formValue(formData, "id"),
+      clientId: formValue(formData, "clientId"),
+      firstName: formValue(formData, "firstName"),
+      lastName: formValue(formData, "lastName"),
+      email: formValue(formData, "email"),
+      phone: formValue(formData, "phone"),
+      mobile: formValue(formData, "mobile"),
+      title: formValue(formData, "title"),
+      isPrimary: formData.get("isPrimary") === "on",
+      active: formData.get("active") === "on",
+      notes: formValue(formData, "notes"),
+    });
+
+    const client = await prisma.client.findUnique({
+      where: { id: input.clientId },
+      select: { id: true, name: true },
+    });
+    if (!client) return { ok: false, message: "That client no longer exists." };
+
+    // An email address can only belong to one contact: inbound mail is routed by
+    // sender, so a duplicate would silently file tickets against whichever record
+    // happened to sort first.
+    if (input.email) {
+      const clash = await prisma.sfContact.findFirst({
+        where: {
+          email: { equals: input.email, mode: "insensitive" },
+          ...(input.id ? { id: { not: input.id } } : {}),
+        },
+        select: { firstName: true, lastName: true, client: { select: { name: true } } },
+      });
+      if (clash) {
+        return {
+          ok: false,
+          message: `${input.email} is already on ${clash.firstName} ${
+            clash.lastName ?? ""
+          }`.trim() + ` at ${clash.client.name}. Inbound email routes by sender, so one address can only belong to one contact.`,
+        };
+      }
+    }
+
+    const data = {
+      clientId: input.clientId,
+      firstName: input.firstName,
+      lastName: input.lastName ?? null,
+      email: input.email ?? null,
+      phone: input.phone ?? null,
+      mobile: input.mobile ?? null,
+      title: input.title ?? null,
+      isPrimary: input.isPrimary,
+      active: input.active,
+      notes: input.notes ?? null,
+      locallyModifiedAt: new Date(),
+    };
+
+    const saved = input.id
+      ? await prisma.sfContact.update({ where: { id: input.id }, data })
+      : await prisma.sfContact.create({ data });
+
+    // One primary per client.
+    if (input.isPrimary) {
+      await prisma.sfContact.updateMany({
+        where: { clientId: input.clientId, id: { not: saved.id }, isPrimary: true },
+        data: { isPrimary: false },
+      });
+    }
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `silverfang:contact:${saved.id}`,
+      metadata: {
+        clientId: input.clientId,
+        created: !input.id,
+        hasEmail: Boolean(input.email),
+        isPrimary: input.isPrimary,
+        active: input.active,
+      },
+    });
+    revalidatePath("/silverfang/contacts");
+    revalidatePath(`/silverfang/clients/${input.clientId}`);
+    revalidatePath("/silverfang/clients");
+    return {
+      ok: true,
+      message: input.id
+        ? "Contact saved. Future SuperOps imports will leave it alone."
+        : "Contact created.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Delete a contact. Refused once it has tickets — the ticket history would lose
+ * its requester. Deactivating is the right move there, and the message says so.
+ */
+export async function deleteContactAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const id = z.string().min(1).parse(formValue(formData, "id"));
+    const contact = await prisma.sfContact.findUnique({
+      where: { id },
+      select: { id: true, clientId: true, _count: { select: { tickets: true } } },
+    });
+    if (!contact) return { ok: false, message: "That contact no longer exists." };
+    if (contact._count.tickets > 0) {
+      return {
+        ok: false,
+        message: `This contact is the requester on ${contact._count.tickets} ticket(s), so deleting it would strip them of their requester. Untick “Active” instead — it hides the contact from pickers and keeps the history intact.`,
+      };
+    }
+
+    await prisma.sfContact.delete({ where: { id } });
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `silverfang:contact:${id}`,
+      metadata: { deleted: true, clientId: contact.clientId },
+    });
+    revalidatePath("/silverfang/contacts");
+    revalidatePath(`/silverfang/clients/${contact.clientId}`);
+    return { ok: true, message: "Contact deleted." };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Email
 // ---------------------------------------------------------------------------
 

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { contactDisplayName, splitName } from "@/lib/silverfang/contacts";
+import {
+  contactDisplayName,
+  contactImportDecision,
+  splitName,
+} from "@/lib/silverfang/contacts";
 
 describe("splitName", () => {
   it("splits a simple first/last name", () => {
@@ -26,6 +30,24 @@ describe("splitName", () => {
     for (const v of ["", "   ", "\n", null, undefined]) {
       expect(splitName(v as string)).toBeNull();
     }
+  });
+});
+
+describe("contactImportDecision", () => {
+  it("creates when there is no existing contact", () => {
+    expect(contactImportDecision(null)).toBe("create");
+    expect(contactImportDecision(undefined)).toBe("create");
+  });
+
+  it("updates an imported contact nobody has touched", () => {
+    expect(contactImportDecision({ locallyModifiedAt: null })).toBe("update");
+    expect(contactImportDecision({})).toBe("update");
+  });
+
+  it("preserves a contact edited by hand, so a re-import cannot revert it", () => {
+    expect(contactImportDecision({ locallyModifiedAt: new Date("2026-08-06") })).toBe(
+      "preserve",
+    );
   });
 });
 
