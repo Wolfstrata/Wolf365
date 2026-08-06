@@ -123,6 +123,11 @@ async function loadSource(
   }
 }
 
+// The SuperOps sync runs from a server action on this route and now fetches
+// client users per client, paced under the API's rate limit — roughly two minutes
+// for a 156-client tenant. Without the headroom the sync would be cut off partway.
+export const maxDuration = 300;
+
 export default async function SyncedSourcePage({
   params,
 }: {

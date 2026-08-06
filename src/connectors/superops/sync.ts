@@ -9,6 +9,7 @@ import {
   introspectFieldType,
   introspectScalarFieldNames,
   introspectTypeFieldsDetailed,
+  introspectInputFields,
   type SuperOpsCtx,
 } from "@/connectors/superops/client";
 import * as Q from "@/connectors/superops/queries";
@@ -437,17 +438,169 @@ export async function syncSuperOpsSites(ctx: SuperOpsCtx, resolve: ClientResolve
   return counts;
 }
 
+/** How `getClientUserList` can be narrowed to one client. */
+interface ClientFilter {
+  key: string;
+  /** Wrap a client's SuperOps account id into the value the input expects. */
+  wrap: (accountId: string) => unknown;
+  described: string;
+}
+
+/**
+ * Work out how to scope the client-user list to a single client.
+ *
+ * This is needed because the `ClientUser` type carries no client reference at
+ * all — confirmed by introspection and by a skipped record's own field list — so
+ * a flat list of users cannot be attributed to anyone. The filter is discovered
+ * from the input type rather than guessed, and the discovery is logged so a
+ * schema that does not support it is visible instead of silent.
+ */
+async function resolveClientUserFilter(ctx: SuperOpsCtx): Promise<ClientFilter | null> {
+  const fields = await introspectInputFields(ctx, "GetClientUserListInput");
+  await writeDebugLog({
+    type: "SUPEROPS",
+    connectorId: ctx.connectorId,
+    action: "introspect_GetClientUserListInput",
+    endpoint: "api.superops.ai/msp",
+    outcome: fields ? "success" : "failure",
+    error: fields
+      ? fields
+          .map((f) => `${f.name}:${f.base.kind}${f.base.name ? `(${f.base.name})` : ""}`)
+          .join(", ")
+      : "input introspection unavailable for this type",
+  });
+  if (!fields) return null;
+
+  // Most specific first: an explicit client/account field beats a generic filter.
+  const CANDIDATES = ["client", "clientId", "accountId", "clientAccountId", "account"];
+  for (const name of CANDIDATES) {
+    const f = fields.find((x) => x.name === name);
+    if (!f) continue;
+    if (f.base.kind === "INPUT_OBJECT" && f.base.name) {
+      const inner = await introspectInputFields(ctx, f.base.name);
+      const idKey = inner?.find((i) => ["accountId", "id", "clientId"].includes(i.name))?.name;
+      if (!idKey) continue;
+      return {
+        key: name,
+        wrap: (accountId) => ({ [idKey]: accountId }),
+        described: `${name}: { ${idKey} }`,
+      };
+    }
+    if (f.base.kind === "SCALAR" || f.base.kind === "ENUM") {
+      return { key: name, wrap: (accountId) => accountId, described: `${name}: scalar` };
+    }
+  }
+  return null;
+}
+
+/** SuperOps allows 100 requests/minute; stay comfortably under it. */
+const REQUESTS_PER_MINUTE = 80;
+const REQUEST_GAP_MS = Math.ceil(60_000 / REQUESTS_PER_MINUTE);
+
+/**
+ * Sync client users (contacts).
+ *
+ * Fetched per client, because a ClientUser record has no client field: querying
+ * the flat list returns every user with nothing to attribute them to, which is
+ * why this previously stored none of 164 records. When the schema offers no way
+ * to scope the query, this falls back to the flat fetch and reports the skips
+ * rather than pretending to have synced.
+ */
 export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
+  const counts = zero();
+  const filter = await resolveClientUserFilter(ctx);
+  const clients = await prisma.superOpsClient.findMany({
+    select: { id: true, superOpsId: true },
+    orderBy: { superOpsId: "asc" },
+  });
+
+  if (!filter || clients.length === 0) {
+    const flat = await syncContactsFlat(ctx, resolve);
+    await logEntity(ctx, "sync_contacts", flat);
+    return flat;
+  }
+
+  // The probe needs a filter value that resolves, so build the query against the
+  // first real client rather than a placeholder.
+  const probeInput = (page: number, pageSize: number) => ({
+    listInfo: { page, pageSize },
+    [filter.key]: filter.wrap(clients[0]!.superOpsId),
+  });
+  const query = await buildListQuery(ctx, {
+    queryName: "getClientUserList",
+    inputType: "GetClientUserListInput",
+    wrapper: "userList",
+    fallback: Q.CONTACT_LIST_QUERY,
+    depth: 1,
+    buildInput: probeInput,
+  });
+
+  let loggedShape = false;
+  for (const client of clients) {
+    const startedAt = Date.now();
+    let records: Obj[] = [];
+    try {
+      records = await fetchAll(ctx, "sync_contacts", query, (page, pageSize) => ({
+        listInfo: { page, pageSize },
+        [filter.key]: filter.wrap(client.superOpsId),
+      }));
+    } catch (err) {
+      // One client failing must not lose the other 155.
+      counts.error = err instanceof Error ? err.message : "contact fetch error";
+      continue;
+    }
+
+    for (const raw of records) {
+      const p = parseContact(raw);
+      if (!p) {
+        counts.skipped += 1;
+        if (!loggedShape) {
+          loggedShape = true;
+          await logSkipShape(ctx, "sync_contacts", raw);
+        }
+        continue;
+      }
+      // Parent is known from the query itself — no resolution, nothing to guess.
+      const data = {
+        superOpsClientId: client.id,
+        name: p.name,
+        email: p.email,
+        phone: p.phone,
+        role: p.role,
+        raw: raw as unknown as Prisma.InputJsonValue,
+        lastSyncedAt: new Date(),
+      };
+      const existing = await prisma.superOpsContact.findUnique({
+        where: { superOpsId: p.superOpsId },
+        select: { id: true },
+      });
+      if (existing) {
+        await prisma.superOpsContact.update({ where: { id: existing.id }, data });
+        counts.updated += 1;
+      } else {
+        await prisma.superOpsContact.create({ data: { superOpsId: p.superOpsId, ...data } });
+        counts.imported += 1;
+      }
+    }
+
+    // Pace the per-client calls so a 156-client tenant cannot trip the API's
+    // rate limit partway through and lose the rest.
+    const gap = REQUEST_GAP_MS - (Date.now() - startedAt);
+    if (gap > 0) await new Promise((r) => setTimeout(r, gap));
+  }
+
+  await logEntity(ctx, "sync_contacts", counts);
+  return counts;
+}
+
+/** Legacy flat fetch, kept as the fallback when the list cannot be scoped. */
+async function syncContactsFlat(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
   const query = await buildListQuery(ctx, {
     queryName: "getClientUserList",
     inputType: "GetClientUserListInput",
     wrapper: "userList",
     fallback: Q.CONTACT_LIST_QUERY,
-    // A flat scalar-only selection omits any OBJECT-typed `client` field, which
-    // leaves the parent resolver nothing to match on and skips every record.
-    // Depth 1 expands it whatever its shape, and the probe falls back to flat if
-    // the tenant rejects the richer query.
     depth: 1,
     buildInput: wrappedListInfoInput,
   });
@@ -480,7 +633,6 @@ export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientReso
     });
     counts.updated += 1;
   }
-  await logEntity(ctx, "sync_contacts", counts);
   return counts;
 }
 

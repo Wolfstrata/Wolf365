@@ -174,6 +174,29 @@ export async function introspectScalarFieldNames(
   return out;
 }
 
+/** One field of a GraphQL *input* type, with its unwrapped base type. */
+export interface InputField {
+  name: string;
+  base: { kind: string; name: string | null };
+}
+
+/**
+ * Fields of an input object type. Input types expose `inputFields`, not `fields`,
+ * so the regular helpers return nothing for them — which is why discovering how a
+ * list query can be filtered needs its own call.
+ */
+export async function introspectInputFields(
+  ctx: SuperOpsCtx,
+  typeName: string,
+): Promise<InputField[] | null> {
+  const q = `query($n: String!) { __type(name: $n) { inputFields { name type { ${TYPE_REF_FRAGMENT} } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_input", q, { n: typeName });
+  const fields = (res.data as { __type?: { inputFields?: IntrospectedField[] } } | null)?.__type
+    ?.inputFields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  return fields.map((f) => ({ name: f.name, base: unwrapType(f.type) }));
+}
+
 export interface DetailedField {
   name: string;
   /** True if the field requires arguments (can't be selected without them). */
