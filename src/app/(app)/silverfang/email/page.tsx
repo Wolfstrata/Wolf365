@@ -11,6 +11,7 @@ import { outboundEnabled } from "@/lib/silverfang/email-policy";
 import { POLICY_ID } from "@/lib/silverfang/mail";
 import { toggleAutoResponseAction } from "../actions";
 import { MailboxForm, type MailboxValues } from "./mailbox-form";
+import { DiagnoseMail } from "./diagnose";
 import { EmailMasterSwitch } from "./master-switch";
 import { PollMailboxesButton } from "./poll-button";
 
@@ -194,6 +195,8 @@ export default async function SilverFangEmailPage() {
             </p>
           </div>
         </Card>
+
+        <DiagnoseMail />
 
         {/* Mailboxes */}
         <Card>

@@ -1168,6 +1168,60 @@ export async function pollMailboxesAction(
   }
 }
 
+/**
+ * Diagnose mail: report which app the Graph token actually belongs to and what
+ * roles it carries, then test reading and sending independently. Optionally sends
+ * a real test message to the address given.
+ */
+export async function diagnoseMailAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { diagnoseMail } = await import("@/lib/silverfang/mail-diagnostics");
+    const sendTo = formValue(formData, "sendTo");
+    const d = await diagnoseMail({ trySend: Boolean(sendTo), sendTo });
+
+    const lines: string[] = [];
+    lines.push(
+      `Token app: ${d.tokenAppId ?? "unknown"}${
+        d.appIdMatches === false ? ` — MISMATCH, Wolf365 is configured with ${d.configuredAppId}` : ""
+      }`,
+    );
+    lines.push(`Tenant: ${d.tenantId ?? "unknown"}`);
+    lines.push(`Application roles on the token: ${d.roles.length ? d.roles.join(", ") : "NONE"}`);
+    lines.push(
+      `Read ${d.mailbox ?? "(no mailbox)"}: ${d.read.ok ? "OK" : `HTTP ${d.read.status} ${d.read.detail ?? ""}`}`,
+    );
+    if (d.send) {
+      lines.push(
+        `Send as ${d.sendAs}: ${d.send.ok ? "OK — check the inbox" : `HTTP ${d.send.status} ${d.send.detail ?? ""}`}`,
+      );
+    }
+    for (const n of d.notes) lines.push(`• ${n}`);
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:mail-diagnostics",
+      metadata: {
+        tokenAppId: d.tokenAppId,
+        appIdMatches: d.appIdMatches,
+        roles: d.roles,
+        readStatus: d.read.status,
+        sendStatus: d.send?.status ?? null,
+      },
+    });
+
+    const healthy = d.read.ok && (!d.send || d.send.ok);
+    return { ok: healthy, message: lines.join("\n") };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 /** Turn an auto-response rule on or off. */
 export async function toggleAutoResponseAction(formData: FormData): Promise<void> {
   const user = await requirePermission("silverfang:configure");
