@@ -350,6 +350,7 @@ model Client {
   crmOpportunities CrmOpportunity[]
 
   // SilverFang (ticketing / PSA).
+  sfClientProfile SfClientProfile?
   sfContacts   SfContact[]
   sfTickets    SfTicket[]
   sfAgreements SfAgreement[]
@@ -1352,6 +1353,7 @@ model SfBoard {
 
   statuses SfStatus[]
   tickets  SfTicket[]
+  clientProfiles SfClientProfile[]
 
   @@index([slaId])
 }
@@ -1398,13 +1400,48 @@ model SfContact {
   active    Boolean @default(true)
   notes     String? @db.Text
 
+  // Provenance for imported contacts, so re-running an import updates rather than
+  // duplicating. Null for contacts created by hand in Wolf365. Same
+  // (sourceSystem, externalId) convention as CrmOpportunity.
+  sourceSystem    String? // e.g. "SUPEROPS"
+  externalId      String? // the source system's contact id
+  sourceUpdatedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   tickets SfTicket[]
 
+  @@unique([sourceSystem, externalId])
   @@index([clientId])
   @@index([email])
+}
+
+// SilverFang-specific settings for a central Client. Created on demand, so a
+// client needs no row until someone sets one of these.
+model SfClientProfile {
+  id       String @id @default(cuid())
+  clientId String @unique
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  /// Service-delivery owner (free text — techs are Users, account managers may not be).
+  accountManager String?
+  /// Board new tickets for this client default to.
+  defaultBoardId String?
+  defaultBoard   SfBoard? @relation(fields: [defaultBoardId], references: [id], onDelete: SetNull)
+  /// Agreement new tickets for this client default to (drives rates).
+  defaultAgreementId String?
+  defaultAgreement   SfAgreement? @relation(fields: [defaultAgreementId], references: [id], onDelete: SetNull)
+
+  vip    Boolean @default(false)
+  notes  String? @db.Text
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([defaultBoardId])
+  @@index([defaultAgreementId])
 }
 
 model SfTicket {
@@ -1735,6 +1772,7 @@ model SfAgreement {
   projects   SfProject[]
   timeEntries SfTimeEntry[]
   rateRules  SfRateRule[]
+  clientProfiles SfClientProfile[]
 
   @@index([clientId, status])
   @@index([type, status])

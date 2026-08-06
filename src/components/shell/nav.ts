@@ -25,11 +25,14 @@ export const NAV_ITEMS: NavItem[] = [
   // SilverFang — ticketing / PSA.
   { label: "Tickets", href: "/silverfang/tickets", icon: "Ticket", section: "SilverFang", permission: "tickets:read" },
   { label: "My Tickets", href: "/silverfang/my-tickets", icon: "UserCheck", section: "SilverFang", permission: "tickets:read" },
+  // Gated on tickets:read (not clients:read) — Financial Power Users hold
+  // clients:read but have no other SilverFang access.
+  { label: "Clients", href: "/silverfang/clients", icon: "Building2", section: "SilverFang", permission: "tickets:read" },
+  { label: "Contacts", href: "/silverfang/contacts", icon: "Contact", section: "SilverFang", permission: "tickets:read" },
   { label: "Time Entries", href: "/silverfang/time", icon: "Timer", section: "SilverFang", permission: "time:log" },
   { label: "Timesheets", href: "/silverfang/timesheets", icon: "CalendarCheck", section: "SilverFang", permission: "time:log" },
   { label: "Agreements", href: "/silverfang/agreements", icon: "FileSignature", section: "SilverFang", permission: "agreements:read" },
   { label: "Projects", href: "/silverfang/projects", icon: "FolderKanban", section: "SilverFang", permission: "projects:read" },
-  { label: "Contacts", href: "/silverfang/contacts", icon: "Contact", section: "SilverFang", permission: "tickets:read" },
   { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },

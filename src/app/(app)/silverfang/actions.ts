@@ -625,6 +625,96 @@ export async function deleteTimeEntryAction(formData: FormData): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Clients
+// ---------------------------------------------------------------------------
+
+/**
+ * Import SuperOps clients + contacts into SilverFang. Re-runnable: contacts key
+ * off (sourceSystem, externalId) so a second run updates instead of duplicating.
+ */
+export async function importSuperOpsClientsAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { importSuperOpsClients, describeImport } = await import(
+      "@/lib/silverfang/import"
+    );
+    const result = await importSuperOpsClients({ id: user.id, email: user.email });
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:clients-import",
+      metadata: { ...result },
+    });
+    revalidatePath("/silverfang/clients");
+    revalidatePath("/silverfang/contacts");
+    revalidatePath("/silverfang/setup");
+    return { ok: true, message: describeImport(result) };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+const clientProfileSchema = z.object({
+  clientId: z.string().min(1),
+  accountManager: z.preprocess(emptyToUndefined, z.string().max(200).optional()),
+  defaultBoardId: optionalId,
+  defaultAgreementId: optionalId,
+  vip: z.coerce.boolean(),
+  notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
+});
+
+/** Save a client's SilverFang profile (account manager, defaults, VIP, notes). */
+export async function saveClientProfileAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const input = clientProfileSchema.parse({
+      clientId: formValue(formData, "clientId"),
+      accountManager: formValue(formData, "accountManager"),
+      defaultBoardId: formValue(formData, "defaultBoardId"),
+      defaultAgreementId: formValue(formData, "defaultAgreementId"),
+      vip: formData.get("vip") === "on",
+      notes: formValue(formData, "notes"),
+    });
+
+    const client = await prisma.client.findUnique({ where: { id: input.clientId } });
+    if (!client) return { ok: false, message: "That client no longer exists." };
+
+    const data = {
+      accountManager: input.accountManager ?? null,
+      defaultBoardId: input.defaultBoardId ?? null,
+      defaultAgreementId: input.defaultAgreementId ?? null,
+      vip: input.vip,
+      notes: input.notes ?? null,
+    };
+    await prisma.sfClientProfile.upsert({
+      where: { clientId: input.clientId },
+      create: { clientId: input.clientId, ...data },
+      update: data,
+    });
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `silverfang:clientProfile:${input.clientId}`,
+      metadata: { vip: input.vip, hasAccountManager: Boolean(input.accountManager) },
+    });
+    revalidatePath(`/silverfang/clients/${input.clientId}`);
+    revalidatePath("/silverfang/clients");
+    return { ok: true, message: "Client profile saved." };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 

@@ -1,0 +1,303 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, ExternalLink, Star } from "lucide-react";
+import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
+import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { LocalTime } from "@/components/ui/local-time";
+import { formatCurrency } from "@/lib/utils";
+import { formatHours } from "@/lib/silverfang/time";
+import { availableHours } from "@/lib/silverfang/block-time";
+import { contactDisplayName } from "@/lib/silverfang/contacts";
+import { getTicketRows } from "@/lib/silverfang/queries";
+import {
+  AGREEMENT_STATUS_LABELS,
+  AGREEMENT_TYPE_LABELS,
+  PROJECT_STATUS_LABELS,
+} from "@/lib/silverfang/constants";
+import { TicketsTable } from "../../tickets/tickets-table";
+import { ClientProfileForm } from "./profile-form";
+
+export const dynamic = "force-dynamic";
+
+/** One client through the SilverFang lens: profile, contacts, tickets, agreements, projects. */
+export default async function SilverFangClientPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const user = await requireUser();
+  if (!can(user.role, "tickets:read")) notFound();
+  const { id } = await params;
+
+  const client = await prisma.client.findUnique({
+    where: { id },
+    include: {
+      sfClientProfile: true,
+      superOpsMatch: { select: { id: true, name: true } },
+      sfContacts: { orderBy: [{ isPrimary: "desc" }, { firstName: "asc" }] },
+      sfAgreements: {
+        orderBy: [{ status: "asc" }, { name: "asc" }],
+        include: { blocks: { include: { draws: { select: { hours: true } } } } },
+      },
+      sfProjects: { orderBy: [{ status: "asc" }, { name: "asc" }] },
+      _count: { select: { sfTickets: true } },
+    },
+  });
+  if (!client) notFound();
+
+  const [tickets, openCount, hoursAgg, boards, activeAgreements] = await Promise.all([
+    getTicketRows({ clientId: id, view: "all" }, 50),
+    prisma.sfTicket.count({ where: { clientId: id, status: { isClosed: false } } }),
+    prisma.sfTimeEntry.aggregate({
+      where: { ticket: { clientId: id } },
+      _sum: { hours: true, amount: true },
+    }),
+    prisma.sfBoard.findMany({
+      where: { active: true },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.sfAgreement.findMany({
+      where: { clientId: id, status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
+
+  const canConfigure = can(user.role, "silverfang:configure");
+  const canWrite = can(user.role, "tickets:write");
+  const now = new Date();
+  const totalHours = hoursAgg._sum.hours != null ? Number(hoursAgg._sum.hours) : 0;
+  const totalRevenue = hoursAgg._sum.amount != null ? Number(hoursAgg._sum.amount) : 0;
+
+  return (
+    <div>
+      <PageHeader
+        title={client.name}
+        description="SilverFang client"
+        actions={
+          <div className="flex items-center gap-3">
+            {client.sfClientProfile?.vip && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning">
+                <Star className="h-3.5 w-3.5" /> VIP
+              </span>
+            )}
+            {canWrite && (
+              <Link
+                href={`/silverfang/tickets/new?client=${client.id}`}
+                className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                New ticket
+              </Link>
+            )}
+          </div>
+        }
+      />
+      <div className="space-y-6 p-4 sm:p-8">
+        <div className="flex flex-wrap items-center gap-4">
+          <Link
+            href="/silverfang/clients"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Clients
+          </Link>
+          <Link
+            href={`/clients/${client.id}`}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Wolf365 client profile
+          </Link>
+          {client.superOpsMatch && (
+            <Link
+              href={`/synced/superops/${client.superOpsMatch.id}`}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> SuperOps record
+            </Link>
+          )}
+        </div>
+
+        {/* Rollup */}
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">Service summary</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <StatItem label="Open tickets" value={openCount} />
+            <StatItem label="Total tickets" value={client._count.sfTickets} />
+            <StatItem label="Contacts" value={client.sfContacts.length} />
+            <StatItem label="Agreements" value={client.sfAgreements.length} />
+            <StatItem label="Projects" value={client.sfProjects.length} />
+            <StatItem
+              label="Time logged"
+              value={`${formatHours(totalHours)}${totalRevenue > 0 ? ` · ${formatCurrency(totalRevenue)}` : ""}`}
+            />
+          </div>
+        </Card>
+
+        {/* Profile */}
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">SilverFang profile</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Service-delivery settings for this client. Defaults apply to new tickets.
+          </p>
+          {canConfigure ? (
+            <ClientProfileForm
+              clientId={client.id}
+              values={{
+                accountManager: client.sfClientProfile?.accountManager ?? "",
+                defaultBoardId: client.sfClientProfile?.defaultBoardId ?? "",
+                defaultAgreementId: client.sfClientProfile?.defaultAgreementId ?? "",
+                vip: client.sfClientProfile?.vip ?? false,
+                notes: client.sfClientProfile?.notes ?? "",
+              }}
+              boards={boards}
+              agreements={activeAgreements}
+            />
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatItem
+                label="Account manager"
+                value={client.sfClientProfile?.accountManager ?? "—"}
+              />
+              <StatItem label="VIP" value={client.sfClientProfile?.vip ? "Yes" : "No"} />
+              <StatItem label="Notes" value={client.sfClientProfile?.notes ?? "—"} />
+            </div>
+          )}
+        </Card>
+
+        {/* Contacts */}
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">Contacts ({client.sfContacts.length})</h2>
+          {client.sfContacts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No contacts yet.{" "}
+              {canConfigure
+                ? "Use “Import from SuperOps” on the Clients page to bring them across."
+                : "Ask a SilverFang administrator to import them from SuperOps."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-4 font-medium">Name</th>
+                    <th className="py-1 pr-4 font-medium">Email</th>
+                    <th className="py-1 pr-4 font-medium">Phone</th>
+                    <th className="py-1 pr-4 font-medium">Title</th>
+                    <th className="py-1 pr-4 font-medium">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {client.sfContacts.map((c) => (
+                    <tr key={c.id} className="border-t align-top">
+                      <td className="py-1.5 pr-4">
+                        {contactDisplayName(c)}
+                        {c.isPrimary && (
+                          <span className="ml-2 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground">
+                            primary
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-4">{c.email ?? "—"}</td>
+                      <td className="py-1.5 pr-4">{c.phone ?? c.mobile ?? "—"}</td>
+                      <td className="py-1.5 pr-4">{c.title ?? "—"}</td>
+                      <td className="py-1.5 pr-4 text-muted-foreground">
+                        {c.sourceSystem ?? "Manual"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* Tickets */}
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">
+            Tickets ({client._count.sfTickets}
+            {tickets.length < client._count.sfTickets ? `, showing ${tickets.length}` : ""})
+          </h2>
+          {tickets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No tickets for this client yet.</p>
+          ) : (
+            <TicketsTable rows={tickets} />
+          )}
+        </Card>
+
+        {/* Agreements */}
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">
+            Agreements ({client.sfAgreements.length})
+          </h2>
+          {client.sfAgreements.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No agreements for this client.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-4 font-medium">Name</th>
+                    <th className="py-1 pr-4 font-medium">Type</th>
+                    <th className="py-1 pr-4 font-medium">Status</th>
+                    <th className="py-1 pr-4 text-right font-medium">Monthly</th>
+                    <th className="py-1 pr-4 text-right font-medium">Block balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {client.sfAgreements.map((a) => {
+                    const blocks = a.blocks.map((b) => ({
+                      id: b.id,
+                      purchasedHours: Number(b.purchasedHours),
+                      purchasedAt: b.purchasedAt,
+                      expiresAt: b.expiresAt,
+                      hoursUsed: b.draws.reduce((acc, d) => acc + Number(d.hours), 0),
+                    }));
+                    return (
+                      <tr key={a.id} className="border-t align-top">
+                        <td className="py-1.5 pr-4 font-medium">{a.name}</td>
+                        <td className="py-1.5 pr-4">{AGREEMENT_TYPE_LABELS[a.type]}</td>
+                        <td className="py-1.5 pr-4">{AGREEMENT_STATUS_LABELS[a.status]}</td>
+                        <td className="py-1.5 pr-4 text-right tabular-nums">
+                          {a.monthlyAmount != null ? formatCurrency(Number(a.monthlyAmount)) : "—"}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right tabular-nums">
+                          {a.type === "BLOCK_TIME" ? formatHours(availableHours(blocks, now)) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* Projects */}
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">Projects ({client.sfProjects.length})</h2>
+          {client.sfProjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No projects for this client.</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {client.sfProjects.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {PROJECT_STATUS_LABELS[p.status]}
+                  </span>
+                  {p.dueDate && (
+                    <span className="text-xs text-muted-foreground">
+                      due <LocalTime value={p.dueDate.toISOString()} dateOnly />
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}

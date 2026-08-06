@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { Contact } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
+import { contactDisplayName } from "@/lib/silverfang/contacts";
 
 export const dynamic = "force-dynamic";
 
@@ -28,19 +30,22 @@ export default async function ContactsPage() {
     { key: "title", label: "Title" },
     { key: "tickets", label: "Tickets", numeric: true },
     { key: "primary", label: "Primary" },
+    { key: "source", label: "Source" },
   ];
 
   const rows: DataRow[] = contacts.map((c) => ({
     id: c.id,
-    href: `/clients/${c.client.id}`,
+    // Link into the SilverFang client view rather than the M365 client profile.
+    href: `/silverfang/clients/${c.client.id}`,
     cells: {
-      name: [c.firstName, c.lastName].filter(Boolean).join(" "),
+      name: contactDisplayName(c),
       client: c.client.name,
       email: c.email ?? "—",
       phone: c.phone ?? c.mobile ?? "—",
       title: c.title ?? "—",
       tickets: c._count.tickets,
       primary: c.isPrimary ? "Yes" : "",
+      source: c.sourceSystem ?? "Manual",
     },
   }));
 
@@ -65,8 +70,11 @@ export default async function ContactsPage() {
           </Card>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          Contacts link to their Wolf365 client. Import from SuperOps and per-contact editing arrive
-          with the next SilverFang phase.
+          Contacts link to their SilverFang client. Import them from SuperOps on the{" "}
+          <Link href="/silverfang/clients" className="text-primary hover:underline">
+            Clients
+          </Link>{" "}
+          page; per-contact editing arrives with a later SilverFang phase.
         </p>
       </div>
     </div>
