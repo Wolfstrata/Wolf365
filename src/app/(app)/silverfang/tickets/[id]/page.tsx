@@ -12,6 +12,7 @@ import { timeEntryEditable } from "@/lib/silverfang/status";
 import { evaluateTarget } from "@/lib/silverfang/sla";
 import { loadSla } from "@/lib/silverfang/service";
 import { defaultReplyRecipients } from "@/lib/silverfang/email-send";
+import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
 import { setTicketStatusAction, assignTicketAction } from "../../actions";
 import { EmailForm } from "./email-form";
 import { NoteForm } from "./note-form";
@@ -75,7 +76,13 @@ export default async function TicketDetailPage({
   const ticket = await prisma.sfTicket.findUnique({
     where: { id },
     include: {
-      client: { select: { id: true, name: true } },
+      client: {
+        select: {
+          id: true,
+          name: true,
+          sfClientProfile: { select: { allowClientEmail: true } },
+        },
+      },
       contact: true,
       board: { include: { statuses: { orderBy: { sortOrder: "asc" } } } },
       status: true,
@@ -378,6 +385,9 @@ export default async function TicketDetailPage({
                   defaultSubject={ticket.summary}
                   mailbox={outboundMailbox?.address ?? null}
                   firstResponsePending={ticket.firstRespondedAt == null}
+                  clientName={ticket.client.name}
+                  clientEmailAllowed={clientEmailAllowed(ticket.client.sfClientProfile)}
+                  clientHref={`/silverfang/clients/${ticket.client.id}`}
                 />
               </div>
             </div>

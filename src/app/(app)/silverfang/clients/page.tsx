@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
+import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
 import { ImportSuperOpsButton } from "./import-button";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,9 @@ export default async function SilverFangClientsPage({
     orderBy: { name: "asc" },
     take: 2000,
     include: {
-      sfClientProfile: { select: { accountManager: true, vip: true } },
+      sfClientProfile: {
+        select: { accountManager: true, vip: true, allowClientEmail: true },
+      },
       superOpsMatch: { select: { id: true } },
       _count: {
         select: { sfTickets: true, sfContacts: true, sfAgreements: true, sfProjects: true },
@@ -57,6 +60,7 @@ export default async function SilverFangClientsPage({
     c._count.sfAgreements > 0 ||
     c._count.sfProjects > 0;
 
+  const emailOn = clients.filter((c) => clientEmailAllowed(c.sfClientProfile)).length;
   const visible = view === "all" ? clients : clients.filter(hasActivity);
   const activityCount = clients.filter(hasActivity).length;
 
@@ -82,7 +86,13 @@ export default async function SilverFangClientsPage({
       contacts: c._count.sfContacts,
       agreements: c._count.sfAgreements,
       projects: c._count.sfProjects,
-      flags: [c.sfClientProfile?.vip ? "VIP" : null, c.superOpsMatch ? "SuperOps" : null]
+      flags: [
+        // Shown positively only: "Email on" is the exception worth noticing,
+        // since off is the norm and the safe state.
+        clientEmailAllowed(c.sfClientProfile) ? "Email on" : null,
+        c.sfClientProfile?.vip ? "VIP" : null,
+        c.superOpsMatch ? "SuperOps" : null,
+      ]
         .filter(Boolean)
         .join(" · "),
     },
@@ -129,6 +139,14 @@ export default async function SilverFangClientsPage({
           </Card>
         )}
 
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            {emailOn} of {clients.length} clients can be emailed.
+          </span>{" "}
+          Email is off for every client until someone turns it on for that client
+          individually — so no customer can be mailed by accident. Inbound email still creates
+          tickets either way.
+        </p>
         <p className="text-xs text-muted-foreground">
           SilverFang uses the same client records as the rest of Wolf365, so tickets, billing
           and CRM always agree. Importing from SuperOps links each SuperOps client to a

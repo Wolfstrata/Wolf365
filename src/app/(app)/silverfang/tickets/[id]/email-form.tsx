@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Mail } from "lucide-react";
+import Link from "next/link";
+import { Mail, MailX } from "lucide-react";
 import { sendTicketEmailAction, type SfActionResult } from "../../actions";
 
 const inputCls =
@@ -17,6 +18,9 @@ export function EmailForm({
   defaultSubject,
   mailbox,
   firstResponsePending,
+  clientName,
+  clientEmailAllowed,
+  clientHref,
 }: {
   ticketId: string;
   defaultTo: string;
@@ -24,6 +28,10 @@ export function EmailForm({
   /** The address the reply will come from, or null when none is configured. */
   mailbox: string | null;
   firstResponsePending: boolean;
+  clientName: string;
+  /** The per-client gate. False means no composer at all. */
+  clientEmailAllowed: boolean;
+  clientHref: string;
 }) {
   const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
     sendTicketEmailAction,
@@ -35,6 +43,28 @@ export function EmailForm({
   useEffect(() => {
     if (result?.ok) formRef.current?.reset();
   }, [result]);
+
+  // The gate comes first: when a client isn't opted in there is nothing to
+  // compose, so no composer is offered at all. The server refuses regardless —
+  // this is so nobody writes a reply that was never going to be sent.
+  if (!clientEmailAllowed) {
+    return (
+      <div className="rounded-md border border-warning/40 bg-warning/5 p-3">
+        <p className="inline-flex items-center gap-1.5 text-sm font-medium text-warning">
+          <MailX className="h-4 w-4" /> Email to {clientName} is off
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Nothing can be emailed to this client. Every client starts this way, on purpose. Turn
+          on{" "}
+          <Link href={clientHref} className="text-primary hover:underline">
+            Allow email to client
+          </Link>{" "}
+          on their SilverFang profile to enable replies. Internal notes and inbound email are
+          unaffected.
+        </p>
+      </div>
+    );
+  }
 
   if (!mailbox) {
     return (

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, Plus, Star } from "lucide-react";
+import { ArrowLeft, ExternalLink, MailX, Plus, Star } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { availableHours } from "@/lib/silverfang/block-time";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
+import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
 import { getTicketRows } from "@/lib/silverfang/queries";
 import {
   AGREEMENT_STATUS_LABELS,
@@ -79,6 +80,11 @@ export default async function SilverFangClientPage({
         description="SilverFang client"
         actions={
           <div className="flex items-center gap-3">
+            {!clientEmailAllowed(client.sfClientProfile) && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning">
+                <MailX className="h-3.5 w-3.5" /> Email off
+              </span>
+            )}
             {client.sfClientProfile?.vip && (
               <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning">
                 <Star className="h-3.5 w-3.5" /> VIP
@@ -148,6 +154,7 @@ export default async function SilverFangClientPage({
                 accountManager: client.sfClientProfile?.accountManager ?? "",
                 defaultBoardId: client.sfClientProfile?.defaultBoardId ?? "",
                 defaultAgreementId: client.sfClientProfile?.defaultAgreementId ?? "",
+                allowClientEmail: clientEmailAllowed(client.sfClientProfile),
                 vip: client.sfClientProfile?.vip ?? false,
                 notes: client.sfClientProfile?.notes ?? "",
               }}
@@ -159,6 +166,16 @@ export default async function SilverFangClientPage({
               <StatItem
                 label="Account manager"
                 value={client.sfClientProfile?.accountManager ?? "—"}
+              />
+              <StatItem
+                label="Email to client"
+                value={
+                  clientEmailAllowed(client.sfClientProfile) ? (
+                    <span className="text-success">Allowed</span>
+                  ) : (
+                    <span className="text-warning">Off</span>
+                  )
+                }
               />
               <StatItem label="VIP" value={client.sfClientProfile?.vip ? "Yes" : "No"} />
               <StatItem label="Notes" value={client.sfClientProfile?.notes ?? "—"} />

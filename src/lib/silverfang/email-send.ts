@@ -9,6 +9,7 @@ import {
   withSignature,
 } from "@/lib/silverfang/email";
 import { resolveOutboundMailbox, sendTicketMail } from "@/lib/silverfang/mail";
+import { clientEmailAllowed, clientEmailBlockedReason } from "@/lib/silverfang/email-policy";
 
 /**
  * Outbound ticket email. Sends first, records second — a message row is only
@@ -64,9 +65,24 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
 
   const ticket = await prisma.sfTicket.findUnique({
     where: { id: input.ticketId },
-    select: { id: true, number: true, summary: true, firstRespondedAt: true },
+    select: {
+      id: true,
+      number: true,
+      summary: true,
+      firstRespondedAt: true,
+      clientId: true,
+      client: {
+        select: { name: true, sfClientProfile: { select: { allowClientEmail: true } } },
+      },
+    },
   });
   if (!ticket) return { ok: false, message: "That ticket no longer exists." };
+
+  // Checked here as well as in the transport: the transport is the guarantee, this
+  // is so the reply composer says why before composing anything.
+  if (!clientEmailAllowed(ticket.client.sfClientProfile)) {
+    return { ok: false, message: clientEmailBlockedReason(ticket.client.name) };
+  }
 
   // Thread onto the most recent message we know about, in the order a mail
   // client expects.
@@ -100,6 +116,7 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
     ticketNumber: ticket.number,
     inReplyTo: last?.messageId ?? null,
     references,
+    audience: { kind: "CLIENT", clientId: ticket.clientId },
   });
   if (!sent.sent) {
     return { ok: false, message: sent.reason ?? "The mail provider rejected the message." };

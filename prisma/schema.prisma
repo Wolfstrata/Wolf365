@@ -1443,6 +1443,12 @@ model SfClientProfile {
   defaultAgreementId String?
   defaultAgreement   SfAgreement? @relation(fields: [defaultAgreementId], references: [id], onDelete: SetNull)
 
+  /// HARD RULE: SilverFang must never email this client's contacts unless this is
+  /// explicitly true. Default false, for every client, forever — including new
+  /// clients and clients with no profile row at all, where the absence of a row
+  /// is itself a "no". Enforced in the mail transport, not just the UI.
+  allowClientEmail Boolean @default(false)
+
   vip    Boolean @default(false)
   notes  String? @db.Text
   active Boolean @default(true)

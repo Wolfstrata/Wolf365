@@ -9,7 +9,11 @@ import {
   textToHtml,
   withSignature,
 } from "@/lib/silverfang/email";
-import { resolveOutboundMailbox, sendTicketMail } from "@/lib/silverfang/mail";
+import {
+  resolveOutboundMailbox,
+  sendTicketMail,
+  type MailAudience,
+} from "@/lib/silverfang/mail";
 
 /**
  * Auto-response rules: templated mail sent to the contact and/or the assignee
@@ -64,7 +68,12 @@ export async function runAutoResponses(
     const ticket = await prisma.sfTicket.findUnique({
       where: { id: ticketId },
       include: {
-        client: { select: { name: true } },
+        client: {
+          select: {
+            name: true,
+            sfClientProfile: { select: { allowClientEmail: true } },
+          },
+        },
         contact: { select: { firstName: true, lastName: true, email: true } },
         status: { select: { id: true, name: true } },
         assignee: { select: { name: true, email: true } },
@@ -96,22 +105,31 @@ export async function runAutoResponses(
       if (rule.statusId && rule.statusId !== ticket.statusId) continue;
       if (rule.priority && rule.priority !== ticket.priority) continue;
 
-      const to: string[] = [];
+      // Client and internal recipients are sent separately: a client who has not
+      // opted in must not be mailed, but that must not also silence the
+      // technician notice on the same rule.
+      const clientTo: string[] = [];
+      const internalTo: string[] = [];
       if (rule.audience === "CONTACT" || rule.audience === "BOTH") {
-        if (ticket.contact?.email) to.push(ticket.contact.email);
+        if (ticket.contact?.email) clientTo.push(ticket.contact.email);
       }
       if (rule.audience === "ASSIGNEE" || rule.audience === "BOTH") {
-        if (ticket.assignee?.email) to.push(ticket.assignee.email);
+        if (ticket.assignee?.email) internalTo.push(ticket.assignee.email);
       }
-      if (to.length === 0) {
-        outcomes.push({ rule: rule.name, sent: false, to, reason: "No recipient for this audience" });
+      if (clientTo.length === 0 && internalTo.length === 0) {
+        outcomes.push({
+          rule: rule.name,
+          sent: false,
+          to: [],
+          reason: "No recipient for this audience",
+        });
         continue;
       }
       if (!mailbox) {
         outcomes.push({
           rule: rule.name,
           sent: false,
-          to,
+          to: [...clientTo, ...internalTo],
           reason: "No active outbound mailbox is configured",
         });
         continue;
@@ -119,35 +137,43 @@ export async function runAutoResponses(
 
       const body = withSignature(renderTemplate(rule.bodyTemplate, vars), mailbox.signature);
       const subject = renderTemplate(rule.subjectTemplate, vars);
-      const result = await sendTicketMail(mailbox, {
-        to,
-        subject: buildOutboundSubject(ticket.number, subject),
-        text: body,
-        html: textToHtml(body),
-        ticketNumber: ticket.number,
-      });
+      const fullSubject = buildOutboundSubject(ticket.number, subject);
 
-      if (result.sent) {
-        await prisma.sfTicketMessage.create({
-          data: {
-            ticketId: ticket.id,
-            mailboxId: mailbox.id,
-            direction: "OUTBOUND",
-            fromAddress: outboundAddress(mailbox),
-            toAddresses: to,
-            subject: buildOutboundSubject(ticket.number, subject),
-            bodyText: body,
-            bodyHtml: textToHtml(body),
-            sentAt: new Date(),
-          },
+      const deliver = async (to: string[], audience: MailAudience) => {
+        if (to.length === 0) return;
+        const result = await sendTicketMail(mailbox, {
+          to,
+          subject: fullSubject,
+          text: body,
+          html: textToHtml(body),
+          ticketNumber: ticket.number,
+          audience,
         });
-      }
-      outcomes.push({
-        rule: rule.name,
-        sent: result.sent,
-        to,
-        ...(result.reason ? { reason: result.reason } : {}),
-      });
+        if (result.sent) {
+          await prisma.sfTicketMessage.create({
+            data: {
+              ticketId: ticket.id,
+              mailboxId: mailbox.id,
+              direction: "OUTBOUND",
+              fromAddress: outboundAddress(mailbox),
+              toAddresses: to,
+              subject: fullSubject,
+              bodyText: body,
+              bodyHtml: textToHtml(body),
+              sentAt: new Date(),
+            },
+          });
+        }
+        outcomes.push({
+          rule: rule.name,
+          sent: result.sent,
+          to,
+          ...(result.reason ? { reason: result.reason } : {}),
+        });
+      };
+
+      await deliver(clientTo, { kind: "CLIENT", clientId: ticket.clientId });
+      await deliver(internalTo, { kind: "INTERNAL" });
     }
     return outcomes;
   } catch (err) {

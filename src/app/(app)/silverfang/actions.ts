@@ -663,6 +663,7 @@ const clientProfileSchema = z.object({
   accountManager: z.preprocess(emptyToUndefined, z.string().max(200).optional()),
   defaultBoardId: optionalId,
   defaultAgreementId: optionalId,
+  allowClientEmail: z.coerce.boolean(),
   vip: z.coerce.boolean(),
   notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
 });
@@ -679,6 +680,7 @@ export async function saveClientProfileAction(
       accountManager: formValue(formData, "accountManager"),
       defaultBoardId: formValue(formData, "defaultBoardId"),
       defaultAgreementId: formValue(formData, "defaultAgreementId"),
+      allowClientEmail: formData.get("allowClientEmail") === "on",
       vip: formData.get("vip") === "on",
       notes: formValue(formData, "notes"),
     });
@@ -690,6 +692,7 @@ export async function saveClientProfileAction(
       accountManager: input.accountManager ?? null,
       defaultBoardId: input.defaultBoardId ?? null,
       defaultAgreementId: input.defaultAgreementId ?? null,
+      allowClientEmail: input.allowClientEmail,
       vip: input.vip,
       notes: input.notes ?? null,
     };
@@ -704,11 +707,22 @@ export async function saveClientProfileAction(
       actorId: user.id,
       actorEmail: user.email,
       target: `silverfang:clientProfile:${input.clientId}`,
-      metadata: { vip: input.vip, hasAccountManager: Boolean(input.accountManager) },
+      // Audited explicitly: turning client email on is the setting that decides
+      // whether a real customer can receive mail from us.
+      metadata: {
+        allowClientEmail: input.allowClientEmail,
+        vip: input.vip,
+        hasAccountManager: Boolean(input.accountManager),
+      },
     });
     revalidatePath(`/silverfang/clients/${input.clientId}`);
     revalidatePath("/silverfang/clients");
-    return { ok: true, message: "Client profile saved." };
+    return {
+      ok: true,
+      message: input.allowClientEmail
+        ? "Client profile saved. Email to this client is now ALLOWED."
+        : "Client profile saved. Email to this client stays off — nothing will be sent to them.",
+    };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }

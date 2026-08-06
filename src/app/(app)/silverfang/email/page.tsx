@@ -70,6 +70,15 @@ export default async function SilverFangEmailPage() {
     prisma.sfTicketMessage.count({ where: { direction: "INBOUND" } }),
   ]);
 
+  // The gate is the most consequential setting on this page, so it is stated
+  // here rather than only on individual clients.
+  const [emailableClients, totalClients] = await Promise.all([
+    prisma.client.count({
+      where: { archived: false, sfClientProfile: { allowClientEmail: true } },
+    }),
+    prisma.client.count({ where: { archived: false } }),
+  ]);
+
   const outboundCount = await prisma.sfTicketMessage.count({ where: { direction: "OUTBOUND" } });
   const webhookUrl = env.AUTH_URL
     ? `${env.AUTH_URL.replace(/\/$/, "")}/api/silverfang/email`
@@ -95,6 +104,18 @@ export default async function SilverFangEmailPage() {
               value={<Yes ok={graphReady} label={graphReady ? "Ready" : "Not configured"} />}
             />
             <StatItem
+              label="Clients emailable"
+              value={
+                emailableClients === 0 ? (
+                  <span className="text-warning">0 of {totalClients}</span>
+                ) : (
+                  <span className="text-success">
+                    {emailableClients} of {totalClients}
+                  </span>
+                )
+              }
+            />
+            <StatItem
               label="Resend"
               value={
                 <Yes
@@ -105,6 +126,17 @@ export default async function SilverFangEmailPage() {
             />
           </div>
           <div className="mt-4 space-y-2 border-t pt-4 text-xs text-muted-foreground">
+            <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5">
+              <span className="font-medium text-foreground">
+                No client is emailed unless it is switched on for that client.
+              </span>{" "}
+              “Allow email to client” lives on each client&rsquo;s SilverFang profile and is off
+              by default — for every client, including new ones, permanently. Replies and
+              auto-responses to a client that is off are refused and say so; nothing is queued
+              or sent later. Internal mail to technicians and all inbound email are unaffected.
+              {emailableClients === 0 &&
+                " Right now no client can be emailed at all, so nothing can go out."}
+            </p>
             <p>
               <span className="font-medium text-foreground">Receiving mail.</span> A Microsoft 365
               mailbox is polled every 15 minutes (and by “Check mail now”). This needs{" "}

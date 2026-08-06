@@ -11,6 +11,7 @@ import {
   parseAddressList,
   pollFloor,
 } from "@/lib/silverfang/email";
+import { clientEmailAllowed, clientEmailBlockedReason } from "@/lib/silverfang/email-policy";
 
 /**
  * SilverFang mail transport: the I/O edge for sending ticket email and reading a
@@ -35,6 +36,16 @@ import {
 
 export type MailProvider = "GRAPH" | "RESEND";
 
+/**
+ * Who this mail is going to. Required, and deliberately not defaulted: a new send
+ * path has to state whether it is mailing a customer, and mailing a customer is
+ * gated on that client's explicit opt-in. Making it a required field is what
+ * stops the gate being forgotten.
+ */
+export type MailAudience =
+  | { kind: "CLIENT"; clientId: string }
+  | { kind: "INTERNAL" };
+
 export interface OutboundMail {
   to: string[];
   cc?: string[];
@@ -46,6 +57,7 @@ export interface OutboundMail {
   /** RFC threading, honoured on the Resend path only (see note above). */
   inReplyTo?: string | null;
   references?: string | null;
+  audience: MailAudience;
 }
 
 export interface SendResult {
@@ -54,6 +66,11 @@ export interface SendResult {
   /** Provider-side id, when one is returned. */
   providerId?: string;
   reason?: string;
+  /**
+   * True when the client-email gate refused the send. Distinct from a failure:
+   * nothing went wrong, the client is simply not opted in.
+   */
+  blockedByPolicy?: boolean;
 }
 
 /** Graph's shape for a mail message we read from a mailbox. */
@@ -111,6 +128,29 @@ export async function sendTicketMail(
   const to = parseAddressList(mail.to);
   if (to.length === 0) return { sent: false, provider: null, reason: "No valid recipients" };
   const cc = parseAddressList(mail.cc ?? []);
+
+  // HARD RULE, enforced here rather than at the callers: a client's contacts are
+  // never emailed unless that client has been explicitly opted in. This is the
+  // single choke point every send goes through, so the gate cannot be bypassed by
+  // adding a new send path.
+  if (mail.audience.kind === "CLIENT") {
+    const client = await prisma.client.findUnique({
+      where: { id: mail.audience.clientId },
+      select: { name: true, sfClientProfile: { select: { allowClientEmail: true } } },
+    });
+    if (!client) {
+      return { sent: false, provider: null, reason: "That client no longer exists." };
+    }
+    if (!clientEmailAllowed(client.sfClientProfile)) {
+      return {
+        sent: false,
+        provider: null,
+        blockedByPolicy: true,
+        reason: clientEmailBlockedReason(client.name),
+      };
+    }
+  }
+
   const provider: MailProvider = mailbox.provider === "RESEND" ? "RESEND" : "GRAPH";
   // May differ from the polled address when a front-door address forwards in.
   const fromAddress = outboundAddress(mailbox);

@@ -18,6 +18,7 @@ export function ClientProfileForm({
     accountManager: string;
     defaultBoardId: string;
     defaultAgreementId: string;
+    allowClientEmail: boolean;
     vip: boolean;
     notes: string;
   };
@@ -77,6 +78,40 @@ export function ClientProfileForm({
         Notes
         <textarea name="notes" defaultValue={values.notes} rows={3} className={`mt-1 ${inputCls}`} />
       </label>
+      <div
+        className={`rounded-md border p-3 ${
+          values.allowClientEmail
+            ? "border-success/40 bg-success/5"
+            : "border-warning/40 bg-warning/5"
+        }`}
+      >
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            name="allowClientEmail"
+            defaultChecked={values.allowClientEmail}
+            className="h-4 w-4"
+          />
+          Allow email to client
+        </label>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {values.allowClientEmail ? (
+            <>
+              <span className="font-medium text-success">On.</span> SilverFang may email this
+              client&rsquo;s contacts — ticket replies and any active auto-responses.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-warning">Off.</span> No email will reach this
+              client&rsquo;s contacts. Replies and auto-responses are refused and say so;
+              nothing is queued or sent later.
+            </>
+          )}{" "}
+          Off is the default for every client, always. Inbound email still works either way —
+          tickets are created from client mail regardless.
+        </p>
+      </div>
+
       <div className="flex flex-wrap items-center gap-4">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" name="vip" defaultChecked={values.vip} className="h-4 w-4" />
