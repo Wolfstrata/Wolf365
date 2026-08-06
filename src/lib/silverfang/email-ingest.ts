@@ -567,8 +567,11 @@ function toInbound(mailbox: SfMailbox, msg: FetchedMessage): InboundEmail {
 
 /** Poll every active inbound mailbox. Failures are isolated per mailbox. */
 export async function pollAllMailboxes(limitPerMailbox = 25): Promise<MailboxPollResult[]> {
+  // Only Graph mailboxes can be polled. A Resend mailbox receives through the
+  // inbound webhook instead, so skipping it here is correct — reporting it as a
+  // failed poll every 15 minutes would be noise, not information.
   const mailboxes = await prisma.sfMailbox.findMany({
-    where: { active: true, inbound: true },
+    where: { active: true, inbound: true, provider: "GRAPH" },
     orderBy: { createdAt: "asc" },
   });
   const results: MailboxPollResult[] = [];

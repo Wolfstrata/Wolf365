@@ -696,14 +696,35 @@ export async function saveClientProfileAction(
       vip: input.vip,
       notes: input.notes ?? null,
     };
-    await prisma.sfClientProfile.upsert({
+    const beforeProfile = await prisma.sfClientProfile.findUnique({
+      where: { clientId: input.clientId },
+    });
+    const savedProfile = await prisma.sfClientProfile.upsert({
       where: { clientId: input.clientId },
       create: { clientId: input.clientId, ...data },
       update: data,
     });
+    const { recordChanges } = await import("@/lib/silverfang/change-log");
+    await recordChanges({
+      entity: "SfClientProfile",
+      entityId: input.clientId,
+      entityLabel: client.name,
+      actor: { id: user.id, email: user.email },
+      before: beforeProfile,
+      after: savedProfile as unknown as Record<string, unknown>,
+      fields: [
+        "accountManager",
+        "defaultBoardId",
+        "defaultAgreementId",
+        "allowClientEmail",
+        "vip",
+        "notes",
+        "active",
+      ],
+    });
 
     await audit({
-      action: "SILVERFANG_CONFIG_CHANGED",
+      action: "SF_CLIENT_PROFILE_UPDATED",
       actorId: user.id,
       actorEmail: user.email,
       target: `silverfang:clientProfile:${input.clientId}`,
@@ -819,9 +840,35 @@ export async function saveContactAction(
       locallyModifiedAt: new Date(),
     };
 
+    const before = input.id
+      ? await prisma.sfContact.findUnique({ where: { id: input.id } })
+      : null;
     const saved = input.id
       ? await prisma.sfContact.update({ where: { id: input.id }, data })
       : await prisma.sfContact.create({ data });
+
+    const { recordChanges } = await import("@/lib/silverfang/change-log");
+    const { describeChanges } = await import("@/lib/silverfang/changes");
+    const changes = await recordChanges({
+      entity: "SfContact",
+      entityId: saved.id,
+      entityLabel: [saved.firstName, saved.lastName].filter(Boolean).join(" "),
+      actor: { id: user.id, email: user.email },
+      before,
+      after: saved as unknown as Record<string, unknown>,
+      fields: [
+        "clientId",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "mobile",
+        "title",
+        "isPrimary",
+        "active",
+        "notes",
+      ],
+    });
 
     // One primary per client.
     if (input.isPrimary) {
@@ -832,16 +879,16 @@ export async function saveContactAction(
     }
 
     await audit({
-      action: "SILVERFANG_CONFIG_CHANGED",
+      action: input.id ? "SF_CONTACT_UPDATED" : "SF_CONTACT_CREATED",
       actorId: user.id,
       actorEmail: user.email,
       target: `silverfang:contact:${saved.id}`,
       metadata: {
         clientId: input.clientId,
-        created: !input.id,
         hasEmail: Boolean(input.email),
         isPrimary: input.isPrimary,
         active: input.active,
+        changed: changes.map((c) => c.field),
       },
     });
     revalidatePath("/silverfang/contacts");
@@ -850,7 +897,9 @@ export async function saveContactAction(
     return {
       ok: true,
       message: input.id
-        ? "Contact saved. Future SuperOps imports will leave it alone."
+        ? changes.length === 0
+          ? "No changes to save."
+          : `Saved ${describeChanges(changes)}. Future SuperOps imports will leave this contact alone.`
         : "Contact created.",
     };
   } catch (err) {
@@ -881,13 +930,26 @@ export async function deleteContactAction(
       };
     }
 
+    const doomed = await prisma.sfContact.findUnique({ where: { id } });
     await prisma.sfContact.delete({ where: { id } });
+    const { recordChanges } = await import("@/lib/silverfang/change-log");
+    await recordChanges({
+      entity: "SfContact",
+      entityId: id,
+      entityLabel: doomed
+        ? [doomed.firstName, doomed.lastName].filter(Boolean).join(" ")
+        : null,
+      actor: { id: user.id, email: user.email },
+      before: doomed as unknown as Record<string, unknown>,
+      after: null,
+      fields: [],
+    });
     await audit({
-      action: "SILVERFANG_CONFIG_CHANGED",
+      action: "SF_CONTACT_DELETED",
       actorId: user.id,
       actorEmail: user.email,
       target: `silverfang:contact:${id}`,
-      metadata: { deleted: true, clientId: contact.clientId },
+      metadata: { clientId: contact.clientId, email: doomed?.email ?? null },
     });
     revalidatePath("/silverfang/contacts");
     revalidatePath(`/silverfang/clients/${contact.clientId}`);
@@ -926,14 +988,27 @@ export async function setEmailMasterSwitchAction(
       };
     }
 
+    const beforePolicy = await prisma.sfEmailPolicy.findUnique({ where: { id: POLICY_ID } });
     await prisma.sfEmailPolicy.upsert({
       where: { id: POLICY_ID },
       create: { id: POLICY_ID, outboundEnabled: enable, updatedByEmail: user.email },
       update: { outboundEnabled: enable, updatedByEmail: user.email },
     });
+    const { recordChanges } = await import("@/lib/silverfang/change-log");
+    await recordChanges({
+      entity: "SfEmailPolicy",
+      entityId: POLICY_ID,
+      entityLabel: "Outbound email master switch",
+      actor: { id: user.id, email: user.email },
+      // Treat a first-ever write as an update from the effective default (off),
+      // so enabling it is always recorded as a change rather than a creation.
+      before: beforePolicy ?? { outboundEnabled: false },
+      after: { outboundEnabled: enable },
+      fields: ["outboundEnabled"],
+    });
 
     await audit({
-      action: "SILVERFANG_CONFIG_CHANGED",
+      action: "SF_EMAIL_POLICY_CHANGED",
       actorId: user.id,
       actorEmail: user.email,
       target: "silverfang:email-master-switch",
@@ -1057,8 +1132,10 @@ export async function saveMailboxAction(
       signature: formValue(formData, "signature"),
     });
 
-    // RESEND cannot receive mail, so accepting inbound on it would be a lie.
-    const inbound = input.provider === "RESEND" ? false : input.inbound;
+    // Receiving and polling are different things: only Graph can be *polled*, but
+    // any mailbox can receive through the inbound webhook, so the provider must not
+    // decide whether inbound is allowed at all.
+    const inbound = input.inbound;
     // A reply-as address equal to the polled address is redundant, not an error.
     const sendAsAddress =
       input.sendAsAddress && input.sendAsAddress !== input.address ? input.sendAsAddress : null;
@@ -1081,12 +1158,40 @@ export async function saveMailboxAction(
       signature: input.signature ?? null,
     };
 
+    const beforeMailbox = input.id
+      ? await prisma.sfMailbox.findUnique({ where: { id: input.id } })
+      : null;
     const saved = input.id
       ? await prisma.sfMailbox.update({ where: { id: input.id }, data })
       : await prisma.sfMailbox.create({ data });
+    const { recordChanges: recordMailboxChanges } = await import(
+      "@/lib/silverfang/change-log"
+    );
+    await recordMailboxChanges({
+      entity: "SfMailbox",
+      entityId: saved.id,
+      entityLabel: saved.address,
+      actor: { id: user.id, email: user.email },
+      before: beforeMailbox,
+      after: saved as unknown as Record<string, unknown>,
+      fields: [
+        "address",
+        "name",
+        "sendAsAddress",
+        "boardId",
+        "fallbackClientId",
+        "defaultPriority",
+        "provider",
+        "inbound",
+        "outbound",
+        "active",
+        "signature",
+        "ignoreBefore",
+      ],
+    });
 
     await audit({
-      action: "SILVERFANG_CONFIG_CHANGED",
+      action: "SF_MAILBOX_CHANGED",
       actorId: user.id,
       actorEmail: user.email,
       target: `silverfang:mailbox:${saved.id}`,
@@ -1103,7 +1208,7 @@ export async function saveMailboxAction(
       ok: true,
       message:
         input.provider === "RESEND" && input.inbound
-          ? "Mailbox saved. Inbound was turned off — the Resend provider can only send."
+          ? "Mailbox saved. Resend cannot be polled, so inbound mail must arrive through the webhook — Graph polling will skip this mailbox."
           : "Mailbox saved.",
     };
   } catch (err) {

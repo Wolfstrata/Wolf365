@@ -19,6 +19,8 @@ import {
 } from "@/lib/silverfang/constants";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ClientProfileForm } from "./profile-form";
+import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
+import { changeLogFor } from "@/lib/silverfang/change-log";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,8 @@ export default async function SilverFangClientPage({
   });
   if (!client) notFound();
 
-  const [tickets, openCount, hoursAgg, boards, activeAgreements] = await Promise.all([
+  const [tickets, openCount, hoursAgg, boards, activeAgreements, trail] =
+    await Promise.all([
     getTicketRows({ clientId: id, view: "all" }, 50),
     prisma.sfTicket.count({ where: { clientId: id, status: { isClosed: false } } }),
     prisma.sfTimeEntry.aggregate({
@@ -65,6 +68,7 @@ export default async function SilverFangClientPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    changeLogFor("SfClientProfile", id),
   ]);
 
   const canConfigure = can(user.role, "silverfang:configure");
@@ -181,6 +185,15 @@ export default async function SilverFangClientPage({
               <StatItem label="Notes" value={client.sfClientProfile?.notes ?? "—"} />
             </div>
           )}
+        </Card>
+
+        {/* Change history */}
+        <Card>
+          <ChangeTrailHeading count={trail.length} />
+          <ChangeTrail
+            rows={trail}
+            emptyHint="No profile changes recorded yet — including whether this client may be emailed."
+          />
         </Card>
 
         {/* Contacts */}

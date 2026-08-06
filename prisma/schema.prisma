@@ -51,6 +51,7 @@ model User {
   accounts  Account[]
   sessions  Session[]
   auditLogs AuditLog[]
+  sfChangeLogs SfChangeLog[]
   ownedOpportunities   CrmOpportunity[] @relation("OpportunityOwner")
   createdOpportunities CrmOpportunity[] @relation("OpportunityCreator")
   createdBackups       Backup[]         @relation("BackupCreator")
@@ -290,6 +291,14 @@ enum AuditAction {
   TICKET_NOTE_ADDED
   TICKET_EMAIL_SENT
   TICKET_EMAIL_RECEIVED
+  // Distinct actions rather than one catch-all, so the audit trail can be
+  // filtered by what actually changed.
+  SF_CONTACT_CREATED
+  SF_CONTACT_UPDATED
+  SF_CONTACT_DELETED
+  SF_CLIENT_PROFILE_UPDATED
+  SF_MAILBOX_CHANGED
+  SF_EMAIL_POLICY_CHANGED
   TIME_LOGGED
   TIME_ENTRY_UPDATED
   TIMESHEET_SUBMITTED
@@ -2155,6 +2164,41 @@ model SfCalendarLink {
 
   @@unique([mailbox, eventId])
   @@index([ticketId])
+}
+
+// Field-level change trail for SilverFang records that have no history table of
+// their own (contacts, client profiles, mailboxes, agreements, projects…).
+// Tickets keep SfTicketHistory, which predates this and is queried per ticket.
+//
+// Append-only by convention: rows are written on change and never updated, so
+// "who changed what, from what, when" survives later edits and deletions.
+model SfChangeLog {
+  id String @id @default(cuid())
+
+  /// Model name, e.g. "SfContact" — kept as a string so a new entity needs no
+  /// migration to become auditable.
+  entity   String
+  entityId String
+  /// Human-readable label at the time of the change, so a deleted record still
+  /// reads sensibly in the trail.
+  entityLabel String?
+
+  /// Field name, or "*" for whole-record events like creation and deletion.
+  field    String
+  oldValue String? @db.Text
+  newValue String? @db.Text
+
+  /// "CREATE" | "UPDATE" | "DELETE"
+  operation String @default("UPDATE")
+
+  actorId    String?
+  actor      User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([createdAt])
 }
 
 // Master switch for ALL outbound SilverFang email. Single row, keyed on a fixed

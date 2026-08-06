@@ -10,6 +10,8 @@ import { contactDisplayName } from "@/lib/silverfang/contacts";
 import { getTicketRows } from "@/lib/silverfang/queries";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ContactForm } from "../contact-form";
+import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
+import { changeLogFor } from "@/lib/silverfang/change-log";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +33,7 @@ export default async function ContactDetailPage({
   });
   if (!contact) notFound();
 
-  const [clients, tickets] = await Promise.all([
+  const [clients, tickets, trail] = await Promise.all([
     prisma.client.findMany({
       where: { archived: false },
       orderBy: { name: "asc" },
@@ -39,6 +41,7 @@ export default async function ContactDetailPage({
       take: 2000,
     }),
     getTicketRows({ contactId: id, view: "all" }, 50),
+    changeLogFor("SfContact", id),
   ]);
 
   const canWrite = can(user.role, "tickets:write");
@@ -117,6 +120,14 @@ export default async function ContactDetailPage({
               <StatItem label="Title" value={contact.title ?? "—"} />
             </div>
           )}
+        </Card>
+
+        <Card>
+          <ChangeTrailHeading count={trail.length} />
+          <ChangeTrail
+            rows={trail}
+            emptyHint="No changes recorded yet. Every edit from here on is logged with who made it and what it was before."
+          />
         </Card>
 
         <Card>

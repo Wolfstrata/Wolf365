@@ -27,8 +27,9 @@ export interface MailboxValues {
 }
 
 /**
- * Create/edit one support mailbox. `provider` is stateful because RESEND cannot
- * receive mail — the inbound control is disabled rather than silently ignored.
+ * Create/edit one support mailbox. `provider` is stateful only to explain what it
+ * implies: Graph can be polled, Resend cannot — but either can receive through the
+ * inbound webhook, so the provider does not decide whether inbound is allowed.
  */
 export function MailboxForm({
   values,
@@ -99,7 +100,7 @@ export function MailboxForm({
           <span className="mt-1 block text-xs font-normal text-muted-foreground">
             {canReceive
               ? "Needs Mail.Send and Mail.ReadWrite application permissions on the Entra app."
-              : "Resend cannot read a mailbox, so inbound is unavailable on this provider."}
+              : "Resend sends only — it cannot be polled. Inbound mail for this mailbox has to arrive through the webhook instead."}
           </span>
         </label>
         <label className="block text-sm font-medium">
@@ -187,12 +188,16 @@ export function MailboxForm({
           <input
             type="checkbox"
             name="inbound"
-            defaultChecked={values.inbound && canReceive}
-            disabled={!canReceive}
+            defaultChecked={values.inbound}
             className="h-4 w-4"
           />
           Receive mail
         </label>
+        <span className="text-xs text-muted-foreground">
+          {canReceive
+            ? "Polled every 15 minutes, and the webhook also accepts mail."
+            : "Webhook only — this provider cannot be polled."}
+        </span>
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" name="outbound" defaultChecked={values.outbound} className="h-4 w-4" />
           Send mail
