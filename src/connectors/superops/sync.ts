@@ -331,7 +331,12 @@ async function buildClientResolver(): Promise<ClientResolver> {
  * explains itself instead of costing another sync-and-ask cycle. Field names and
  * the client-ish field structure only — never values, which carry PII.
  */
-async function logSkipShape(ctx: SuperOpsCtx, action: string, raw: Obj): Promise<void> {
+async function logSkipShape(
+  ctx: SuperOpsCtx,
+  action: string,
+  raw: Obj,
+  cause = "could not link record to a client",
+): Promise<void> {
   const describe = (v: unknown): string => {
     if (v === undefined) return "absent";
     if (v === null) return "null";
@@ -347,7 +352,7 @@ async function logSkipShape(ctx: SuperOpsCtx, action: string, raw: Obj): Promise
       endpoint: "api.superops.ai/msp",
       outcome: "failure",
       error:
-        `could not link record to a client. keys=[${Object.keys(raw).join(",")}] ` +
+        `${cause}. keys=[${Object.keys(raw).join(",")}] ` +
         `client=${describe(raw.client)} site=${describe(raw.site)} ` +
         `accountId=${describe(raw.accountId)} clientId=${describe(raw.clientId)}`,
     });
@@ -455,7 +460,10 @@ interface ClientFilter {
  * from the input type rather than guessed, and the discovery is logged so a
  * schema that does not support it is visible instead of silent.
  */
-async function resolveClientUserFilter(ctx: SuperOpsCtx): Promise<ClientFilter | null> {
+async function resolveClientUserFilter(
+  ctx: SuperOpsCtx,
+  sampleAccountId: string,
+): Promise<ClientFilter | null> {
   const fields = await introspectInputFields(ctx, "GetClientUserListInput");
   await writeDebugLog({
     type: "SUPEROPS",
@@ -469,27 +477,84 @@ async function resolveClientUserFilter(ctx: SuperOpsCtx): Promise<ClientFilter |
           .join(", ")
       : "input introspection unavailable for this type",
   });
-  if (!fields) return null;
 
-  // Most specific first: an explicit client/account field beats a generic filter.
-  const CANDIDATES = ["client", "clientId", "accountId", "clientAccountId", "account"];
-  for (const name of CANDIDATES) {
-    const f = fields.find((x) => x.name === name);
-    if (!f) continue;
+  // 1. Schema-driven: any input field whose name mentions a client or account is a
+  //    candidate, rather than a fixed list of guessed names — that is what missed
+  //    the real field last time. Most specific name first.
+  const candidates: ClientFilter[] = [];
+  for (const f of fields ?? []) {
+    if (!/client|account/i.test(f.name)) continue;
     if (f.base.kind === "INPUT_OBJECT" && f.base.name) {
       const inner = await introspectInputFields(ctx, f.base.name);
-      const idKey = inner?.find((i) => ["accountId", "id", "clientId"].includes(i.name))?.name;
-      if (!idKey) continue;
-      return {
-        key: name,
-        wrap: (accountId) => ({ [idKey]: accountId }),
-        described: `${name}: { ${idKey} }`,
-      };
-    }
-    if (f.base.kind === "SCALAR" || f.base.kind === "ENUM") {
-      return { key: name, wrap: (accountId) => accountId, described: `${name}: scalar` };
+      const idKey = inner?.find((i) => /^(accountId|id|clientId)$/i.test(i.name))?.name;
+      if (idKey) {
+        candidates.push({
+          key: f.name,
+          wrap: (accountId) => ({ [idKey]: accountId }),
+          described: `${f.name}: { ${idKey} }`,
+        });
+      }
+    } else if (f.base.kind === "SCALAR" || f.base.kind === "ENUM") {
+      // A plural name almost always wants a list.
+      const plural = /s$/i.test(f.name);
+      candidates.push({
+        key: f.name,
+        wrap: (accountId) => (plural ? [accountId] : accountId),
+        described: `${f.name}: ${plural ? "[scalar]" : "scalar"}`,
+      });
     }
   }
+
+  // 2. Blind fallbacks, only if introspection told us nothing. These are *probed*
+  //    below, never assumed, so an unaccepted shape costs one request rather than
+  //    silently syncing nothing.
+  if (candidates.length === 0) {
+    candidates.push(
+      { key: "client", wrap: (a) => ({ accountId: a }), described: "client: { accountId }" },
+      { key: "clientId", wrap: (a) => a, described: "clientId: scalar" },
+      { key: "accountId", wrap: (a) => a, described: "accountId: scalar" },
+      { key: "clientIds", wrap: (a) => [a], described: "clientIds: [scalar]" },
+    );
+  }
+
+  // 3. Accept the first candidate the API actually honours. A filter the server
+  //    ignores is worse than none, so require that it also returns a usable page.
+  for (const candidate of candidates) {
+    const probe = `query ($input: GetClientUserListInput!) { getClientUserList(input: $input) { userList { userId } listInfo { totalCount } } }`;
+    try {
+      const res = await superOpsGraphQL(ctx, "probe_client_user_filter", probe, {
+        input: {
+          listInfo: { page: 1, pageSize: 1 },
+          [candidate.key]: candidate.wrap(sampleAccountId),
+        },
+      });
+      if (res.ok) {
+        await writeDebugLog({
+          type: "SUPEROPS",
+          connectorId: ctx.connectorId,
+          action: "sync_contacts_strategy",
+          endpoint: "api.superops.ai/msp",
+          outcome: "success",
+          error: `per-client fetch using ${candidate.described}`,
+        });
+        return candidate;
+      }
+    } catch {
+      /* try the next candidate */
+    }
+  }
+
+  await writeDebugLog({
+    type: "SUPEROPS",
+    connectorId: ctx.connectorId,
+    action: "sync_contacts_strategy",
+    endpoint: "api.superops.ai/msp",
+    outcome: "failure",
+    error:
+      `no accepted way to scope getClientUserList to one client; tried ` +
+      `${candidates.map((c) => c.described).join(" | ") || "(none)"}. ` +
+      `Falling back to the flat fetch, which cannot attribute users to a client.`,
+  });
   return null;
 }
 
@@ -508,11 +573,13 @@ const REQUEST_GAP_MS = Math.ceil(60_000 / REQUESTS_PER_MINUTE);
  */
 export async function syncSuperOpsContacts(ctx: SuperOpsCtx, resolve: ClientResolver): Promise<Counts> {
   const counts = zero();
-  const filter = await resolveClientUserFilter(ctx);
   const clients = await prisma.superOpsClient.findMany({
     select: { id: true, superOpsId: true },
     orderBy: { superOpsId: "asc" },
   });
+  const filter = clients[0]
+    ? await resolveClientUserFilter(ctx, clients[0].superOpsId)
+    : null;
 
   if (!filter || clients.length === 0) {
     const flat = await syncContactsFlat(ctx, resolve);
