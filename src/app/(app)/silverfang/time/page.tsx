@@ -8,6 +8,11 @@ import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours, weekStartOf } from "@/lib/silverfang/time";
 import { TIME_BAND_LABELS, TIME_ENTRY_STATUS_LABELS } from "@/lib/silverfang/constants";
+import { isoDateKey, weekDays } from "@/lib/silverfang/timesheet";
+import { minutesOf, DEFAULT_GRID } from "@/lib/silverfang/calendar";
+import { timeEntryEditable } from "@/lib/silverfang/status";
+import { WeekCalendar, type CalendarBlock } from "./week-calendar";
+import { SubmitWeekButton } from "./submit-week";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +34,8 @@ export default async function TimeEntriesPage({
   const weekStart = sp.week ? new Date(`${sp.week}T00:00:00Z`) : weekStartOf(new Date());
   const weekEnd = new Date(weekStart.getTime() + 7 * 86_400_000);
 
+  const view = sp.view === "list" ? "list" : "calendar";
+
   const entries = await prisma.sfTimeEntry.findMany({
     where: {
       ...(scope === "mine" ? { userId: user.id } : {}),
@@ -39,7 +46,92 @@ export default async function TimeEntriesPage({
       chargeCode: { select: { code: true, name: true } },
       user: { select: { name: true, email: true } },
       ticket: { select: { id: true, number: true, summary: true } },
+      projectTask: { select: { id: true, name: true, project: { select: { name: true } } } },
+      agreement: { select: { id: true, name: true } },
     },
+  });
+
+  // Calendar options and this week's sheet state.
+  const [chargeCodes, openTickets, openTasks, activeAgreements, clients, sheet] =
+    await Promise.all([
+      prisma.sfChargeCode.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
+      prisma.sfTicket.findMany({
+        where: { status: { isClosed: false }, client: { archived: false } },
+        orderBy: { number: "desc" },
+        take: 300,
+        select: { id: true, number: true, summary: true, client: { select: { name: true } } },
+      }),
+      prisma.sfProjectTask.findMany({
+        where: { status: { not: "COMPLETED" }, project: { status: { in: ["PLANNED", "ACTIVE"] } } },
+        orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }],
+        take: 300,
+        select: { id: true, name: true, project: { select: { name: true } } },
+      }),
+      prisma.sfAgreement.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        take: 500,
+        select: { id: true, name: true, client: { select: { name: true } } },
+      }),
+      prisma.client.findMany({
+        where: { archived: false },
+        orderBy: { name: "asc" },
+        take: 2000,
+        select: { id: true, name: true },
+      }),
+      prisma.sfTimesheet.findUnique({
+        where: { userId_weekStart: { userId: user.id, weekStart } },
+        select: { id: true, status: true, rejectionNote: true },
+      }),
+    ]);
+
+  // The calendar only ever edits the signed-in tech's own blocks; an approver
+  // viewing everyone still sees the whole week, but read-only on others' time.
+  const weekLocked = sheet?.status === "SUBMITTED" || sheet?.status === "APPROVED";
+  const days = weekDays(weekStart).map((d) => ({
+    key: d.key,
+    label: d.label,
+    dateLabel: d.date.toLocaleDateString("en-CA", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }),
+    weekend: d.weekend,
+    isToday: d.key === isoDateKey(new Date()),
+  }));
+
+  const blocks: CalendarBlock[] = entries.map((e) => {
+    // An entry logged without start/end still needs a place on the grid: put it at
+    // the start of the working day so it is visible and editable rather than lost.
+    const offset = 0;
+    const start = e.startedAt
+      ? minutesOf(e.startedAt, offset)
+      : DEFAULT_GRID.startHour * 60;
+    const end = e.endedAt
+      ? minutesOf(e.endedAt, offset)
+      : start + Math.max(15, Math.round(Number(e.hours) * 60));
+    return {
+      id: e.id,
+      day: isoDateKey(e.workDate),
+      startMinutes: start,
+      endMinutes: end,
+      hours: Number(e.hours),
+      label: e.ticket
+        ? `#${e.ticket.number} ${e.ticket.summary}`
+        : e.projectTask
+          ? `${e.projectTask.project.name}: ${e.projectTask.name}`
+          : (e.agreement?.name ?? e.chargeCode.code),
+      sublabel: scope === "all" ? (e.user.name ?? e.user.email) : e.chargeCode.code,
+      billable: e.billable,
+      editable: e.userId === user.id && timeEntryEditable(e.status),
+      status: e.status,
+      chargeCodeId: e.chargeCodeId,
+      ticketId: e.ticketId,
+      projectTaskId: e.projectTaskId,
+      agreementId: e.agreementId,
+      notes: e.notes,
+      internalOnly: e.internalOnly,
+    };
   });
 
   const total = entries.reduce((a, e) => a + Number(e.hours), 0);
@@ -49,7 +141,13 @@ export default async function TimeEntriesPage({
   const prevWeek = new Date(weekStart.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
   const nextWeek = new Date(weekStart.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
   const qs = (week: string) =>
-    `/silverfang/time?week=${week}${scope === "all" ? "&scope=all" : ""}`;
+    `/silverfang/time?week=${week}${scope === "all" ? "&scope=all" : ""}${
+      view === "list" ? "&view=list" : ""
+    }`;
+  const viewQs = (v: string) =>
+    `/silverfang/time?week=${weekLabel}${scope === "all" ? "&scope=all" : ""}${
+      v === "list" ? "&view=list" : ""
+    }`;
 
   return (
     <div>
@@ -90,6 +188,79 @@ export default async function TimeEntriesPage({
           </div>
         </Card>
 
+        {sheet?.status === "REJECTED" && sheet.rejectionNote && (
+          <Card>
+            <p className="text-sm text-danger">
+              This week was sent back: {sheet.rejectionNote}
+            </p>
+          </Card>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href={viewQs("calendar")}
+            className={
+              view === "calendar"
+                ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                : "rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+            }
+          >
+            Calendar
+          </Link>
+          <Link
+            href={viewQs("list")}
+            className={
+              view === "list"
+                ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                : "rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+            }
+          >
+            List
+          </Link>
+          <span className="text-xs text-muted-foreground">
+            Click any empty slot to log a block — attach it to a ticket, a project task, an
+            agreement, or open a new ticket on the spot.
+          </span>
+          <SubmitWeekButton
+            weekStart={weekLabel}
+            status={sheet?.status ?? "OPEN"}
+            timesheetId={sheet?.id ?? null}
+            entryCount={entries.filter((e) => e.userId === user.id).length}
+          />
+        </div>
+
+        {view === "calendar" && (
+          <Card>
+            <WeekCalendar
+              days={days}
+              blocks={blocks}
+              weekLocked={weekLocked}
+              options={{
+                chargeCodes: chargeCodes.map((c) => ({
+                  id: c.id,
+                  code: c.code,
+                  name: c.name,
+                  billableDefault: c.billableDefault,
+                })),
+                tickets: openTickets.map((t) => ({
+                  id: t.id,
+                  label: `#${t.number} ${t.client.name} — ${t.summary}`,
+                })),
+                tasks: openTasks.map((t) => ({
+                  id: t.id,
+                  label: `${t.project.name}: ${t.name}`,
+                })),
+                agreements: activeAgreements.map((a) => ({
+                  id: a.id,
+                  label: `${a.client.name} — ${a.name}`,
+                })),
+                clients,
+              }}
+            />
+          </Card>
+        )}
+
+        {view === "list" && (
         <Card>
           {entries.length === 0 ? (
             <EmptyState
@@ -156,6 +327,7 @@ export default async function TimeEntriesPage({
             </div>
           )}
         </Card>
+        )}
       </div>
     </div>
   );

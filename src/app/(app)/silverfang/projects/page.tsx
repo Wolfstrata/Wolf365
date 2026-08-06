@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { FolderKanban } from "lucide-react";
+import { FolderKanban, Plus } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatHours } from "@/lib/silverfang/time";
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 
 /** Projects and their tasks ("ticklets"), optionally created from a template. */
 export default async function ProjectsPage() {
-  await requirePermission("projects:read");
+  const user = await requirePermission("projects:read");
+  const canManage = can(user.role, "projects:manage");
 
   const [projects, templates] = await Promise.all([
     prisma.sfProject.findMany({
@@ -32,7 +34,26 @@ export default async function ProjectsPage() {
 
   return (
     <div>
-      <PageHeader title="Projects" description="Project work, tasks and templates." />
+      <PageHeader title="Projects" description="Project work, tasks and templates."
+        actions={
+          canManage ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/silverfang/projects/templates"
+                className="rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                Templates
+              </Link>
+              <Link
+                href="/silverfang/projects/new"
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                <Plus className="h-4 w-4" /> New project
+              </Link>
+            </div>
+          ) : null
+        }
+      />
       <div className="space-y-4 p-4 sm:p-8">
         {projects.length === 0 ? (
           <Card>
@@ -61,7 +82,7 @@ export default async function ProjectsPage() {
                 <tbody>
                   {projects.map((p) => (
                     <tr key={p.id} className="border-t align-top">
-                      <td className="py-1.5 pr-4 font-medium">{p.name}</td>
+                      <td className="py-1.5 pr-4 font-medium"><Link href={`/silverfang/projects/${p.id}`} className="text-primary hover:underline">{p.name}</Link></td>
                       <td className="py-1.5 pr-4">
                         <Link href={`/clients/${p.client.id}`} className="text-primary hover:underline">
                           {p.client.name}

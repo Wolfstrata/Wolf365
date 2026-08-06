@@ -1,0 +1,85 @@
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { prisma } from "@/lib/db";
+import { requirePermission } from "@/lib/auth/session";
+import { PageHeader, Card } from "@/components/ui/primitives";
+import { ProjectForm } from "../project-form";
+
+export const dynamic = "force-dynamic";
+
+/** `?client=<id>` preselects the client. */
+export default async function NewProjectPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  await requirePermission("projects:manage");
+  const [sp, clients, agreements, users, templates] = await Promise.all([
+    searchParams,
+    prisma.client.findMany({
+      where: { archived: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+      take: 2000,
+    }),
+    prisma.sfAgreement.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, client: { select: { name: true } } },
+      take: 500,
+    }),
+    prisma.user.findMany({
+      where: { disabled: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, email: true },
+    }),
+    prisma.sfProjectTemplate.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, _count: { select: { tasks: true } } },
+    }),
+  ]);
+  const clientId = sp.client && clients.some((c) => c.id === sp.client) ? sp.client : "";
+
+  return (
+    <div>
+      <PageHeader title="New project" description="Scoped work with a task list." />
+      <div className="space-y-4 p-4 sm:p-8">
+        <Link
+          href="/silverfang/projects"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Projects
+        </Link>
+        <Card>
+          <ProjectForm
+            values={{
+              clientId,
+              agreementId: "",
+              name: "",
+              description: "",
+              status: "PLANNED",
+              managerId: "",
+              startDate: new Date().toISOString().slice(0, 10),
+              dueDate: "",
+              estimatedHours: "",
+              budgetAmount: "",
+            }}
+            clients={clients}
+            agreements={agreements.map((a) => ({
+              id: a.id,
+              label: `${a.client.name} — ${a.name}`,
+            }))}
+            users={users}
+            templates={templates.map((t) => ({
+              id: t.id,
+              name: t.name,
+              taskCount: t._count.tasks,
+            }))}
+            submitLabel="Create project"
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}

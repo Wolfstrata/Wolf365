@@ -5,6 +5,7 @@ import { safeEqual } from "@/lib/crypto";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { safeErrorMessage } from "@/lib/redact";
 import { pollAllMailboxes } from "@/lib/silverfang/email-ingest";
+import { sweepSlaBreaches } from "@/lib/silverfang/sla-sweep";
 
 // Mail polling is quick, but a backlog on first run can take a while.
 export const maxDuration = 300;
@@ -34,11 +35,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "rate limited" }, { status: 429 });
   }
 
-  const mailboxes = await prisma.sfMailbox.count({ where: { active: true, inbound: true } });
+  // SLA breaches are swept regardless of mail, since due dates pass whether or
+  // not a mailbox is configured.
+  const sla = await sweepSlaBreaches(500);
+
+  const mailboxes = await prisma.sfMailbox.count({
+    where: { active: true, inbound: true, provider: "GRAPH" },
+  });
   if (mailboxes === 0) {
     return NextResponse.json({
       ok: true,
-      mail: { skipped: "No active inbound mailbox is configured" },
+      sla,
+      mail: { skipped: "No pollable inbound mailbox is configured" },
     });
   }
 
@@ -46,6 +54,7 @@ export async function GET(request: Request) {
     const results = await pollAllMailboxes(25);
     return NextResponse.json({
       ok: results.every((r) => r.ok),
+      sla,
       mail: {
         mailboxes: results.length,
         created: results.reduce((a, r) => a + r.created, 0),
@@ -55,6 +64,6 @@ export async function GET(request: Request) {
       },
     });
   } catch (err) {
-    return NextResponse.json({ ok: false, error: safeErrorMessage(err) }, { status: 500 });
+    return NextResponse.json({ ok: false, sla, error: safeErrorMessage(err) }, { status: 500 });
   }
 }

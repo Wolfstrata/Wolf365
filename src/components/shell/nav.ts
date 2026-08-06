@@ -23,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "M365 Clients", href: "/clients", icon: "Building2", section: "Finance Workspace", permission: "clients:read" },
   { label: "M365 Archived Clients", href: "/archived-licensing", icon: "Archive", section: "Finance Workspace", permission: "clients:read" },
   // SilverFang — ticketing / PSA.
+  { label: "SilverFang Dashboard", href: "/silverfang/dashboard", icon: "LayoutDashboard", section: "SilverFang", permission: "tickets:read" },
   { label: "Tickets", href: "/silverfang/tickets", icon: "Ticket", section: "SilverFang", permission: "tickets:read" },
   { label: "My Tickets", href: "/silverfang/my-tickets", icon: "UserCheck", section: "SilverFang", permission: "tickets:read" },
   // Gated on tickets:read (not clients:read) — Financial Power Users hold

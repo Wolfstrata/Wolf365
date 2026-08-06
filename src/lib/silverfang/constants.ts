@@ -9,6 +9,7 @@ import type {
   SfAgreementType,
   SfChargeCodeKind,
   SfProjectStatus,
+  SfRateScope,
   SfTaskStatus,
   SfTicketPriority,
   SfTicketSource,
@@ -228,3 +229,13 @@ export const DEFAULT_AUTO_RESPONSES: {
     ].join("\n"),
   },
 ];
+
+/** Rate-rule scope labels, in the precedence order resolveRate applies. */
+export const RATE_SCOPE_LABELS: Record<SfRateScope, string> = {
+  AGREEMENT_SERVICE: "Agreement + charge code",
+  AGREEMENT: "Agreement",
+  CLIENT_SERVICE: "Client + charge code",
+  CLIENT: "Client",
+  SERVICE: "Charge code",
+  GLOBAL: "Global",
+};

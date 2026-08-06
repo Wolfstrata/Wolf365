@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { FileSignature } from "lucide-react";
+import { FileSignature, Plus } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
@@ -16,7 +17,8 @@ export const dynamic = "force-dynamic";
  * Block-time balances are derived from the draw ledger.
  */
 export default async function AgreementsPage() {
-  await requirePermission("agreements:read");
+  const user = await requirePermission("agreements:read");
+  const canManage = can(user.role, "agreements:manage");
 
   const agreements = await prisma.sfAgreement.findMany({
     where: { client: { archived: false } },
@@ -35,6 +37,16 @@ export default async function AgreementsPage() {
       <PageHeader
         title="Agreements"
         description="Block time, managed services, managed NOC and T&M agreements."
+        actions={
+          canManage ? (
+            <Link
+              href="/silverfang/agreements/new"
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" /> New agreement
+            </Link>
+          ) : null
+        }
       />
       <div className="space-y-4 p-4 sm:p-8">
         {agreements.length === 0 ? (
@@ -42,7 +54,7 @@ export default async function AgreementsPage() {
             <EmptyState
               icon={<FileSignature className="h-8 w-8" />}
               title="No agreements yet"
-              description="Agreements determine which rates apply to logged time and how block-time hours are drawn down. The data model is in place; the create/edit screens arrive in the next SilverFang phase."
+              description="Agreements determine which rates apply to logged time and how block-time hours are drawn down. Create one to start billing against it."
             />
           </Card>
         ) : (
@@ -73,7 +85,14 @@ export default async function AgreementsPage() {
                     const balance = availableHours(blocks, now);
                     return (
                       <tr key={a.id} className="border-t align-top">
-                        <td className="py-1.5 pr-4 font-medium">{a.name}</td>
+                        <td className="py-1.5 pr-4 font-medium">
+                          <Link
+                            href={`/silverfang/agreements/${a.id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {a.name}
+                          </Link>
+                        </td>
                         <td className="py-1.5 pr-4">
                           <Link href={`/clients/${a.client.id}`} className="text-primary hover:underline">
                             {a.client.name}
@@ -107,7 +126,7 @@ export default async function AgreementsPage() {
         )}
         <p className="text-xs text-muted-foreground">
           Block-time balances are computed from the drawdown ledger, so they always reconcile with
-          logged time. Creating and editing agreements arrives in the next SilverFang phase.
+          logged time rather than drifting from a stored counter.
         </p>
       </div>
     </div>

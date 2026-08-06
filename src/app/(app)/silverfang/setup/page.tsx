@@ -9,6 +9,15 @@ import {
 } from "@/lib/silverfang/constants";
 import { SeedButton } from "./seed-button";
 
+import {
+  CalendarEditor,
+  ChargeCodeEditor,
+  RateRuleEditor,
+  SlaTargetEditor,
+  type ChargeCodeRow,
+  type RateRuleRow,
+} from "./config-forms";
+
 export const dynamic = "force-dynamic";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -46,6 +55,8 @@ export default async function SilverFangSetupPage() {
     prisma.sfChargeCode.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.sfRateRule.findMany({
       orderBy: { scope: "asc" },
+      // clientId is a plain column on SfRateRule (no relation), so client names
+      // are resolved from the client list below rather than by include.
       include: { chargeCode: { select: { code: true } }, agreement: { select: { name: true } } },
     }),
     Promise.all([
@@ -58,6 +69,52 @@ export default async function SilverFangSetupPage() {
   ]);
 
   const [tickets, contacts, agreements, projects, timeEntries] = counts;
+
+  // Extra lookups for the configuration editors.
+  const [setupClients, setupAgreementRows, chargeCodeUsage] = await Promise.all([
+    prisma.client.findMany({
+      where: { archived: false },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+      take: 2000,
+    }),
+    prisma.sfAgreement.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, client: { select: { name: true } } },
+      take: 500,
+    }),
+    prisma.sfTimeEntry.groupBy({ by: ["chargeCodeId"], _count: { _all: true } }),
+  ]);
+  const usageByCode = new Map(chargeCodeUsage.map((u) => [u.chargeCodeId, u._count._all]));
+  const clientNames = new Map(setupClients.map((c) => [c.id, c.name]));
+  const setupAgreements = setupAgreementRows.map((a) => ({
+    id: a.id,
+    label: `${a.client.name} — ${a.name}`,
+  }));
+  const chargeCodeRows: ChargeCodeRow[] = chargeCodes.map((c) => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    kind: c.kind,
+    billableDefault: c.billableDefault,
+    defaultMultiplier: c.defaultMultiplier != null ? Number(c.defaultMultiplier) : null,
+    sortOrder: c.sortOrder,
+    active: c.active,
+    inUse: usageByCode.get(c.id) ?? 0,
+  }));
+  const rateRuleRows: RateRuleRow[] = rateRules.map((r) => ({
+    id: r.id,
+    scope: r.scope,
+    client: r.clientId ? (clientNames.get(r.clientId) ?? "Unknown client") : null,
+    agreement: r.agreement?.name ?? null,
+    chargeCode: r.chargeCode?.code ?? null,
+    timeBand: r.timeBand,
+    fixedRate: r.fixedRate != null ? Number(r.fixedRate) : null,
+    multiplier: r.multiplier != null ? Number(r.multiplier) : null,
+    costRate: r.costRate != null ? Number(r.costRate) : null,
+    active: r.active,
+  }));
+  const sla = slas[0] ?? null;
   const empty = boards.length === 0 && slas.length === 0 && chargeCodes.length === 0;
 
   return (
@@ -289,6 +346,68 @@ export default async function SilverFangSetupPage() {
                   </table>
                 </div>
               )}
+            </Card>
+          </>
+        )}
+
+        {/* Configuration editors */}
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">Charge codes</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            What kind of work a time entry is, and whether it bills by default.
+          </p>
+          <ChargeCodeEditor codes={chargeCodeRows} />
+        </Card>
+
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">Rate rules</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            How logged time gets a value. Without a matching rule, an agreement&rsquo;s standard
+            rate or the technician&rsquo;s own rate is used — and if neither exists, the entry has
+            no value and says so rather than inventing one.
+          </p>
+          <RateRuleEditor
+            rules={rateRuleRows}
+            clients={setupClients}
+            agreements={setupAgreements}
+            chargeCodes={chargeCodeRows.map((c) => ({ id: c.id, code: c.code }))}
+          />
+        </Card>
+
+        {sla && (
+          <>
+            <Card>
+              <h2 className="mb-1 text-sm font-semibold">SLA targets — {sla.name}</h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Response and resolution targets per priority, in business minutes.
+              </p>
+              <SlaTargetEditor
+                slaId={sla.id}
+                targets={sla.targets.map((t) => ({
+                  priority: t.priority,
+                  kind: t.kind,
+                  minutes: t.minutes,
+                }))}
+              />
+            </Card>
+
+            <Card>
+              <h2 className="mb-1 text-sm font-semibold">Business hours &amp; holidays</h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                The only time the SLA clock counts. Holidays stop it for the whole day.
+              </p>
+              <CalendarEditor
+                slaId={sla.id}
+                weekdays={sla.businessHours.map((w) => w.weekday)}
+                startMinute={sla.businessHours[0]?.startMinute ?? 480}
+                endMinute={sla.businessHours[0]?.endMinute ?? 1020}
+                timezone={sla.businessHours[0]?.timezone ?? "America/Winnipeg"}
+                holidays={sla.holidays.map((h) => ({
+                  id: h.id,
+                  name: h.name,
+                  date: h.date.toISOString().slice(0, 10),
+                }))}
+              />
             </Card>
           </>
         )}
