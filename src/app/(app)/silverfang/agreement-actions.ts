@@ -47,6 +47,16 @@ const agreementSchema = z.object({
   overageRate: optionalMoney,
   standardRate: optionalMoney,
   notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
+  // Block time is bought as a quantity of hours. Captured on the agreement form
+  // so creating one gives it a balance immediately, rather than leaving a
+  // block-time agreement with zero hours until someone remembers step two.
+  initialHours: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().gt(0).max(100_000).optional(),
+  ),
+  initialRate: optionalMoney,
+  initialAmount: optionalMoney,
+  initialExpiresAt: optionalDate,
 });
 
 const AGREEMENT_FIELDS = [
@@ -87,6 +97,10 @@ export async function saveAgreementAction(
       overageRate: formValue(formData, "overageRate"),
       standardRate: formValue(formData, "standardRate"),
       notes: formValue(formData, "notes"),
+      initialHours: formValue(formData, "initialHours"),
+      initialRate: formValue(formData, "initialRate"),
+      initialAmount: formValue(formData, "initialAmount"),
+      initialExpiresAt: formValue(formData, "initialExpiresAt"),
     });
 
     if (input.endDate && input.endDate < input.startDate) {
@@ -114,13 +128,47 @@ export async function saveAgreementAction(
       notes: input.notes ?? null,
     };
 
+    if (input.initialHours != null && input.type !== "BLOCK_TIME") {
+      return {
+        ok: false,
+        message:
+          "Purchased hours only apply to a Block time agreement — nothing would draw from them on this type.",
+      };
+    }
+    if (
+      input.initialExpiresAt &&
+      input.initialHours != null &&
+      input.initialExpiresAt <= input.startDate
+    ) {
+      return { ok: false, message: "The hours' expiry must be after the agreement start date." };
+    }
+
     const before = input.id
       ? await prisma.sfAgreement.findUnique({ where: { id: input.id } })
       : null;
     const saved = input.id
       ? await prisma.sfAgreement.update({ where: { id: input.id }, data })
       : await prisma.sfAgreement.create({
-          data: { ...data, createdById: user.id, createdByEmail: user.email },
+          data: {
+            ...data,
+            createdById: user.id,
+            createdByEmail: user.email,
+            // The opening block is created with the agreement so its balance is
+            // real from the moment it exists.
+            ...(input.initialHours != null
+              ? {
+                  blocks: {
+                    create: {
+                      purchasedHours: input.initialHours,
+                      rate: input.initialRate ?? null,
+                      amount: input.initialAmount ?? null,
+                      purchasedAt: input.startDate,
+                      expiresAt: input.initialExpiresAt ?? null,
+                    },
+                  },
+                }
+              : {}),
+          },
         });
 
     const changes = await recordChanges({
@@ -149,7 +197,9 @@ export async function saveAgreementAction(
         ? changes.length === 0
           ? "No changes to save."
           : `Saved ${describeChanges(changes)}.`
-        : "Agreement created.",
+        : input.initialHours != null
+          ? `Agreement created with ${input.initialHours}h of prepaid time.`
+          : "Agreement created.",
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

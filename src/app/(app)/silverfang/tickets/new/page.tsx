@@ -8,7 +8,11 @@ import { saveTicketAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
-/** `?client=<id>` preselects that client (and its profile defaults). */
+/**
+ * `?client=<id>` preselects that client (and its profile defaults);
+ * `?project=`/`?phase=` preselect a project phase, so "New project ticket" on a
+ * phase lands on a form already pointed at it.
+ */
 export default async function NewTicketPage({
   searchParams,
 }: {
@@ -16,7 +20,10 @@ export default async function NewTicketPage({
 }) {
   await requirePermission("tickets:write");
   const [options, sp] = await Promise.all([getTicketFormData(), searchParams]);
-  const values = await newTicketValues(options, sp.client);
+  const values = await newTicketValues(options, sp.client, {
+    projectId: sp.project,
+    projectPhaseId: sp.phase,
+  });
 
   return (
     <div>

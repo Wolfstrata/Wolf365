@@ -53,6 +53,8 @@ const ticketSchema = z.object({
   description: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
   assigneeId: optionalId,
   agreementId: optionalId,
+  projectId: optionalId,
+  projectPhaseId: optionalId,
   type: z.preprocess(emptyToUndefined, z.string().max(80).optional()),
   subtype: z.preprocess(emptyToUndefined, z.string().max(80).optional()),
   estimatedHours: z.preprocess(
@@ -79,10 +81,54 @@ function parseTicketForm(formData: FormData) {
     description: formValue(formData, "description"),
     assigneeId: formValue(formData, "assigneeId"),
     agreementId: formValue(formData, "agreementId"),
+    projectId: formValue(formData, "projectId"),
+    projectPhaseId: formValue(formData, "projectPhaseId"),
     type: formValue(formData, "type"),
     subtype: formValue(formData, "subtype"),
     estimatedHours: formValue(formData, "estimatedHours"),
   });
+}
+
+/**
+ * Resolve the project/phase a ticket belongs to. A phase without its project is
+ * refused rather than dropped, and a phase belonging to a different project (or
+ * a project belonging to a different client) is refused too — a project ticket
+ * filed under the wrong parent is worse than one that failed to save, because
+ * its hours would land on somebody else's total.
+ */
+async function resolveTicketProject(input: {
+  clientId: string;
+  projectId?: string;
+  projectPhaseId?: string;
+}): Promise<
+  | { ok: true; projectId: string | null; projectPhaseId: string | null }
+  | { ok: false; message: string }
+> {
+  if (!input.projectId) {
+    if (input.projectPhaseId) {
+      return { ok: false, message: "Choose the project this phase belongs to." };
+    }
+    return { ok: true, projectId: null, projectPhaseId: null };
+  }
+  const project = await prisma.sfProject.findUnique({
+    where: { id: input.projectId },
+    select: { id: true, clientId: true },
+  });
+  if (!project) return { ok: false, message: "That project no longer exists." };
+  if (project.clientId !== input.clientId) {
+    return { ok: false, message: "That project belongs to a different client." };
+  }
+  if (!input.projectPhaseId) {
+    return { ok: true, projectId: project.id, projectPhaseId: null };
+  }
+  const phase = await prisma.sfProjectPhase.findUnique({
+    where: { id: input.projectPhaseId },
+    select: { id: true, projectId: true },
+  });
+  if (!phase || phase.projectId !== project.id) {
+    return { ok: false, message: "That phase does not belong to the chosen project." };
+  }
+  return { ok: true, projectId: project.id, projectPhaseId: phase.id };
 }
 
 /** Create or update a ticket. Records a field-level history trail on updates. */
@@ -101,6 +147,9 @@ export async function saveTicketAction(
       include: { statuses: { orderBy: { sortOrder: "asc" } } },
     });
     if (!board) return { ok: false, message: "That board no longer exists." };
+
+    const link = await resolveTicketProject(input);
+    if (!link.ok) return { ok: false, message: link.message };
 
     const chosenStatus = input.statusId
       ? board.statuses.find((s) => s.id === input.statusId)
@@ -170,6 +219,8 @@ export async function saveTicketAction(
       track("boardId", existing.boardId, input.boardId);
       track("agreementId", existing.agreementId, input.agreementId ?? null);
       track("contactId", existing.contactId, input.contactId ?? null);
+      track("projectId", existing.projectId, link.projectId);
+      track("projectPhaseId", existing.projectPhaseId, link.projectPhaseId);
 
       await prisma.$transaction([
         prisma.sfTicket.update({
@@ -185,6 +236,8 @@ export async function saveTicketAction(
             description: input.description ?? null,
             assigneeId: input.assigneeId ?? null,
             agreementId: input.agreementId ?? null,
+            projectId: link.projectId,
+            projectPhaseId: link.projectPhaseId,
             type: input.type ?? null,
             subtype: input.subtype ?? null,
             estimatedHours: input.estimatedHours ?? null,
@@ -254,6 +307,8 @@ export async function saveTicketAction(
           description: input.description ?? null,
           assigneeId: input.assigneeId ?? null,
           agreementId: input.agreementId ?? null,
+          projectId: link.projectId,
+          projectPhaseId: link.projectPhaseId,
           type: input.type ?? null,
           subtype: input.subtype ?? null,
           estimatedHours: input.estimatedHours ?? null,
@@ -277,6 +332,7 @@ export async function saveTicketAction(
       metadata: { number: created.number, clientId: input.clientId, priority: input.priority },
     });
     revalidatePath("/silverfang/tickets");
+    if (link.projectId) revalidatePath(`/silverfang/projects/${link.projectId}`);
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }

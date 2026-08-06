@@ -9,10 +9,21 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { changeLogFor } from "@/lib/silverfang/change-log";
 import { PROJECT_STATUS_LABELS } from "@/lib/silverfang/constants";
+import {
+  depositStatus,
+  effectiveContractedHours,
+  hoursUsage,
+  hoursVisibleToClient,
+  nextBillingDate,
+  projectTotal,
+  remainderAfterDeposit,
+} from "@/lib/silverfang/project-billing";
 import { getTicketRows } from "@/lib/silverfang/queries";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { ProjectForm } from "../project-form";
+import { DepositCard } from "./deposit-card";
+import { PhaseBoard, type PhaseRow } from "./phase-board";
 import { TaskBoard, type TaskRow } from "./task-board";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +31,9 @@ export const dynamic = "force-dynamic";
 function dateInput(d: Date | null | undefined): string {
   return d ? d.toISOString().slice(0, 10) : "";
 }
+
+const num = (v: { toString(): string } | null | undefined): number | null =>
+  v != null ? Number(v) : null;
 
 export default async function ProjectDetailPage({
   params,
@@ -37,10 +51,27 @@ export default async function ProjectDetailPage({
       agreement: { select: { id: true, name: true } },
       manager: { select: { name: true, email: true } },
       template: { select: { id: true, name: true } },
+      phases: {
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        include: {
+          tickets: {
+            orderBy: { number: "asc" },
+            select: {
+              id: true,
+              number: true,
+              summary: true,
+              actualHours: true,
+              status: { select: { name: true } },
+            },
+          },
+          _count: { select: { tasks: true } },
+        },
+      },
       tasks: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         include: {
           assignee: { select: { name: true, email: true } },
+          projectPhase: { select: { id: true, name: true } },
           _count: { select: { timeEntries: true, tickets: true } },
         },
       },
@@ -49,7 +80,7 @@ export default async function ProjectDetailPage({
   });
   if (!project) notFound();
 
-  const [clients, agreements, users, tickets, trail] = await Promise.all([
+  const [clients, agreements, users, tickets, trail, phaseTime] = await Promise.all([
     prisma.client.findMany({
       where: { archived: false },
       orderBy: { name: "asc" },
@@ -69,17 +100,71 @@ export default async function ProjectDetailPage({
     }),
     getTicketRows({ view: "all" }, 200).then((rows) => rows.filter((r) => r.clientId === project.clientId)),
     changeLogFor("SfProject", id),
+    // Hours logged straight against a phase of *this* project.
+    prisma.sfTimeEntry.groupBy({
+      by: ["projectPhaseId"],
+      where: { projectPhase: { projectId: id } },
+      _sum: { hours: true },
+    }),
   ]);
 
   const canManage = can(user.role, "projects:manage");
+
+  // Time logged per phase: entries carrying the phase directly, plus those that
+  // reach it through a phase ticket or a phase task.
+  const phaseIds = project.phases.map((p) => p.id);
+  const [byPhaseTicket, byPhaseTask] = await Promise.all([
+    phaseIds.length > 0
+      ? prisma.sfTimeEntry.findMany({
+          where: { ticket: { projectPhaseId: { in: phaseIds } } },
+          select: { hours: true, ticket: { select: { projectPhaseId: true } } },
+        })
+      : Promise.resolve([]),
+    phaseIds.length > 0
+      ? prisma.sfTimeEntry.findMany({
+          where: { projectTask: { projectPhaseId: { in: phaseIds } } },
+          select: { hours: true, projectTask: { select: { projectPhaseId: true } } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const loggedByPhase = new Map<string, number>();
+  const addPhaseHours = (phaseId: string | null | undefined, hours: unknown) => {
+    if (!phaseId) return;
+    loggedByPhase.set(phaseId, (loggedByPhase.get(phaseId) ?? 0) + Number(hours ?? 0));
+  };
+  for (const row of phaseTime) addPhaseHours(row.projectPhaseId, row._sum.hours);
+  for (const row of byPhaseTicket) addPhaseHours(row.ticket?.projectPhaseId, row.hours);
+  for (const row of byPhaseTask) addPhaseHours(row.projectTask?.projectPhaseId, row.hours);
+
+  const phaseRows: PhaseRow[] = project.phases.map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    hours: num(p.hours),
+    notes: p.notes,
+    sortOrder: p.sortOrder,
+    loggedHours: loggedByPhase.get(p.id) ?? 0,
+    taskCount: p._count.tasks,
+    tickets: p.tickets.map((t) => ({
+      id: t.id,
+      number: t.number,
+      summary: t.summary,
+      status: t.status.name,
+      hours: Number(t.actualHours),
+    })),
+  }));
+
   const taskRows: TaskRow[] = project.tasks.map((t) => ({
     id: t.id,
+    projectPhaseId: t.projectPhaseId,
+    phaseName: t.projectPhase?.name ?? null,
     phase: t.phase,
     name: t.name,
     status: t.status,
     assigneeId: t.assigneeId,
     assignee: t.assignee?.name ?? t.assignee?.email ?? null,
-    estimatedHours: t.estimatedHours != null ? Number(t.estimatedHours) : null,
+    estimatedHours: num(t.estimatedHours),
     actualHours: Number(t.actualHours),
     dueDate: dateInput(t.dueDate),
     sortOrder: t.sortOrder,
@@ -87,19 +172,56 @@ export default async function ProjectDetailPage({
   }));
 
   const loggedAgg = await prisma.sfTimeEntry.aggregate({
-    where: { projectTask: { projectId: id } },
+    where: {
+      OR: [
+        { projectTask: { projectId: id } },
+        { ticket: { projectId: id } },
+        { projectPhase: { projectId: id } },
+      ],
+    },
     _sum: { hours: true, amount: true },
   });
-  const loggedHours = loggedAgg._sum.hours != null ? Number(loggedAgg._sum.hours) : 0;
-  const loggedValue = loggedAgg._sum.amount != null ? Number(loggedAgg._sum.amount) : 0;
-  const estimated = project.estimatedHours != null ? Number(project.estimatedHours) : null;
-  const budget = project.budgetAmount != null ? Number(project.budgetAmount) : null;
+  const loggedHours = Number(loggedAgg._sum.hours ?? 0);
+  const loggedValue = Number(loggedAgg._sum.amount ?? 0);
+
+  const contracted = num(project.contractedHours);
+  const estimated = num(project.estimatedHours);
+  const budget = num(project.budgetAmount);
+  const fixedFee = num(project.fixedFeeAmount);
+
+  // Phases are the detail the contracted total is built from, so they win.
+  const effectiveHours = effectiveContractedHours(
+    contracted,
+    phaseRows.map((p) => ({ hours: p.hours })),
+  );
+  const usage = hoursUsage(loggedHours, effectiveHours);
+  const showHours = hoursVisibleToClient(project.billingType);
+  const total = projectTotal({
+    billingType: project.billingType,
+    fixedFeeAmount: fixedFee,
+    budgetAmount: budget,
+  });
+  const deposit = depositStatus(total, {
+    percent: num(project.depositPercent),
+    amount: num(project.depositAmount),
+    invoicedAt: project.depositInvoicedAt,
+  });
+  const nextBilling =
+    project.billingType === "FIXED_FEE"
+      ? nextBillingDate({
+          startDate: project.startDate,
+          lastBilledAt: null,
+          intervalDays: project.billingIntervalDays,
+        })
+      : null;
 
   return (
     <div>
       <PageHeader
         title={project.name}
-        description={`${project.client.name} · ${PROJECT_STATUS_LABELS[project.status]}`}
+        description={`${project.client.name} · ${PROJECT_STATUS_LABELS[project.status]} · ${
+          project.billingType === "FIXED_FEE" ? "Fixed fee" : "Time and materials"
+        }`}
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">
@@ -127,32 +249,117 @@ export default async function ProjectDetailPage({
 
         <Card>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <StatItem label="Tasks" value={project.tasks.length} />
+            <StatItem label="Phases" value={phaseRows.length} />
             <StatItem
-              label="Complete"
-              value={project.tasks.filter((t) => t.status === "COMPLETED").length}
+              label="Tasks"
+              value={`${project.tasks.filter((t) => t.status === "COMPLETED").length} / ${project.tasks.length}`}
             />
             <StatItem label="Manager" value={project.manager?.name ?? project.manager?.email ?? "—"} />
             <StatItem
               label="Time logged"
               value={
-                <span className={estimated != null && loggedHours > estimated ? "text-warning" : ""}>
-                  {formatHours(loggedHours)}
-                  {estimated != null ? ` / ${formatHours(estimated)}` : ""}
+                <span className={usage.overage > 0 ? "text-danger" : ""}>
+                  {formatHours(usage.logged)}
+                  {usage.contracted != null
+                    ? ` / ${formatHours(usage.contracted)} sold`
+                    : estimated != null
+                      ? ` / ${formatHours(estimated)} est.`
+                      : ""}
                 </span>
               }
             />
             <StatItem
-              label="Value"
+              label={project.billingType === "FIXED_FEE" ? "Fixed fee" : "Value"}
               value={
-                <span className={budget != null && loggedValue > budget ? "text-warning" : ""}>
-                  {formatCurrency(loggedValue)}
-                  {budget != null ? ` / ${formatCurrency(budget)}` : ""}
-                </span>
+                project.billingType === "FIXED_FEE" ? (
+                  <span>
+                    {fixedFee != null ? formatCurrency(fixedFee) : "—"}
+                    <span className="text-xs text-muted-foreground">
+                      {" "}
+                      / {project.billingIntervalDays}d
+                    </span>
+                  </span>
+                ) : (
+                  <span className={budget != null && loggedValue > budget ? "text-warning" : ""}>
+                    {formatCurrency(loggedValue)}
+                    {budget != null ? ` / ${formatCurrency(budget)}` : ""}
+                  </span>
+                )
               }
             />
-            <StatItem label="From template" value={project.template?.name ?? "—"} />
+            <StatItem
+              label={project.billingType === "FIXED_FEE" ? "Next billing" : "From template"}
+              value={
+                project.billingType === "FIXED_FEE"
+                  ? (nextBilling?.toISOString().slice(0, 10) ?? "set a start date")
+                  : (project.template?.name ?? "—")
+              }
+            />
           </div>
+        </Card>
+
+        {project.billingType === "FIXED_FEE" && (
+          <Card>
+            <p className="text-xs">
+              <span className="font-medium">Fixed fee.</span> Hours below are tracked exactly as on
+              a time-and-materials project, but they are internal — the client is billed{" "}
+              {fixedFee != null ? formatCurrency(fixedFee) : "the fee"} every{" "}
+              {project.billingIntervalDays} days and never sees the hours.
+            </p>
+          </Card>
+        )}
+
+        {usage.contracted != null && usage.contracted > 0 && (
+          <Card>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full ${
+                  usage.overage > 0
+                    ? "bg-danger"
+                    : (usage.ratio ?? 0) > 0.9
+                      ? "bg-warning"
+                      : "bg-primary"
+                }`}
+                style={{ width: `${(usage.ratio ?? 0) * 100}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {formatHours(usage.logged)} of {formatHours(usage.contracted)} contracted hours used
+              {phaseRows.length > 0 ? " (summed from the phases)" : ""}.
+              {usage.overage > 0 &&
+                ` ${formatHours(usage.overage)} over — bill as overage or raise a change request.`}
+            </p>
+          </Card>
+        )}
+
+        {deposit.percent != null && (
+          <Card>
+            <h2 className="mb-2 text-sm font-semibold">Deposit</h2>
+            <DepositCard
+              projectId={project.id}
+              percent={deposit.percent}
+              expected={deposit.expected}
+              invoiced={deposit.invoiced}
+              invoicedAt={
+                deposit.invoicedAt ? deposit.invoicedAt.toISOString().slice(0, 10) : null
+              }
+              drifted={deposit.drifted}
+              remainder={remainderAfterDeposit(total, deposit.invoiced)}
+              canManage={canManage}
+            />
+          </Card>
+        )}
+
+        <Card>
+          <h2 className="mb-3 text-sm font-semibold">Phases</h2>
+          <PhaseBoard
+            projectId={project.id}
+            clientId={project.clientId}
+            phases={phaseRows}
+            contractedHours={contracted}
+            showHours={showHours || canManage}
+            canManage={canManage}
+          />
         </Card>
 
         <Card>
@@ -161,6 +368,7 @@ export default async function ProjectDetailPage({
             projectId={project.id}
             tasks={taskRows}
             users={users}
+            phases={phaseRows.map((p) => ({ id: p.id, name: p.name }))}
             canManage={canManage}
           />
         </Card>
@@ -179,8 +387,15 @@ export default async function ProjectDetailPage({
                 managerId: project.managerId ?? "",
                 startDate: dateInput(project.startDate),
                 dueDate: dateInput(project.dueDate),
+                contractedHours: contracted != null ? String(contracted) : "",
                 estimatedHours: estimated != null ? String(estimated) : "",
                 budgetAmount: budget != null ? String(budget) : "",
+                billingType: project.billingType,
+                fixedFeeAmount: fixedFee != null ? String(fixedFee) : "",
+                billingIntervalDays: String(project.billingIntervalDays),
+                depositPercent:
+                  deposit.percent != null ? String(deposit.percent) : "",
+                depositInvoiced: project.depositInvoicedAt != null,
               }}
               clients={clients}
               agreements={agreements.map((a) => ({

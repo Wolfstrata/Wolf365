@@ -17,9 +17,17 @@ export interface TicketFormValues {
   description: string;
   assigneeId: string;
   agreementId: string;
+  projectId: string;
+  projectPhaseId: string;
   type: string;
   subtype: string;
   estimatedHours: string;
+}
+
+export interface TicketFormProject {
+  id: string;
+  name: string;
+  phases: { id: string; name: string }[];
 }
 
 export interface TicketFormOptions {
@@ -28,6 +36,7 @@ export interface TicketFormOptions {
   users: { id: string; name: string | null; email: string }[];
   contactsByClient: Record<string, { id: string; name: string }[]>;
   agreementsByClient: Record<string, { id: string; name: string }[]>;
+  projectsByClient: Record<string, TicketFormProject[]>;
 }
 
 const inputCls =
@@ -79,9 +88,14 @@ export function TicketForm({
   // Client drives which contacts/agreements are selectable; board drives statuses.
   const [clientId, setClientId] = useState(values.clientId);
   const [boardId, setBoardId] = useState(values.boardId);
+  // A project ticket belongs to a phase of that project, so the phase list
+  // follows the chosen project rather than being a free-standing select.
+  const [projectId, setProjectId] = useState(values.projectId);
 
   const contacts = options.contactsByClient[clientId] ?? [];
   const agreements = options.agreementsByClient[clientId] ?? [];
+  const projects = options.projectsByClient[clientId] ?? [];
+  const phases = projects.find((p) => p.id === projectId)?.phases ?? [];
   const statuses = options.boards.find((b) => b.id === boardId)?.statuses ?? [];
 
   return (
@@ -93,7 +107,10 @@ export function TicketForm({
           <select
             name="clientId"
             value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
+            onChange={(e) => {
+              setClientId(e.target.value);
+              setProjectId("");
+            }}
             className={inputCls}
             required
           >
@@ -188,6 +205,55 @@ export function TicketForm({
             {agreements.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
+          label="Project"
+          help={
+            clientId && projects.length === 0
+              ? "This client has no open projects."
+              : "Makes this a project ticket, tracked against the project's hours."
+          }
+        >
+          <select
+            name="projectId"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Not a project ticket</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
+          label="Phase"
+          help={
+            projectId && phases.length === 0
+              ? "This project has no phases yet — add them on the project."
+              : undefined
+          }
+        >
+          {/* Keyed on the project so switching project cannot leave a phase from
+              the previous one selected. */}
+          <select
+            key={projectId}
+            name="projectPhaseId"
+            defaultValue={values.projectPhaseId}
+            className={inputCls}
+            disabled={phases.length === 0}
+          >
+            <option value="">No phase</option>
+            {phases.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
               </option>
             ))}
           </select>

@@ -11,7 +11,13 @@ import type {
  */
 
 export function blankTicketValues(
-  defaults: { boardId?: string; clientId?: string; agreementId?: string } = {},
+  defaults: {
+    boardId?: string;
+    clientId?: string;
+    agreementId?: string;
+    projectId?: string;
+    projectPhaseId?: string;
+  } = {},
 ): TicketFormValues {
   return {
     clientId: defaults.clientId ?? "",
@@ -24,6 +30,8 @@ export function blankTicketValues(
     description: "",
     assigneeId: "",
     agreementId: defaults.agreementId ?? "",
+    projectId: defaults.projectId ?? "",
+    projectPhaseId: defaults.projectPhaseId ?? "",
     type: "",
     subtype: "",
     estimatedHours: "",
@@ -39,6 +47,7 @@ export function blankTicketValues(
 export async function newTicketValues(
   options: TicketFormOptions,
   requestedClientId?: string,
+  requested: { projectId?: string; projectPhaseId?: string } = {},
 ): Promise<TicketFormValues> {
   const firstBoardId = options.boards[0]?.id;
   const clientId =
@@ -65,12 +74,24 @@ export async function newTicketValues(
       ? defaultAgreementId
       : undefined;
 
-  return blankTicketValues({ clientId, boardId, agreementId });
+  // A project (and phase) can be requested by the "New project ticket" button on
+  // a phase — honoured only when it really belongs to this client.
+  const clientProjects = options.projectsByClient[clientId] ?? [];
+  const project = clientProjects.find((p) => p.id === requested.projectId);
+  const phase = project?.phases.find((p) => p.id === requested.projectPhaseId);
+
+  return blankTicketValues({
+    clientId,
+    boardId,
+    agreementId,
+    projectId: project?.id,
+    projectPhaseId: phase?.id,
+  });
 }
 
 /** Options for the ticket form's selects, including per-client dependent lists. */
 export async function getTicketFormData(): Promise<TicketFormOptions> {
-  const [boards, clients, users, contacts, agreements] = await Promise.all([
+  const [boards, clients, users, contacts, agreements, projects] = await Promise.all([
     prisma.sfBoard.findMany({
       where: { active: true },
       orderBy: { sortOrder: "asc" },
@@ -96,6 +117,21 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
       orderBy: { name: "asc" },
       select: { id: true, clientId: true, name: true, type: true },
     }),
+    // Only live projects: a ticket cannot usefully be raised against one that is
+    // finished or cancelled.
+    prisma.sfProject.findMany({
+      where: { status: { in: ["PLANNED", "ACTIVE", "ON_HOLD"] } },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        clientId: true,
+        name: true,
+        phases: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, name: true },
+        },
+      },
+    }),
   ]);
 
   const contactsByClient: TicketFormOptions["contactsByClient"] = {};
@@ -110,6 +146,15 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
     (agreementsByClient[a.clientId] ??= []).push({ id: a.id, name: a.name });
   }
 
+  const projectsByClient: TicketFormOptions["projectsByClient"] = {};
+  for (const p of projects) {
+    (projectsByClient[p.clientId] ??= []).push({
+      id: p.id,
+      name: p.name,
+      phases: p.phases,
+    });
+  }
+
   return {
     boards: boards.map((b) => ({
       id: b.id,
@@ -120,6 +165,7 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
     users,
     contactsByClient,
     agreementsByClient,
+    projectsByClient,
   };
 }
 
@@ -139,6 +185,8 @@ export async function ticketToFormValues(id: string): Promise<TicketFormValues |
     description: t.description ?? "",
     assigneeId: t.assigneeId ?? "",
     agreementId: t.agreementId ?? "",
+    projectId: t.projectId ?? "",
+    projectPhaseId: t.projectPhaseId ?? "",
     type: t.type ?? "",
     subtype: t.subtype ?? "",
     estimatedHours: t.estimatedHours != null ? String(Number(t.estimatedHours)) : "",

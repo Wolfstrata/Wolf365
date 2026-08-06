@@ -62,8 +62,13 @@ export default async function NewProjectPage({
               managerId: "",
               startDate: new Date().toISOString().slice(0, 10),
               dueDate: "",
+              contractedHours: "",
               estimatedHours: "",
               budgetAmount: "",
+              billingType: "TIME_AND_MATERIALS",
+              fixedFeeAmount: "",
+              billingIntervalDays: "30",
+              depositPercent: "",
             }}
             clients={clients}
             agreements={agreements.map((a) => ({

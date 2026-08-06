@@ -214,12 +214,59 @@ export function AgreementForm({
         <textarea name="notes" defaultValue={values.notes} rows={3} className={`mt-1 ${inputCls}`} />
       </label>
 
-      {blockTime && (
+      {blockTime && !values.id && (
+        <div className="grid grid-cols-1 gap-4 rounded-md border border-primary/30 bg-primary/5 p-3 sm:grid-cols-4">
+          <label className="block text-sm font-medium">
+            Purchased hours
+            <input
+              type="number"
+              step="0.25"
+              min="0.25"
+              name="initialHours"
+              placeholder="e.g. 40"
+              className={`mt-1 ${inputCls}`}
+            />
+            <span className="mt-1 block text-xs font-normal text-muted-foreground">
+              The quantity bought, in hours.
+            </span>
+          </label>
+          <label className="block text-sm font-medium">
+            Hourly rate
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              name="initialRate"
+              className={`mt-1 ${inputCls}`}
+            />
+          </label>
+          <label className="block text-sm font-medium">
+            Amount invoiced
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              name="initialAmount"
+              className={`mt-1 ${inputCls}`}
+            />
+          </label>
+          <label className="block text-sm font-medium">
+            Hours expire
+            <input type="date" name="initialExpiresAt" className={`mt-1 ${inputCls}`} />
+          </label>
+          <p className="text-xs text-muted-foreground sm:col-span-4">
+            These hours become the agreement&rsquo;s opening block, so its balance is real as soon
+            as it exists. Add further blocks later as the client tops up. Time is drawn
+            soonest-to-expire first, and anything beyond the balance is reported as overage
+            rather than pushing a block negative.
+          </p>
+        </div>
+      )}
+
+      {blockTime && values.id && (
         <p className="rounded-md border border-primary/30 bg-primary/5 p-3 text-xs text-muted-foreground">
-          Block time draws down prepaid hours. Save the agreement, then add one or more hour
-          blocks — time logged against it consumes them oldest-and-soonest-to-expire first, and
-          anything beyond the balance is reported as overage rather than pushing a block
-          negative.
+          Prepaid hours are managed as blocks below — each top-up is its own block so the
+          drawdown ledger stays reconcilable.
         </p>
       )}
 

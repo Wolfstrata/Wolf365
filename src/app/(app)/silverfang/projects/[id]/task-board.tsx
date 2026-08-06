@@ -12,6 +12,10 @@ const inputCls =
 
 export interface TaskRow {
   id: string;
+  /** Structured phase, when the task belongs to one. */
+  projectPhaseId: string | null;
+  phaseName: string | null;
+  /** Legacy free-text phase, kept for tasks (and templates) that predate phases. */
   phase: string | null;
   name: string;
   status: string;
@@ -33,11 +37,13 @@ export function TaskBoard({
   projectId,
   tasks,
   users,
+  phases: projectPhases,
   canManage,
 }: {
   projectId: string;
   tasks: TaskRow[];
   users: { id: string; name: string | null; email: string }[];
+  phases: { id: string; name: string }[];
   canManage: boolean;
 }) {
   const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
@@ -47,7 +53,10 @@ export function TaskBoard({
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const phases = Array.from(new Set(tasks.map((t) => t.phase ?? "")));
+  // Group under the structured phase when the task has one, falling back to the
+  // legacy free-text phase so nothing disappears from view.
+  const groupOf = (t: TaskRow) => t.phaseName ?? t.phase ?? "";
+  const phases = Array.from(new Set(tasks.map(groupOf)));
   const totalEstimated = tasks.reduce((a, t) => a + (t.estimatedHours ?? 0), 0);
   const totalActual = tasks.reduce((a, t) => a + t.actualHours, 0);
   const done = tasks.filter((t) => t.status === "COMPLETED").length;
@@ -88,7 +97,7 @@ export function TaskBoard({
       )}
 
       {phases.map((phase) => {
-        const inPhase = tasks.filter((t) => (t.phase ?? "") === phase);
+        const inPhase = tasks.filter((t) => groupOf(t) === phase);
         if (inPhase.length === 0) return null;
         return (
           <div key={phase || "_none"}>
@@ -105,6 +114,7 @@ export function TaskBoard({
                       projectId={projectId}
                       task={t}
                       users={users}
+                      phases={projectPhases}
                       action={action}
                       pending={pending}
                       onCancel={() => setEditing(null)}
@@ -159,6 +169,7 @@ export function TaskBoard({
             projectId={projectId}
             task={null}
             users={users}
+            phases={projectPhases}
             action={action}
             pending={pending}
             onCancel={() => setAdding(false)}
@@ -177,6 +188,7 @@ function TaskFields({
   projectId,
   task,
   users,
+  phases,
   action,
   pending,
   onCancel,
@@ -184,6 +196,7 @@ function TaskFields({
   projectId: string;
   task: TaskRow | null;
   users: { id: string; name: string | null; email: string }[];
+  phases: { id: string; name: string }[];
   action: (formData: FormData) => void;
   pending: boolean;
   onCancel: () => void;
@@ -193,15 +206,33 @@ function TaskFields({
       <input type="hidden" name="projectId" value={projectId} />
       {task && <input type="hidden" name="id" value={task.id} />}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
-        <label className="block text-xs font-medium">
-          Phase
-          <input
-            name="phase"
-            defaultValue={task?.phase ?? ""}
-            className={`mt-1 ${inputCls}`}
-            placeholder="Optional"
-          />
-        </label>
+        {phases.length > 0 ? (
+          <label className="block text-xs font-medium">
+            Phase
+            <select
+              name="projectPhaseId"
+              defaultValue={task?.projectPhaseId ?? ""}
+              className={`mt-1 ${inputCls}`}
+            >
+              <option value="">No phase</option>
+              {phases.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="block text-xs font-medium">
+            Phase
+            <input
+              name="phase"
+              defaultValue={task?.phase ?? ""}
+              className={`mt-1 ${inputCls}`}
+              placeholder="Optional"
+            />
+          </label>
+        )}
         <label className="block text-xs font-medium sm:col-span-2">
           Task <span className="text-danger">*</span>
           <input

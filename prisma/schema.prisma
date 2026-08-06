@@ -1303,6 +1303,13 @@ enum SfTimesheetStatus {
   REJECTED
 }
 
+/// How a project is billed. Hours are tracked identically for both; what differs
+/// is what the client sees and how the invoice is built.
+enum SfProjectBillingType {
+  TIME_AND_MATERIALS // hours billed as worked, hours shown to the client
+  FIXED_FEE          // fixed amount per interval; hours are internal only
+}
+
 enum SfProjectStatus {
   PLANNED
   ACTIVE
@@ -1506,6 +1513,9 @@ model SfTicket {
   projectId String?
   project   SfProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
+  projectPhaseId String?
+  projectPhase   SfProjectPhase? @relation(fields: [projectPhaseId], references: [id], onDelete: SetNull)
+
   projectTaskId String?
   projectTask   SfProjectTask? @relation(fields: [projectTaskId], references: [id], onDelete: SetNull)
 
@@ -1551,6 +1561,7 @@ model SfTicket {
   @@index([priority, openedAt])
   @@index([agreementId])
   @@index([projectId])
+  @@index([projectPhaseId])
 }
 
 // A note on a ticket. `internalOnly` notes must NEVER be exposed to a client —
@@ -1780,6 +1791,9 @@ model SfTimeEntry {
   ticketId String?
   ticket   SfTicket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
 
+  projectPhaseId String?
+  projectPhase   SfProjectPhase? @relation(fields: [projectPhaseId], references: [id], onDelete: SetNull)
+
   projectTaskId String?
   projectTask   SfProjectTask? @relation(fields: [projectTaskId], references: [id], onDelete: SetNull)
 
@@ -2002,6 +2016,24 @@ model SfProject {
   dueDate   DateTime?
   closedAt  DateTime?
 
+  billingType SfProjectBillingType @default(TIME_AND_MATERIALS)
+
+  /// Fixed-fee amount billed each `billingIntervalDays`. Only meaningful for
+  /// FIXED_FEE; hours stay internal on that type and must never reach the client.
+  fixedFeeAmount      Decimal? @db.Decimal(18, 2)
+  billingIntervalDays Int      @default(30)
+
+  /// Up-front deposit as a percentage of the total, and what was actually
+  /// invoiced for it. Stored rather than always recomputed so a later change to
+  /// the total cannot rewrite an invoice that already went out.
+  depositPercent   Decimal?  @db.Decimal(5, 2)
+  depositAmount    Decimal?  @db.Decimal(18, 2)
+  depositInvoicedAt DateTime?
+
+  /// Hours sold for this project — the quantity the client agreed to, distinct
+  /// from the internal estimate. Overage is measured against this. For a phased
+  /// project this is the sum of its phase hours.
+  contractedHours Decimal? @db.Decimal(18, 4)
   estimatedHours Decimal? @db.Decimal(18, 4)
   budgetAmount   Decimal? @db.Decimal(18, 2)
 
@@ -2015,6 +2047,7 @@ model SfProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  phases  SfProjectPhase[]
   tasks   SfProjectTask[]
   tickets SfTicket[]
 
@@ -2023,11 +2056,41 @@ model SfProject {
   @@index([status, dueDate])
 }
 
+/// A stage of a project. Created as "Phase 1", "Phase 2"… and renamable. Hours
+/// are sold per phase and sum to the project's contracted total, so a phased
+/// project's quantity is built from its parts rather than typed twice.
+model SfProjectPhase {
+  id        String    @id @default(cuid())
+  projectId String
+  project   SfProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name      String
+  sortOrder Int    @default(0)
+  /// Hours sold for this phase.
+  hours     Decimal? @db.Decimal(18, 4)
+  status    SfTaskStatus @default(NOT_STARTED)
+  notes     String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks       SfProjectTask[]
+  tickets     SfTicket[]
+  timeEntries SfTimeEntry[]
+
+  @@index([projectId, sortOrder])
+}
+
 // A project task ("ticklet"): the unit of work techs log time against.
 model SfProjectTask {
   id        String    @id @default(cuid())
   projectId String
   project   SfProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Structured phase. `phase` (the free string) predates this and is kept so
+  /// existing rows and template tasks still render.
+  projectPhaseId String?
+  projectPhase   SfProjectPhase? @relation(fields: [projectPhaseId], references: [id], onDelete: SetNull)
 
   phase     String?
   name      String
@@ -2052,6 +2115,7 @@ model SfProjectTask {
   tickets     SfTicket[]
 
   @@index([projectId, sortOrder])
+  @@index([projectPhaseId])
   @@index([assigneeId])
   @@index([status])
 }
