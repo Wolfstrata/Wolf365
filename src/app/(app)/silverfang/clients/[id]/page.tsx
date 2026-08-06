@@ -19,6 +19,7 @@ import {
 } from "@/lib/silverfang/constants";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ClientProfileForm } from "./profile-form";
+import { HuduCard } from "./hudu-card";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { changeLogFor } from "@/lib/silverfang/change-log";
 
@@ -259,6 +260,9 @@ export default async function SilverFangClientPage({
             </div>
           )}
         </Card>
+
+        {/* What Hudu already knows — renders nothing when no Hudu company is linked. */}
+        <HuduCard clientId={client.id} />
 
         {/* Tickets */}
         <Card>

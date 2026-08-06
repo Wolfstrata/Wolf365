@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { safeErrorMessage } from "@/lib/redact";
 import { runSync } from "@/connectors/runtime";
 import { runSuperOpsTicketSync } from "@/lib/superops/tickets";
+import { materializeClients } from "@/lib/mapping/service";
 
 export interface SyncActionResult {
   ok: boolean;
@@ -58,6 +59,59 @@ export async function syncSuperOpsTicketsAction(
     return {
       ok: !r.error,
       message: `Synced ${r.tickets} tickets + ${r.worklogs} worklogs.${done ? " Backfill complete." : " Click again to continue."}${errNote}`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Sync Hudu companies, assets and documentation links, then link companies to
+ * Wolf365 clients by name so the data reaches the SilverFang client pages.
+ */
+export async function syncHuduAction(
+  _prev: SyncActionResult | null,
+  _formData: FormData,
+): Promise<SyncActionResult> {
+  const user = await requirePermission("connectors:sync");
+  try {
+    const r = await runSync("HUDU", "manual", user.id);
+    const s = (r.summary ?? {}) as Record<string, unknown>;
+
+    // Linking is what makes the sync visible in SilverFang, so it runs here
+    // rather than waiting for a separate mapping pass. Best-effort: a failure to
+    // link must not present the sync itself as failed.
+    let linked: number | null = null;
+    try {
+      const m = await materializeClients({ id: user.id, email: user.email });
+      linked = m.merged;
+    } catch {
+      linked = null;
+    }
+
+    revalidatePath("/synced/hudu");
+    revalidatePath("/silverfang/clients");
+
+    const skipped = (s.skippedByEntity ?? {}) as Record<string, number>;
+    const skipNote = Object.entries(skipped)
+      .filter(([, n]) => n > 0)
+      .map(([entity, n]) => `${n} ${entity}`)
+      .join(", ");
+    const errors = (s.errors ?? {}) as Record<string, string>;
+    const errNote = Object.keys(errors).length
+      ? ` Some entities failed: ${Object.entries(errors)
+          .map(([k, v]) => `${k} (${v})`)
+          .join("; ")}.`
+      : "";
+
+    return {
+      ok: Object.keys(errors).length === 0,
+      message:
+        `Synced ${s.companies ?? 0} companies, ${s.assets ?? 0} assets, ${s.articles ?? 0} documentation links.` +
+        (linked != null ? ` ${linked} company(ies) matched to a Wolf365 client.` : "") +
+        (skipNote ? ` Skipped: ${skipNote} (no matching Hudu company held locally).` : "") +
+        errNote +
+        ` Confidential Hudu fields are never copied — ${s.redactedFields ?? 0} withheld.`,
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

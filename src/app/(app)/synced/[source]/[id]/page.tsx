@@ -119,7 +119,10 @@ export default async function SyncedDetailPage({
       { label: "Last synced", value: formatDateTime(c.lastSyncedAt, user.timezone) },
     ];
   } else {
-    const c = await prisma.huduCompany.findUnique({ where: { id } });
+    const c = await prisma.huduCompany.findUnique({
+      where: { id },
+      include: { _count: { select: { assets: true, articles: true } } },
+    });
     if (!c) notFound();
     title = c.name;
     clientId = c.clientId;
@@ -127,6 +130,13 @@ export default async function SyncedDetailPage({
     fields = [
       { label: "Name", value: c.name },
       { label: "Hudu ID", value: c.huduId },
+      { label: "Type", value: c.companyType ?? "—" },
+      { label: "Phone", value: c.phone ?? "—" },
+      { label: "Website", value: c.website ?? "—" },
+      { label: "Address", value: c.address ?? "—" },
+      { label: "Assets", value: String(c._count.assets) },
+      { label: "Documentation", value: String(c._count.articles) },
+      { label: "In Hudu", value: c.huduUrl ?? "—" },
       { label: "Last synced", value: formatDateTime(c.lastSyncedAt, user.timezone) },
     ];
   }

@@ -40,7 +40,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },
   { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },
   // Hidden for now (functionality kept; routes still work) — future items.
-  // { label: "Hudu Clients", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
+  { label: "Hudu Companies", href: "/synced/hudu", icon: "Building", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Billing Runs", href: "/billing", icon: "Receipt", section: "Finance Workspace", permission: "billing:read" },
   // Hidden for now (functionality kept; route still works) — future item.
   // { label: "SuperOps Billing", href: "/superops-billing", icon: "ReceiptText", section: "Finance Workspace", permission: "billing:read" },

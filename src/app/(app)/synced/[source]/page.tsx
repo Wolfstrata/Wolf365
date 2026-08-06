@@ -12,6 +12,7 @@ import { isSourceSlug, SOURCE_LABELS, SOURCE_BLURB } from "@/lib/connector-sourc
 import { formatSortableDateTime } from "@/lib/utils";
 import { can } from "@/lib/rbac";
 import { SuperOpsSyncControls } from "./superops-sync";
+import { HuduSyncControls } from "./hudu-sync";
 
 async function loadSource(
   source: string,
@@ -105,16 +106,31 @@ async function loadSource(
       return { columns, rows };
     }
     case "hudu": {
-      const list = await prisma.huduCompany.findMany({ orderBy: { name: "asc" } });
+      const list = await prisma.huduCompany.findMany({
+        orderBy: { name: "asc" },
+        include: { _count: { select: { assets: true, articles: true } } },
+      });
       const columns: DataColumn[] = [
         { key: "name", label: "Name" },
-        { key: "huduId", label: "Hudu ID" },
+        { key: "type", label: "Type" },
+        { key: "client", label: "Wolf365 client" },
+        { key: "assets", label: "Assets" },
+        { key: "articles", label: "Docs" },
         { key: "synced", label: "Last synced" },
       ];
       const rows: DataRow[] = list.map((c) => ({
         id: c.id,
         href: `/synced/hudu/${c.id}`,
-        cells: { name: c.name, huduId: c.huduId, synced: synced(c.lastSyncedAt) },
+        cells: {
+          name: c.name,
+          type: c.companyType ?? "—",
+          // Says "not linked" rather than nothing: an unlinked company is why
+          // its assets and docs won't appear on a SilverFang client.
+          client: c.clientId ? "linked" : "not linked",
+          assets: c._count.assets,
+          articles: c._count.articles,
+          synced: synced(c.lastSyncedAt),
+        },
       }));
       return { columns, rows };
     }
@@ -138,14 +154,22 @@ export default async function SyncedSourcePage({
   if (!isSourceSlug(source)) notFound();
 
   const { columns, rows } = await loadSource(source, user.timezone);
-  const showSuperOpsSync = source === "superops" && can(user.role, "connectors:sync");
+  const canSync = can(user.role, "connectors:sync");
+  const showSuperOpsSync = source === "superops" && canSync;
+  const showHuduSync = source === "hudu" && canSync;
 
   return (
     <div>
       <PageHeader
         title={SOURCE_LABELS[source]}
         description={SOURCE_BLURB[source]}
-        actions={showSuperOpsSync ? <SuperOpsSyncControls /> : undefined}
+        actions={
+          showSuperOpsSync ? (
+            <SuperOpsSyncControls />
+          ) : showHuduSync ? (
+            <HuduSyncControls />
+          ) : undefined
+        }
       />
       <div className="p-4 sm:p-8">
         {rows.length === 0 ? (

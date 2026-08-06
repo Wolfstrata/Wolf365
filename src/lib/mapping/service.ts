@@ -157,6 +157,57 @@ export async function materializeClients(actor: {
     }
   }
 
+  // 4) Link each unlinked Hudu company to a Client with the same normalized
+  // name. Deliberately link-only: unlike TD/QBO/SuperOps, a Hudu company does
+  // NOT create a Client. Hudu holds vendors, prospects and internal records
+  // alongside clients, so creating one per company would fill the client list
+  // with things nobody bills. Unmatched companies stay unlinked and visible on
+  // /synced/hudu, where they can be matched by hand.
+  const huduUnlinked = await prisma.huduCompany.findMany({
+    where: { clientId: null, archived: false },
+    select: { id: true, name: true },
+  });
+  if (huduUnlinked.length > 0) {
+    const takenClientIds = new Set(
+      (
+        await prisma.huduCompany.findMany({
+          where: { clientId: { not: null } },
+          select: { clientId: true },
+        })
+      ).map((r) => r.clientId as string),
+    );
+    const allClients = await prisma.client.findMany({ select: { id: true, name: true } });
+    const clientByNorm = new Map<string, string>();
+    for (const cl of allClients) {
+      if (takenClientIds.has(cl.id)) continue;
+      const norm = normalizeName(cl.name);
+      if (norm && !clientByNorm.has(norm)) clientByNorm.set(norm, cl.id);
+    }
+
+    const huduLinks: { id: string; clientId: string }[] = [];
+    const usedForHudu = new Set<string>();
+    for (const hc of huduUnlinked) {
+      const norm = normalizeName(hc.name);
+      const match = norm ? clientByNorm.get(norm) : undefined;
+      // The 1:1 constraint means one Client can hold at most one Hudu company.
+      if (match && !usedForHudu.has(match)) {
+        huduLinks.push({ id: hc.id, clientId: match });
+        usedForHudu.add(match);
+        merged += 1;
+      }
+    }
+    if (huduLinks.length) {
+      await prisma.$transaction(
+        huduLinks.map((l) =>
+          prisma.huduCompany.update({
+            where: { id: l.id },
+            data: { clientId: l.clientId },
+          }),
+        ),
+      );
+    }
+  }
+
   const clients = await prisma.client.count();
   await audit({
     action: "MAPPING_CHANGED",

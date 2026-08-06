@@ -604,8 +604,85 @@ model HuduCompany {
   client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   huduId    String  @unique
   name      String
+
+  /// Contact/identity detail Hudu already holds, so SilverFang can show it
+  /// without a second system of record.
+  nickname    String?
+  companyType String?
+  address     String? @db.Text
+  phone       String?
+  website     String?
+  idNumber    String?
+  /// Deep link back into Hudu — the point of the sync is to get people there fast.
+  huduUrl     String?
+  archived    Boolean @default(false)
+
   raw       Json?
   lastSyncedAt DateTime @default(now())
+
+  assets   HuduAsset[]
+  articles HuduArticle[]
+
+  @@index([name])
+}
+
+/// A Hudu asset (configuration item): server, workstation, network device…
+///
+/// SECURITY: Hudu is a credential vault. Asset layouts can contain password,
+/// secret and confidential field types, and Hudu's password records hold live
+/// credentials. This sync stores **no** Hudu password records at all, drops any
+/// asset field that is confidential or whose label reads like a secret, and
+/// deliberately keeps **no `raw` blob** for assets — a raw copy would reinstate
+/// exactly the values that were stripped.
+model HuduAsset {
+  id        String      @id @default(cuid())
+  companyId String
+  company   HuduCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  huduId       String  @unique
+  name         String
+  /// The asset layout's name, e.g. "Server", "Workstation", "Network Device".
+  assetLayout  String?
+  serial       String?
+  model        String?
+  manufacturer String?
+  primaryMail  String?
+  huduUrl      String?
+  archived     Boolean @default(false)
+
+  /// Non-secret fields only, as `[{ label, value }]`. See the model comment.
+  fields Json?
+  /// Count of fields withheld as confidential, so the UI can say so rather than
+  /// implying Hudu held nothing more.
+  redactedFieldCount Int @default(0)
+
+  huduUpdatedAt DateTime?
+  lastSyncedAt  DateTime  @default(now())
+
+  @@index([companyId, name])
+  @@index([assetLayout])
+}
+
+/// A Hudu knowledge-base article. Titles and links only — the body is never
+/// stored, because article content routinely contains embedded credentials and
+/// because a documentation system should stay the source of truth for its text.
+model HuduArticle {
+  id        String       @id @default(cuid())
+  companyId String?
+  company   HuduCompany? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  huduId  String  @unique
+  name    String
+  folder  String?
+  huduUrl String?
+  /// True for a global article that belongs to no single company.
+  global  Boolean @default(false)
+  archived Boolean @default(false)
+
+  huduUpdatedAt DateTime?
+  lastSyncedAt  DateTime  @default(now())
+
+  @@index([companyId, name])
 }
 
 model SuperOpsClient {
