@@ -10,6 +10,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { safeErrorMessage } from "@/lib/redact";
 import { recordChanges } from "@/lib/silverfang/change-log";
 import { describeChanges } from "@/lib/silverfang/changes";
+import { addMonths, increaseBy, renewalPreview } from "@/lib/silverfang/renewal";
 import type { SfActionResult } from "./actions";
 
 /**
@@ -41,6 +42,13 @@ const agreementSchema = z.object({
   startDate: z.coerce.date({ message: "A start date is required" }),
   endDate: optionalDate,
   autoRenew: z.coerce.boolean(),
+  // The uplift applied when the agreement renews. Defaults to the house 15% when
+  // left blank rather than to zero — a blank box should not quietly mean "no
+  // increase" when the whole point of the field is that renewals go up.
+  renewalIncreasePercent: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().min(0).max(100).optional(),
+  ),
   billingFrequency: z.preprocess(emptyToUndefined, z.enum(["MONTHLY", "YEARLY"]).optional()),
   monthlyAmount: optionalMoney,
   includedHours: optionalMoney,
@@ -67,6 +75,7 @@ const AGREEMENT_FIELDS = [
   "startDate",
   "endDate",
   "autoRenew",
+  "renewalIncreasePercent",
   "billingFrequency",
   "monthlyAmount",
   "includedHours",
@@ -91,6 +100,7 @@ export async function saveAgreementAction(
       startDate: formValue(formData, "startDate"),
       endDate: formValue(formData, "endDate"),
       autoRenew: formData.get("autoRenew") === "on",
+      renewalIncreasePercent: formValue(formData, "renewalIncreasePercent"),
       billingFrequency: formValue(formData, "billingFrequency"),
       monthlyAmount: formValue(formData, "monthlyAmount"),
       includedHours: formValue(formData, "includedHours"),
@@ -120,6 +130,7 @@ export async function saveAgreementAction(
       startDate: input.startDate,
       endDate: input.endDate ?? null,
       autoRenew: input.autoRenew,
+      renewalIncreasePercent: input.renewalIncreasePercent ?? 15,
       billingFrequency: input.billingFrequency ?? null,
       monthlyAmount: input.monthlyAmount ?? null,
       includedHours: input.includedHours ?? null,
@@ -349,4 +360,134 @@ export async function deleteAgreementAction(
     return { ok: false, message: safeErrorMessage(err) };
   }
   redirect("/silverfang/agreements");
+}
+
+/**
+ * Apply the auto-renew uplift: raise the agreement's prices by its configured
+ * percentage and roll the end date forward by one term.
+ *
+ * Deliberately manual. An agreement's renewal changes what a client pays, and a
+ * price rise nobody approved reaching an invoice is how you lose the client — so
+ * SilverFang computes and shows it, and a person decides. The same rule that
+ * keeps invoices from auto-pushing applies here.
+ *
+ * Refused when the uplift has already been applied for this term, which is what
+ * stops a second click from compounding 15% into 32%.
+ */
+export async function applyAgreementRenewalAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("agreements:manage");
+  try {
+    const id = z.string().min(1).parse(formValue(formData, "id"));
+    const agreement = await prisma.sfAgreement.findUnique({
+      where: { id },
+      include: { client: { select: { name: true } } },
+    });
+    if (!agreement) return { ok: false, message: "That agreement no longer exists." };
+    if (!agreement.autoRenew) {
+      return {
+        ok: false,
+        message:
+          "This agreement is not set to auto-renew, so there is no renewal uplift to apply. Tick auto-renew first if it should renew.",
+      };
+    }
+    if (!agreement.endDate) {
+      return {
+        ok: false,
+        message:
+          "This agreement has no end date, so there is no term to renew. Set an end date first.",
+      };
+    }
+
+    const percent = Number(agreement.renewalIncreasePercent);
+    const preview = renewalPreview({
+      autoRenew: agreement.autoRenew,
+      renewalIncreasePercent: percent,
+      startDate: agreement.startDate,
+      endDate: agreement.endDate,
+      lastRenewedAt: agreement.lastRenewedAt,
+      billingFrequency: agreement.billingFrequency,
+      monthlyAmount: agreement.monthlyAmount != null ? Number(agreement.monthlyAmount) : null,
+      overageRate: agreement.overageRate != null ? Number(agreement.overageRate) : null,
+      standardRate: agreement.standardRate != null ? Number(agreement.standardRate) : null,
+    });
+    if (preview.alreadyRenewed) {
+      return {
+        ok: false,
+        message:
+          "This term has already been renewed — applying the uplift again would compound it. The next renewal is due at the new end date.",
+      };
+    }
+
+    const newEndDate = addMonths(agreement.endDate, preview.termMonths);
+    const before = agreement;
+    const saved = await prisma.sfAgreement.update({
+      where: { id },
+      data: {
+        // The old end date becomes the new start of the term, so the history of
+        // what the term was stays derivable from the dates.
+        startDate: agreement.endDate,
+        endDate: newEndDate,
+        monthlyAmount: increaseBy(
+          agreement.monthlyAmount != null ? Number(agreement.monthlyAmount) : null,
+          percent,
+        ),
+        overageRate: increaseBy(
+          agreement.overageRate != null ? Number(agreement.overageRate) : null,
+          percent,
+        ),
+        standardRate: increaseBy(
+          agreement.standardRate != null ? Number(agreement.standardRate) : null,
+          percent,
+        ),
+        lastRenewedAt: new Date(),
+      },
+    });
+
+    await recordChanges({
+      entity: "SfAgreement",
+      entityId: id,
+      entityLabel: `${agreement.client.name} — ${agreement.name}`,
+      actor: { id: user.id, email: user.email },
+      before: before as unknown as Record<string, unknown>,
+      after: saved as unknown as Record<string, unknown>,
+      fields: [
+        "startDate",
+        "endDate",
+        "monthlyAmount",
+        "overageRate",
+        "standardRate",
+        "lastRenewedAt",
+      ],
+    });
+    await audit({
+      action: "AGREEMENT_UPDATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfAgreement:${id}`,
+      metadata: {
+        renewed: true,
+        percent,
+        termMonths: preview.termMonths,
+        newEndDate: newEndDate.toISOString(),
+      },
+    });
+    revalidatePath("/silverfang/agreements");
+    revalidatePath(`/silverfang/agreements/${id}`);
+    revalidatePath(`/silverfang/clients/${agreement.clientId}`);
+
+    const moved = preview.changes
+      .map((c) => `${c.label} ${c.from} → ${c.to}`)
+      .join(", ");
+    return {
+      ok: true,
+      message:
+        `Renewed at +${percent}% through ${newEndDate.toISOString().slice(0, 10)}.` +
+        (moved ? ` ${moved}.` : " No prices were set, so only the term moved."),
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }

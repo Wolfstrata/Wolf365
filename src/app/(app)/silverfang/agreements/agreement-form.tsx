@@ -18,6 +18,7 @@ export interface AgreementFormValues {
   startDate: string;
   endDate: string;
   autoRenew: boolean;
+  renewalIncreasePercent: string;
   billingFrequency: string;
   monthlyAmount: string;
   includedHours: string;
@@ -45,6 +46,9 @@ export function AgreementForm({
     null,
   );
   const [type, setType] = useState(values.type);
+  // Auto-renew drives whether the uplift field is relevant, so it is state: a
+  // percentage box next to an unticked box invites nonsense data.
+  const [autoRenew, setAutoRenew] = useState(values.autoRenew);
 
   const recurring = type === "MANAGED_SERVICES" || type === "MANAGED_NOC";
   const blockTime = type === "BLOCK_TIME";
@@ -198,15 +202,37 @@ export function AgreementForm({
             value.
           </span>
         </label>
-        <label className="mt-6 inline-flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            name="autoRenew"
-            defaultChecked={values.autoRenew}
-            className="h-4 w-4"
-          />
-          Auto-renew at the end date
-        </label>
+        <div>
+          <label className="mt-6 inline-flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="autoRenew"
+              checked={autoRenew}
+              onChange={(e) => setAutoRenew(e.target.checked)}
+              className="h-4 w-4"
+            />
+            Auto-renew at the end date
+          </label>
+          {autoRenew && (
+            <label className="mt-3 block text-sm font-medium">
+              Renewal increase (%)
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                name="renewalIncreasePercent"
+                defaultValue={values.renewalIncreasePercent || "15"}
+                className={`mt-1 ${inputCls}`}
+              />
+              <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                Applied to the recurring amount and the rates when this agreement renews.
+                Defaults to 15%. Never applied on its own — the renewal is shown for
+                confirmation on the agreement, because it changes what the client pays.
+              </span>
+            </label>
+          )}
+        </div>
       </div>
 
       <label className="block text-sm font-medium">

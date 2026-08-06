@@ -9,6 +9,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { availableHours } from "@/lib/silverfang/block-time";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_TYPE_LABELS } from "@/lib/silverfang/constants";
+import { renewalPreview } from "@/lib/silverfang/renewal";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,25 @@ export default async function AgreementsPage() {
   });
 
   const now = new Date();
+  // Renewals that have come and gone unapplied. Counted here so the list leads
+  // with the money nobody has actioned, rather than burying it in a column.
+  const dueCount = agreements.filter(
+    (a) =>
+      renewalPreview(
+        {
+          autoRenew: a.autoRenew,
+          renewalIncreasePercent: Number(a.renewalIncreasePercent),
+          startDate: a.startDate,
+          endDate: a.endDate,
+          lastRenewedAt: a.lastRenewedAt,
+          billingFrequency: a.billingFrequency,
+          monthlyAmount: a.monthlyAmount != null ? Number(a.monthlyAmount) : null,
+          overageRate: a.overageRate != null ? Number(a.overageRate) : null,
+          standardRate: a.standardRate != null ? Number(a.standardRate) : null,
+        },
+        now,
+      ).due && a.status === "ACTIVE",
+  ).length;
 
   return (
     <div>
@@ -49,6 +69,18 @@ export default async function AgreementsPage() {
         }
       />
       <div className="space-y-4 p-4 sm:p-8">
+        {dueCount > 0 && (
+          <Card>
+            <p className="text-sm">
+              <span className="font-medium text-warning">
+                {dueCount} agreement{dueCount === 1 ? "" : "s"}
+              </span>{" "}
+              {dueCount === 1 ? "has" : "have"} passed the end of their term with the auto-renew
+              uplift not yet applied. Open one to see exactly which prices would move, and confirm
+              it — renewals are never applied on their own.
+            </p>
+          </Card>
+        )}
         {agreements.length === 0 ? (
           <Card>
             <EmptyState
@@ -68,6 +100,7 @@ export default async function AgreementsPage() {
                     <th className="py-1 pr-4 font-medium">Type</th>
                     <th className="py-1 pr-4 font-medium">Status</th>
                     <th className="py-1 pr-4 font-medium">Term</th>
+                    <th className="py-1 pr-4 font-medium">Renewal</th>
                     <th className="py-1 pr-4 text-right font-medium">Monthly</th>
                     <th className="py-1 pr-4 text-right font-medium">Block balance</th>
                     <th className="py-1 pr-4 text-right font-medium">Tickets</th>
@@ -83,6 +116,20 @@ export default async function AgreementsPage() {
                       hoursUsed: b.draws.reduce((acc, d) => acc + Number(d.hours), 0),
                     }));
                     const balance = availableHours(blocks, now);
+                    const renewal = renewalPreview(
+                      {
+                        autoRenew: a.autoRenew,
+                        renewalIncreasePercent: Number(a.renewalIncreasePercent),
+                        startDate: a.startDate,
+                        endDate: a.endDate,
+                        lastRenewedAt: a.lastRenewedAt,
+                        billingFrequency: a.billingFrequency,
+                        monthlyAmount: a.monthlyAmount != null ? Number(a.monthlyAmount) : null,
+                        overageRate: a.overageRate != null ? Number(a.overageRate) : null,
+                        standardRate: a.standardRate != null ? Number(a.standardRate) : null,
+                      },
+                      now,
+                    );
                     return (
                       <tr key={a.id} className="border-t align-top">
                         <td className="py-1.5 pr-4 font-medium">
@@ -107,6 +154,22 @@ export default async function AgreementsPage() {
                               {" – "}
                               <LocalTime value={a.endDate.toISOString()} dateOnly />
                             </>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-4 whitespace-nowrap">
+                          {!a.autoRenew ? (
+                            <span className="text-muted-foreground">no</span>
+                          ) : renewal.due ? (
+                            <span className="font-medium text-warning">
+                              +{renewal.percent}% due
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              +{renewal.percent}%
+                              {renewal.daysUntil != null && renewal.daysUntil <= 60
+                                ? ` in ${renewal.daysUntil}d`
+                                : ""}
+                            </span>
                           )}
                         </td>
                         <td className="py-1.5 pr-4 text-right tabular-nums">

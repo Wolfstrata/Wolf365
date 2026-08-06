@@ -1934,6 +1934,15 @@ model SfAgreement {
   endDate   DateTime?
   autoRenew Boolean  @default(false)
 
+  /// Uplift applied when the agreement auto-renews, as a percentage. Defaults to
+  /// 15% — the house standard — and is editable per agreement. Only meaningful
+  /// when `autoRenew` is on, and never applied on its own: renewing changes what
+  /// a client pays, so a human confirms it.
+  renewalIncreasePercent Decimal   @default(15) @db.Decimal(5, 2)
+  /// When the uplift was last applied, so a renewal cannot be run twice for the
+  /// same term.
+  lastRenewedAt          DateTime?
+
   // Recurring billing (managed services / NOC).
   billingFrequency String? // "MONTHLY" | "YEARLY" — string per house precedent
   monthlyAmount    Decimal? @db.Decimal(18, 2)

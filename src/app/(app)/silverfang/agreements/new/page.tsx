@@ -45,6 +45,7 @@ export default async function NewAgreementPage({
               startDate: new Date().toISOString().slice(0, 10),
               endDate: "",
               autoRenew: false,
+              renewalIncreasePercent: "15",
               billingFrequency: "MONTHLY",
               monthlyAmount: "",
               includedHours: "",

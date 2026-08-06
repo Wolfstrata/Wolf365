@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { availableHours, blockBalance } from "@/lib/silverfang/block-time";
 import { changeLogFor } from "@/lib/silverfang/change-log";
+import { renewalPreview } from "@/lib/silverfang/renewal";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_TYPE_LABELS } from "@/lib/silverfang/constants";
 import { getTicketRows } from "@/lib/silverfang/queries";
 import { TicketsTable } from "../../tickets/tickets-table";
@@ -17,6 +18,7 @@ import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { AgreementForm } from "../agreement-form";
 import { BlockForm } from "./block-form";
 import { DeleteAgreementButton } from "./delete-button";
+import { RenewalCard } from "./renewal-card";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +83,22 @@ export default async function AgreementDetailPage({
   const loggedHours = hoursAgg._sum.hours != null ? Number(hoursAgg._sum.hours) : 0;
   const loggedValue = hoursAgg._sum.amount != null ? Number(hoursAgg._sum.amount) : 0;
   const isBlockTime = agreement.type === "BLOCK_TIME";
+
+  const renewal = renewalPreview(
+    {
+      autoRenew: agreement.autoRenew,
+      renewalIncreasePercent: Number(agreement.renewalIncreasePercent),
+      startDate: agreement.startDate,
+      endDate: agreement.endDate,
+      lastRenewedAt: agreement.lastRenewedAt,
+      billingFrequency: agreement.billingFrequency,
+      monthlyAmount: agreement.monthlyAmount != null ? Number(agreement.monthlyAmount) : null,
+      overageRate: agreement.overageRate != null ? Number(agreement.overageRate) : null,
+      standardRate: agreement.standardRate != null ? Number(agreement.standardRate) : null,
+    },
+    now,
+  );
+  const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
   return (
     <div>
@@ -159,6 +177,25 @@ export default async function AgreementDetailPage({
           )}
         </Card>
 
+        {agreement.autoRenew && (
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold">Renewal</h2>
+            <RenewalCard
+              agreementId={agreement.id}
+              percent={renewal.percent}
+              renewsOn={iso(renewal.renewsOn)}
+              newEndDate={iso(renewal.newEndDate)}
+              termMonths={renewal.termMonths}
+              daysUntil={renewal.daysUntil}
+              due={renewal.due}
+              alreadyRenewed={renewal.alreadyRenewed}
+              changes={renewal.changes}
+              annualDelta={renewal.annualDelta}
+              canManage={canManage}
+            />
+          </Card>
+        )}
+
         <Card>
           <h2 className="mb-4 text-sm font-semibold">Agreement</h2>
           {canManage ? (
@@ -172,6 +209,7 @@ export default async function AgreementDetailPage({
                 startDate: dateInput(agreement.startDate),
                 endDate: dateInput(agreement.endDate),
                 autoRenew: agreement.autoRenew,
+                renewalIncreasePercent: numInput(agreement.renewalIncreasePercent),
                 billingFrequency: agreement.billingFrequency ?? "MONTHLY",
                 monthlyAmount: numInput(agreement.monthlyAmount),
                 includedHours: numInput(agreement.includedHours),
