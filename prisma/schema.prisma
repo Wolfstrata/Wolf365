@@ -2157,6 +2157,24 @@ model SfCalendarLink {
   @@index([ticketId])
 }
 
+// Master switch for ALL outbound SilverFang email. Single row, keyed on a fixed
+// id so it can be upserted without a lookup.
+//
+// HARD RULE: when this is off — including when the row does not exist — nothing
+// outbound is sent at all, to clients or technicians. It sits above the
+// per-client "Allow email to client" gate: both must be on for a client to be
+// mailed. Off is the default, and stays the default.
+model SfEmailPolicy {
+  id              String  @id @default("singleton")
+  outboundEnabled Boolean @default(false)
+
+  /// Who last changed it, denormalized so the record survives user deletion.
+  updatedByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Monotonic ticket-number source, so numbers don't depend on row counts.
 model SfCounter {
   name  String @id // e.g. "ticket"

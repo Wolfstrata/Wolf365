@@ -7,8 +7,11 @@ import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TEMPLATE_VARIABLES, TICKET_HEADER } from "@/lib/silverfang/email";
+import { outboundEnabled } from "@/lib/silverfang/email-policy";
+import { POLICY_ID } from "@/lib/silverfang/mail";
 import { toggleAutoResponseAction } from "../actions";
 import { MailboxForm, type MailboxValues } from "./mailbox-form";
+import { EmailMasterSwitch } from "./master-switch";
 import { PollMailboxesButton } from "./poll-button";
 
 export const dynamic = "force-dynamic";
@@ -72,12 +75,17 @@ export default async function SilverFangEmailPage() {
 
   // The gate is the most consequential setting on this page, so it is stated
   // here rather than only on individual clients.
-  const [emailableClients, totalClients] = await Promise.all([
+  const [emailableClients, totalClients, policy] = await Promise.all([
     prisma.client.count({
       where: { archived: false, sfClientProfile: { allowClientEmail: true } },
     }),
     prisma.client.count({ where: { archived: false } }),
+    prisma.sfEmailPolicy.findUnique({
+      where: { id: POLICY_ID },
+      select: { outboundEnabled: true, updatedByEmail: true },
+    }),
   ]);
+  const masterOn = outboundEnabled(policy);
 
   const outboundCount = await prisma.sfTicketMessage.count({ where: { direction: "OUTBOUND" } });
   const webhookUrl = env.AUTH_URL
@@ -92,6 +100,12 @@ export default async function SilverFangEmailPage() {
         actions={<PollMailboxesButton />}
       />
       <div className="space-y-6 p-4 sm:p-8">
+        <EmailMasterSwitch
+          enabled={masterOn}
+          updatedByEmail={policy?.updatedByEmail ?? null}
+          emailableClients={emailableClients}
+        />
+
         {/* What is wired up */}
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Configuration</h2>
@@ -102,6 +116,16 @@ export default async function SilverFangEmailPage() {
             <StatItem
               label="Microsoft Graph"
               value={<Yes ok={graphReady} label={graphReady ? "Ready" : "Not configured"} />}
+            />
+            <StatItem
+              label="Outbound email"
+              value={
+                masterOn ? (
+                  <span className="text-success">On</span>
+                ) : (
+                  <span className="text-danger">Off — nothing sent</span>
+                )
+              }
             />
             <StatItem
               label="Clients emailable"
@@ -128,7 +152,8 @@ export default async function SilverFangEmailPage() {
           <div className="mt-4 space-y-2 border-t pt-4 text-xs text-muted-foreground">
             <p className="rounded-md border border-warning/40 bg-warning/5 p-2.5">
               <span className="font-medium text-foreground">
-                No client is emailed unless it is switched on for that client.
+                Two gates, both of which must be on: the master switch above, and
+                &ldquo;Allow email to client&rdquo; for the individual client.
               </span>{" "}
               “Allow email to client” lives on each client&rsquo;s SilverFang profile and is off
               by default — for every client, including new ones, permanently. Replies and

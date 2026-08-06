@@ -8,8 +8,8 @@ import {
   textToHtml,
   withSignature,
 } from "@/lib/silverfang/email";
-import { resolveOutboundMailbox, sendTicketMail } from "@/lib/silverfang/mail";
-import { clientEmailAllowed, clientEmailBlockedReason } from "@/lib/silverfang/email-policy";
+import { loadEmailPolicy, resolveOutboundMailbox, sendTicketMail } from "@/lib/silverfang/mail";
+import { decideOutbound } from "@/lib/silverfang/email-policy";
 
 /**
  * Outbound ticket email. Sends first, records second — a message row is only
@@ -79,10 +79,14 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
   if (!ticket) return { ok: false, message: "That ticket no longer exists." };
 
   // Checked here as well as in the transport: the transport is the guarantee, this
-  // is so the reply composer says why before composing anything.
-  if (!clientEmailAllowed(ticket.client.sfClientProfile)) {
-    return { ok: false, message: clientEmailBlockedReason(ticket.client.name) };
-  }
+  // is so the composer reports the reason before anything else happens.
+  const decision = decideOutbound({
+    policy: await loadEmailPolicy(),
+    audience: "CLIENT",
+    clientProfile: ticket.client.sfClientProfile,
+    clientName: ticket.client.name,
+  });
+  if (!decision.allowed) return { ok: false, message: decision.message };
 
   // Thread onto the most recent message we know about, in the order a mail
   // client expects.

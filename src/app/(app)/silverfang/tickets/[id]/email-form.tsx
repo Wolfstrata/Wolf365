@@ -21,6 +21,7 @@ export function EmailForm({
   clientName,
   clientEmailAllowed,
   clientHref,
+  masterEnabled,
 }: {
   ticketId: string;
   defaultTo: string;
@@ -32,6 +33,8 @@ export function EmailForm({
   /** The per-client gate. False means no composer at all. */
   clientEmailAllowed: boolean;
   clientHref: string;
+  /** The SilverFang-wide master switch. */
+  masterEnabled: boolean;
 }) {
   const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
     sendTicketEmailAction,
@@ -44,9 +47,25 @@ export function EmailForm({
     if (result?.ok) formRef.current?.reset();
   }, [result]);
 
-  // The gate comes first: when a client isn't opted in there is nothing to
-  // compose, so no composer is offered at all. The server refuses regardless —
-  // this is so nobody writes a reply that was never going to be sent.
+  // The gates come first, master switch before the per-client one, so a disabled
+  // system doesn't look like a client misconfiguration. No composer is offered at
+  // all in either case — the server refuses regardless; this is so nobody writes
+  // a reply that was never going to be sent.
+  if (!masterEnabled) {
+    return (
+      <div className="rounded-md border border-danger/40 bg-danger/5 p-3">
+        <p className="inline-flex items-center gap-1.5 text-sm font-medium text-danger">
+          <MailX className="h-4 w-4" /> Outbound email is off for all of SilverFang
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Nothing can be emailed to anyone while the master switch is off. A SilverFang
+          administrator can turn it on under SilverFang → Email. Internal notes still work, and
+          inbound email still opens and updates tickets.
+        </p>
+      </div>
+    );
+  }
+
   if (!clientEmailAllowed) {
     return (
       <div className="rounded-md border border-warning/40 bg-warning/5 p-3">

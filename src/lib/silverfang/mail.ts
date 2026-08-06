@@ -11,7 +11,7 @@ import {
   parseAddressList,
   pollFloor,
 } from "@/lib/silverfang/email";
-import { clientEmailAllowed, clientEmailBlockedReason } from "@/lib/silverfang/email-policy";
+import { decideOutbound, type BlockReason } from "@/lib/silverfang/email-policy";
 
 /**
  * SilverFang mail transport: the I/O edge for sending ticket email and reading a
@@ -35,6 +35,9 @@ import { clientEmailAllowed, clientEmailBlockedReason } from "@/lib/silverfang/e
  */
 
 export type MailProvider = "GRAPH" | "RESEND";
+
+/** Fixed primary key of the single SfEmailPolicy row. */
+export const POLICY_ID = "singleton";
 
 /**
  * Who this mail is going to. Required, and deliberately not defaulted: a new send
@@ -67,10 +70,12 @@ export interface SendResult {
   providerId?: string;
   reason?: string;
   /**
-   * True when the client-email gate refused the send. Distinct from a failure:
-   * nothing went wrong, the client is simply not opted in.
+   * True when a policy gate refused the send. Distinct from a failure: nothing
+   * went wrong, the send simply was not permitted.
    */
   blockedByPolicy?: boolean;
+  /** Which gate refused it, when one did. */
+  blockReason?: BlockReason;
 }
 
 /** Graph's shape for a mail message we read from a mailbox. */
@@ -103,6 +108,17 @@ const MESSAGE_FIELDS = [
   "conversationId",
 ].join(",");
 
+/**
+ * The master email policy. A missing row is "disabled" — email must never start
+ * flowing just because this table has never been written to.
+ */
+export async function loadEmailPolicy(): Promise<{ outboundEnabled: boolean } | null> {
+  return prisma.sfEmailPolicy.findUnique({
+    where: { id: POLICY_ID },
+    select: { outboundEnabled: true },
+  });
+}
+
 /** The mailbox to send a ticket reply from: the ticket's own, else any outbound one. */
 export async function resolveOutboundMailbox(
   preferredId?: string | null,
@@ -129,26 +145,36 @@ export async function sendTicketMail(
   if (to.length === 0) return { sent: false, provider: null, reason: "No valid recipients" };
   const cc = parseAddressList(mail.cc ?? []);
 
-  // HARD RULE, enforced here rather than at the callers: a client's contacts are
-  // never emailed unless that client has been explicitly opted in. This is the
-  // single choke point every send goes through, so the gate cannot be bypassed by
-  // adding a new send path.
+  // HARD RULE, enforced here rather than at the callers, because this is the
+  // single choke point every send goes through: the master switch must be on, and
+  // for client mail that client must be opted in as well. Neither gate can be
+  // bypassed by adding a new send path.
+  const policy = await loadEmailPolicy();
+  let client: { name: string; sfClientProfile: { allowClientEmail: boolean } | null } | null =
+    null;
   if (mail.audience.kind === "CLIENT") {
-    const client = await prisma.client.findUnique({
+    client = await prisma.client.findUnique({
       where: { id: mail.audience.clientId },
       select: { name: true, sfClientProfile: { select: { allowClientEmail: true } } },
     });
     if (!client) {
       return { sent: false, provider: null, reason: "That client no longer exists." };
     }
-    if (!clientEmailAllowed(client.sfClientProfile)) {
-      return {
-        sent: false,
-        provider: null,
-        blockedByPolicy: true,
-        reason: clientEmailBlockedReason(client.name),
-      };
-    }
+  }
+  const decision = decideOutbound({
+    policy,
+    audience: mail.audience.kind,
+    clientProfile: client?.sfClientProfile,
+    clientName: client?.name,
+  });
+  if (!decision.allowed) {
+    return {
+      sent: false,
+      provider: null,
+      blockedByPolicy: true,
+      blockReason: decision.reason,
+      reason: decision.message,
+    };
   }
 
   const provider: MailProvider = mailbox.provider === "RESEND" ? "RESEND" : "GRAPH";

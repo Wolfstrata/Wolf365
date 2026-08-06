@@ -12,7 +12,8 @@ import { timeEntryEditable } from "@/lib/silverfang/status";
 import { evaluateTarget } from "@/lib/silverfang/sla";
 import { loadSla } from "@/lib/silverfang/service";
 import { defaultReplyRecipients } from "@/lib/silverfang/email-send";
-import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
+import { clientEmailAllowed, outboundEnabled } from "@/lib/silverfang/email-policy";
+import { POLICY_ID } from "@/lib/silverfang/mail";
 import { setTicketStatusAction, assignTicketAction } from "../../actions";
 import { EmailForm } from "./email-form";
 import { NoteForm } from "./note-form";
@@ -103,7 +104,7 @@ export default async function TicketDetailPage({
   });
   if (!ticket) notFound();
 
-  const [sla, chargeCodes, users, outboundMailbox, replyTo] = await Promise.all([
+  const [sla, chargeCodes, users, outboundMailbox, replyTo, emailPolicy] = await Promise.all([
     loadSla(ticket.slaId),
     prisma.sfChargeCode.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     prisma.user.findMany({
@@ -117,6 +118,10 @@ export default async function TicketDetailPage({
       select: { address: true },
     }),
     defaultReplyRecipients(id),
+    prisma.sfEmailPolicy.findUnique({
+      where: { id: POLICY_ID },
+      select: { outboundEnabled: true },
+    }),
   ]);
 
   const now = new Date();
@@ -387,6 +392,7 @@ export default async function TicketDetailPage({
                   firstResponsePending={ticket.firstRespondedAt == null}
                   clientName={ticket.client.name}
                   clientEmailAllowed={clientEmailAllowed(ticket.client.sfClientProfile)}
+                  masterEnabled={outboundEnabled(emailPolicy)}
                   clientHref={`/silverfang/clients/${ticket.client.id}`}
                 />
               </div>

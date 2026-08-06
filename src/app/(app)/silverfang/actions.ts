@@ -901,6 +901,57 @@ export async function deleteContactAction(
 // Email
 // ---------------------------------------------------------------------------
 
+/**
+ * Master switch for all outbound SilverFang email.
+ *
+ * Enabling requires typing ENABLE. Disabling is one click — friction belongs only
+ * on the path that lets mail reach real customers, never on the path that stops
+ * it. Both directions are audited.
+ */
+export async function setEmailMasterSwitchAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { ENABLE_CONFIRMATION } = await import("@/lib/silverfang/email-policy");
+    const { POLICY_ID } = await import("@/lib/silverfang/mail");
+    const enable = formValue(formData, "enable") === "true";
+    const confirmation = (formValue(formData, "confirm") ?? "").trim();
+
+    if (enable && confirmation !== ENABLE_CONFIRMATION) {
+      return {
+        ok: false,
+        message: `Type ${ENABLE_CONFIRMATION} to turn outbound email on. Nothing has changed.`,
+      };
+    }
+
+    await prisma.sfEmailPolicy.upsert({
+      where: { id: POLICY_ID },
+      create: { id: POLICY_ID, outboundEnabled: enable, updatedByEmail: user.email },
+      update: { outboundEnabled: enable, updatedByEmail: user.email },
+    });
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:email-master-switch",
+      metadata: { outboundEnabled: enable },
+    });
+    revalidatePath("/silverfang/email");
+    revalidatePath("/silverfang/clients");
+    return {
+      ok: true,
+      message: enable
+        ? "Outbound email is ON. Clients with “Allow email to client” enabled can now be emailed."
+        : "Outbound email is OFF. Nothing will be sent to anyone, client or technician.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 const replySchema = z.object({
   ticketId: z.string().min(1),
   to: z.string().trim().min(1, "Add at least one recipient"),

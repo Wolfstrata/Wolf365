@@ -50,3 +50,71 @@ export function clientEmailBlockedReason(clientName: string): string {
 export function clientEmailLabel(profile: ClientEmailSetting | null | undefined): string {
   return clientEmailAllowed(profile) ? "Email allowed" : "Email off";
 }
+
+// ---------------------------------------------------------------------------
+// Master switch
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether outbound email is enabled at all. Deliberately scoped to *everything*
+ * — client and internal alike. A kill switch that leaves some mail flowing is
+ * not a kill switch, and "which half is still on?" is exactly the question you
+ * don't want to be asking when you flip it.
+ *
+ * A missing policy row means off, so email cannot begin flowing merely because
+ * the table has never been written to.
+ */
+export function outboundEnabled(
+  policy: { outboundEnabled?: boolean | null } | null | undefined,
+): boolean {
+  return policy?.outboundEnabled === true;
+}
+
+export type BlockReason = "MASTER_OFF" | "CLIENT_OFF";
+
+export type EmailDecision =
+  | { allowed: true }
+  | { allowed: false; reason: BlockReason; message: string };
+
+/**
+ * The single decision for whether one message may be sent. Both gates apply and
+ * the master switch is checked first, so a disabled system reports the real
+ * reason rather than blaming a per-client setting.
+ */
+export function decideOutbound(input: {
+  policy: { outboundEnabled?: boolean | null } | null | undefined;
+  audience: "CLIENT" | "INTERNAL";
+  /** Required for a CLIENT audience; ignored otherwise. */
+  clientProfile?: ClientEmailSetting | null;
+  clientName?: string;
+}): EmailDecision {
+  if (!outboundEnabled(input.policy)) {
+    return { allowed: false, reason: "MASTER_OFF", message: masterOffReason() };
+  }
+  if (input.audience === "CLIENT" && !clientEmailAllowed(input.clientProfile)) {
+    return {
+      allowed: false,
+      reason: "CLIENT_OFF",
+      message: clientEmailBlockedReason(input.clientName ?? "this client"),
+    };
+  }
+  return { allowed: true };
+}
+
+export function masterOffReason(): string {
+  return (
+    "Outbound email is switched off for all of SilverFang. Nothing has been sent, " +
+    "to anyone. A SilverFang administrator can enable it under SilverFang → Email; " +
+    "each client still needs its own “Allow email to client” as well."
+  );
+}
+
+/** Short label for the settings UI. */
+export function outboundLabel(
+  policy: { outboundEnabled?: boolean | null } | null | undefined,
+): string {
+  return outboundEnabled(policy) ? "Enabled" : "Off — nothing is sent";
+}
+
+/** Typed exactly, so enabling can never be a stray truthy value. */
+export const ENABLE_CONFIRMATION = "ENABLE";
