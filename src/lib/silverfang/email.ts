@@ -357,6 +357,45 @@ export const TEMPLATE_VARIABLES = [
   "mailbox.name",
 ] as const;
 
+/**
+ * The address outbound mail is sent from: the explicit reply-as address when set
+ * and usable, else the polled mailbox address. Used for the Graph sendMail
+ * target, so a bad value would silently mail from the wrong place — hence the
+ * validation rather than a bare `??`.
+ */
+export function outboundAddress(mailbox: {
+  address: string;
+  sendAsAddress?: string | null;
+}): string {
+  return normalizeAddress(mailbox.sendAsAddress) ?? mailbox.address;
+}
+
+/**
+ * Every address that counts as "us" for loop detection. Inbound mail from any of
+ * these is our own traffic coming back and must never be filed.
+ */
+export function ownAddresses(mailbox: {
+  address: string;
+  sendAsAddress?: string | null;
+}): string[] {
+  const own = [normalizeAddress(mailbox.address), normalizeAddress(mailbox.sendAsAddress)];
+  return own.filter((a): a is string => a != null).filter((a, i, all) => all.indexOf(a) === i);
+}
+
+/**
+ * The floor for a mailbox poll: only mail newer than this is fetched. Takes the
+ * later of the watermark and the configured cutoff, so raising the cutoff can
+ * skip history but lowering it can never re-process what has already been filed.
+ */
+export function pollFloor(
+  lastMessageAt: Date | null | undefined,
+  ignoreBefore: Date | null | undefined,
+): Date | null {
+  if (!lastMessageAt) return ignoreBefore ?? null;
+  if (!ignoreBefore) return lastMessageAt;
+  return lastMessageAt > ignoreBefore ? lastMessageAt : ignoreBefore;
+}
+
 /** Append a mailbox signature below a separator, when one is configured. */
 export function withSignature(body: string, signature: string | null | undefined): string {
   const sig = (signature ?? "").trim();

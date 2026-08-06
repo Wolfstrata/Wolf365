@@ -777,6 +777,19 @@ const mailboxSchema = z.object({
     .toLowerCase()
     .regex(/^[^\s@]+@[^\s@.]+\.[^\s@]+$/, "Enter a valid mailbox address"),
   name: z.preprocess(emptyToUndefined, z.string().max(200).optional()),
+  sendAsAddress: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[^\s@]+@[^\s@.]+\.[^\s@]+$/, "Enter a valid reply-as address")
+      .optional(),
+  ),
+  // A free-text datetime here would be read as the *server's* timezone while the
+  // browser sends the admin's local time, so the cutoff would silently land hours
+  // off. The real requirement is "start from now", which needs no parsing.
+  resetIgnoreBefore: z.coerce.boolean(),
   boardId: optionalId,
   fallbackClientId: optionalId,
   defaultPriority: z.enum(SfTicketPriority),
@@ -798,6 +811,8 @@ export async function saveMailboxAction(
       id: formValue(formData, "id"),
       address: formValue(formData, "address"),
       name: formValue(formData, "name"),
+      sendAsAddress: formValue(formData, "sendAsAddress"),
+      resetIgnoreBefore: formData.get("resetIgnoreBefore") === "on",
       boardId: formValue(formData, "boardId"),
       fallbackClientId: formValue(formData, "fallbackClientId"),
       defaultPriority: formValue(formData, "defaultPriority"),
@@ -810,9 +825,18 @@ export async function saveMailboxAction(
 
     // RESEND cannot receive mail, so accepting inbound on it would be a lie.
     const inbound = input.provider === "RESEND" ? false : input.inbound;
+    // A reply-as address equal to the polled address is redundant, not an error.
+    const sendAsAddress =
+      input.sendAsAddress && input.sendAsAddress !== input.address ? input.sendAsAddress : null;
     const data = {
       address: input.address,
       name: input.name ?? null,
+      sendAsAddress,
+      // A new mailbox starts from now, so adding an established mailbox never
+      // works through its history. On an existing one the cutoff only moves when
+      // the admin explicitly asks.
+      ignoreBefore:
+        input.resetIgnoreBefore || !input.id ? new Date() : undefined,
       boardId: input.boardId ?? null,
       fallbackClientId: input.fallbackClientId ?? null,
       defaultPriority: input.defaultPriority,

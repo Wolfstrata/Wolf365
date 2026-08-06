@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import {
   buildOutboundSubject,
   buildReferences,
+  outboundAddress,
   parseAddressList,
   textToHtml,
   withSignature,
@@ -83,6 +84,7 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
     };
   }
 
+  const fromAddress = outboundAddress(mailbox);
   const subject = buildOutboundSubject(ticket.number, input.subject?.trim() || ticket.summary, {
     reply: Boolean(last),
   });
@@ -111,7 +113,7 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
         ticketId: ticket.id,
         mailboxId: mailbox.id,
         direction: "OUTBOUND",
-        fromAddress: mailbox.address,
+        fromAddress,
         toAddresses: to,
         ccAddresses: cc,
         subject,

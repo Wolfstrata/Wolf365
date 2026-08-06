@@ -4,6 +4,7 @@ import { getEnv } from "@/env";
 import { safeErrorMessage } from "@/lib/redact";
 import {
   buildOutboundSubject,
+  outboundAddress,
   renderTemplate,
   textToHtml,
   withSignature,
@@ -132,7 +133,7 @@ export async function runAutoResponses(
             ticketId: ticket.id,
             mailboxId: mailbox.id,
             direction: "OUTBOUND",
-            fromAddress: mailbox.address,
+            fromAddress: outboundAddress(mailbox),
             toAddresses: to,
             subject: buildOutboundSubject(ticket.number, subject),
             bodyText: body,

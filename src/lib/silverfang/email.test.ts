@@ -9,8 +9,11 @@ import {
   isAutoSubmitted,
   isPublicEmailDomain,
   normalizeAddress,
+  outboundAddress,
+  ownAddresses,
   parseAddressList,
   parseTicketNumber,
+  pollFloor,
   referencedMessageIds,
   renderTemplate,
   sameAddress,
@@ -318,6 +321,68 @@ describe("renderTemplate", () => {
     expect(renderTemplate("Hi {{contact.firstName}}", { "contact.firstName": "" })).toBe(
       "Hi {{contact.firstName}}",
     );
+  });
+});
+
+describe("outboundAddress / ownAddresses", () => {
+  it("prefers the reply-as address when set", () => {
+    expect(
+      outboundAddress({ address: "help@wolfstrata.com", sendAsAddress: "Support <SUPPORT@wolfstrata.com>" }),
+    ).toBe("support@wolfstrata.com");
+  });
+
+  it("falls back to the polled address when unset or unusable", () => {
+    expect(outboundAddress({ address: "help@wolfstrata.com" })).toBe("help@wolfstrata.com");
+    expect(outboundAddress({ address: "help@wolfstrata.com", sendAsAddress: "" })).toBe(
+      "help@wolfstrata.com",
+    );
+    expect(outboundAddress({ address: "help@wolfstrata.com", sendAsAddress: "junk" })).toBe(
+      "help@wolfstrata.com",
+    );
+  });
+
+  it("treats both addresses as our own for loop detection", () => {
+    expect(
+      ownAddresses({ address: "help@wolfstrata.com", sendAsAddress: "support@wolfstrata.com" }),
+    ).toEqual(["help@wolfstrata.com", "support@wolfstrata.com"]);
+  });
+
+  it("de-duplicates when both addresses are the same", () => {
+    expect(
+      ownAddresses({ address: "help@wolfstrata.com", sendAsAddress: "HELP@wolfstrata.com" }),
+    ).toEqual(["help@wolfstrata.com"]);
+  });
+
+  it("ignores an unusable reply-as address", () => {
+    expect(ownAddresses({ address: "help@wolfstrata.com", sendAsAddress: null })).toEqual([
+      "help@wolfstrata.com",
+    ]);
+  });
+});
+
+describe("pollFloor", () => {
+  const early = new Date("2026-08-01T00:00:00Z");
+  const late = new Date("2026-08-06T00:00:00Z");
+
+  it("uses the cutoff on a mailbox that has never been polled", () => {
+    expect(pollFloor(null, late)).toEqual(late);
+  });
+
+  it("uses the watermark when it is newer than the cutoff", () => {
+    expect(pollFloor(late, early)).toEqual(late);
+  });
+
+  it("uses the cutoff when it is newer, so raising it skips history", () => {
+    expect(pollFloor(early, late)).toEqual(late);
+  });
+
+  it("never goes back before what has already been processed", () => {
+    // Lowering the cutoff must not re-open the back catalogue.
+    expect(pollFloor(late, new Date("2020-01-01T00:00:00Z"))).toEqual(late);
+  });
+
+  it("returns null when neither is set (fetch from the beginning)", () => {
+    expect(pollFloor(null, null)).toBeNull();
   });
 });
 

@@ -16,6 +16,8 @@ export const dynamic = "force-dynamic";
 const BLANK: MailboxValues = {
   address: "",
   name: "",
+  sendAsAddress: "",
+  ignoreBeforeIso: null,
   boardId: "",
   fallbackClientId: "",
   defaultPriority: "P3",
@@ -152,6 +154,11 @@ export default async function SilverFangEmailPage() {
                     <div className="flex flex-wrap items-center gap-3 text-sm">
                       <span className="font-medium">{m.address}</span>
                       {m.name && <span className="text-muted-foreground">{m.name}</span>}
+                      {m.sendAsAddress && (
+                        <span className="text-muted-foreground">
+                          replies as <span className="font-medium">{m.sendAsAddress}</span>
+                        </span>
+                      )}
                       <span className="rounded-full border px-2 py-0.5 text-xs">{m.provider}</span>
                       {!m.active && (
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
@@ -205,6 +212,8 @@ export default async function SilverFangEmailPage() {
                         id: m.id,
                         address: m.address,
                         name: m.name ?? "",
+                        sendAsAddress: m.sendAsAddress ?? "",
+                        ignoreBeforeIso: m.ignoreBefore?.toISOString() ?? null,
                         boardId: m.boardId ?? "",
                         fallbackClientId: m.fallbackClientId ?? "",
                         defaultPriority: m.defaultPriority,

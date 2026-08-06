@@ -9,6 +9,7 @@ import {
   isAutoSubmitted,
   isPublicEmailDomain,
   normalizeAddress,
+  ownAddresses,
   parseAddressList,
   parseTicketNumber,
   referencedMessageIds,
@@ -78,7 +79,13 @@ export type IngestResult =
 async function resolveInboundMailbox(address: string | null): Promise<SfMailbox | null> {
   const normalized = normalizeAddress(address);
   if (normalized) {
-    const named = await prisma.sfMailbox.findUnique({ where: { address: normalized } });
+    // Match the reply-as address too: a webhook forwarding mail that was sent to
+    // the front-door address (support@) still belongs to the mailbox we poll
+    // (help@), and the flow has no way to know the difference.
+    const named = await prisma.sfMailbox.findFirst({
+      where: { OR: [{ address: normalized }, { sendAsAddress: normalized }] },
+      orderBy: { createdAt: "asc" },
+    });
     if (named?.active && named.inbound) return named;
     if (named) return null; // named but disabled — do not silently use another
   }
@@ -251,8 +258,11 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
       };
     }
 
-    // Our own outbound mail bouncing back in would loop forever.
-    if (sameAddress(from, mailbox.address)) return { ok: false, reason: "loop-self" };
+    // Our own outbound mail bouncing back in would loop forever. Covers the
+    // reply-as address too, which is what a forwarding front door delivers as.
+    if (ownAddresses(mailbox).some((own) => sameAddress(from, own))) {
+      return { ok: false, reason: "loop-self" };
+    }
 
     const duplicate = await findDuplicate(input, mailbox.id);
     if (duplicate) return { ok: true, action: "deduped", ticketId: duplicate.ticketId };

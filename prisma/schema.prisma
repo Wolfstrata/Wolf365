@@ -1559,9 +1559,21 @@ model SfTicketNote {
 // replies are sent from the same address so the client sees one conversation.
 model SfMailbox {
   id      String  @id @default(cuid())
-  /// Mailbox address, always stored lowercased (e.g. support@wolfstrata.com).
+  /// Mailbox address polled for inbound mail, always stored lowercased.
   address String  @unique
   name    String?
+
+  /// Optional address outbound replies are sent *from*, when it differs from the
+  /// polled mailbox. Set this when a front-door address forwards into a real
+  /// mailbox (support@ → help@): poll the real one, answer as the front door.
+  /// Requires the app's mail policy to cover this address too. Blank = reply
+  /// from `address`.
+  sendAsAddress String?
+
+  /// Mail received before this instant is never processed. Defaults to when the
+  /// mailbox was added, so pointing SilverFang at an established mailbox does not
+  /// work through its back catalogue creating tickets.
+  ignoreBefore DateTime?
 
   /// Board new tickets from this mailbox land on. Falls back to the default board.
   boardId String?

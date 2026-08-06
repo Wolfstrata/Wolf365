@@ -4,7 +4,13 @@ import { prisma } from "@/lib/db";
 import { getGraphToken, graphGetChecked, graphPost, graphPatch } from "@/lib/crm/graph";
 import { sendEmail } from "@/lib/email/resend";
 import { safeErrorMessage } from "@/lib/redact";
-import { TICKET_HEADER, normalizeAddress, parseAddressList } from "@/lib/silverfang/email";
+import {
+  TICKET_HEADER,
+  normalizeAddress,
+  outboundAddress,
+  parseAddressList,
+  pollFloor,
+} from "@/lib/silverfang/email";
 
 /**
  * SilverFang mail transport: the I/O edge for sending ticket email and reading a
@@ -106,6 +112,8 @@ export async function sendTicketMail(
   if (to.length === 0) return { sent: false, provider: null, reason: "No valid recipients" };
   const cc = parseAddressList(mail.cc ?? []);
   const provider: MailProvider = mailbox.provider === "RESEND" ? "RESEND" : "GRAPH";
+  // May differ from the polled address when a front-door address forwards in.
+  const fromAddress = outboundAddress(mailbox);
 
   try {
     if (provider === "RESEND") {
@@ -115,8 +123,8 @@ export async function sendTicketMail(
         html: mail.html,
         to,
         cc,
-        from: mailbox.name ? `${mailbox.name} <${mailbox.address}>` : mailbox.address,
-        replyTo: mailbox.address,
+        from: mailbox.name ? `${mailbox.name} <${fromAddress}>` : fromAddress,
+        replyTo: fromAddress,
         headers: {
           [TICKET_HEADER]: String(mail.ticketNumber),
           ...(mail.inReplyTo ? { "In-Reply-To": mail.inReplyTo } : {}),
@@ -142,7 +150,7 @@ export async function sendTicketMail(
     }
     const res = await graphPost(
       token,
-      `/users/${encodeURIComponent(mailbox.address)}/sendMail`,
+      `/users/${encodeURIComponent(fromAddress)}/sendMail`,
       {
         message: {
           subject: mail.subject,
@@ -162,7 +170,11 @@ export async function sendTicketMail(
       return {
         sent: false,
         provider,
-        reason: `Graph sendMail failed (HTTP ${res.status}): ${res.error ?? "unknown error"}`,
+        // Name the address so a policy that covers the polled mailbox but not the
+        // reply-as address is obvious rather than mystifying.
+        reason: `Graph sendMail as ${fromAddress} failed (HTTP ${res.status}): ${
+          res.error ?? "unknown error"
+        }`,
       };
     }
     // sendMail returns 202 with no body, so there is no provider id to record.
@@ -259,8 +271,11 @@ export async function fetchMailboxMessages(
     $orderby: "receivedDateTime asc",
     $top: String(Math.min(Math.max(limit, 1), 50)),
   });
-  if (mailbox.lastMessageAt) {
-    params.set("$filter", `receivedDateTime gt ${mailbox.lastMessageAt.toISOString()}`);
+  // Never reach further back than the later of the watermark and the cutoff, so
+  // an established mailbox is not worked through from its oldest message.
+  const floor = pollFloor(mailbox.lastMessageAt, mailbox.ignoreBefore);
+  if (floor) {
+    params.set("$filter", `receivedDateTime gt ${floor.toISOString()}`);
   }
   const res = await graphGetChecked<{ value?: GraphMessage[] }>(
     token,

@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { Save } from "lucide-react";
 import { saveMailboxAction, type SfActionResult } from "../actions";
+import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 
 const inputCls =
@@ -12,6 +13,9 @@ export interface MailboxValues {
   id?: string;
   address: string;
   name: string;
+  sendAsAddress: string;
+  /** Current cutoff as an ISO instant, for display only. Null = no cutoff. */
+  ignoreBeforeIso: string | null;
   boardId: string;
   fallbackClientId: string;
   defaultPriority: string;
@@ -66,6 +70,20 @@ export function MailboxForm({
             placeholder="Wolfstrata Support"
             className={`mt-1 ${inputCls}`}
           />
+        </label>
+        <label className="block text-sm font-medium">
+          Reply from a different address
+          <input
+            name="sendAsAddress"
+            defaultValue={values.sendAsAddress}
+            placeholder="Optional — e.g. support@wolfstrata.com"
+            className={`mt-1 ${inputCls}`}
+          />
+          <span className="mt-1 block text-xs font-normal text-muted-foreground">
+            Leave blank to reply from the mailbox above. Set it when a front-door address
+            forwards into this mailbox, so clients see the address they wrote to. The app’s
+            mail policy must cover this address as well.
+          </span>
         </label>
         <label className="block text-sm font-medium">
           Provider
@@ -139,6 +157,30 @@ export function MailboxForm({
           className={`mt-1 ${inputCls}`}
         />
       </label>
+
+      {values.id && (
+        <div className="rounded-md border border-warning/40 bg-warning/5 p-3">
+          <p className="text-xs text-muted-foreground">
+            {values.ignoreBeforeIso ? (
+              <>
+                Only mail received after{" "}
+                <span className="font-medium text-foreground">
+                  <LocalTime value={values.ignoreBeforeIso} />
+                </span>{" "}
+                is processed, so this mailbox’s existing history never becomes tickets.
+              </>
+            ) : (
+              <>
+                No cutoff is set, so a poll can reach back to the oldest mail in this mailbox.
+              </>
+            )}
+          </p>
+          <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" name="resetIgnoreBefore" className="h-4 w-4" />
+            Move the cutoff to now — skip everything currently sitting in the mailbox
+          </label>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-5">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
