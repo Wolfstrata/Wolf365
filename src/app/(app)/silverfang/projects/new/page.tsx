@@ -26,7 +26,7 @@ export default async function NewProjectPage({
     prisma.sfAgreement.findMany({
       where: { status: "ACTIVE" },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, client: { select: { name: true } } },
+      select: { id: true, name: true, clientId: true, client: { select: { name: true } } },
       take: 500,
     }),
     prisma.user.findMany({
@@ -45,6 +45,13 @@ export default async function NewProjectPage({
     }),
   ]);
   const clientId = sp.client && clients.some((c) => c.id === sp.client) ? sp.client : "";
+  // Arriving from an agreement page: preselect that agreement, but only when it
+  // really belongs to the chosen client, so a stale link cannot bill a project
+  // against somebody else's agreement.
+  const agreementId =
+    sp.agreement && agreements.some((a) => a.id === sp.agreement && a.clientId === clientId)
+      ? sp.agreement
+      : "";
   const backTo =
     safeReturnTo(sp.returnTo) ??
     (clientId ? `/silverfang/clients/${clientId}` : "/silverfang/projects");
@@ -65,7 +72,7 @@ export default async function NewProjectPage({
           <ProjectForm
             values={{
               clientId,
-              agreementId: "",
+              agreementId,
               name: "",
               description: "",
               status: "PLANNED",

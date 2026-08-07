@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 /**
  * `?client=<id>` preselects that client (and its profile defaults);
  * `?project=`/`?phase=` preselect a project phase, so "New project ticket" on a
- * phase lands on a form already pointed at it.
+ * phase lands on a form already pointed at it; `?agreement=`/`?contact=` do the
+ * same for the agreement and contact pages. Every one of them is validated
+ * against the chosen client, so a stale link cannot file a ticket against another
+ * client's agreement, contact or project.
  *
  * `?returnTo=` is where saving goes back to. Opening this form from a phase and
  * being dropped on the ticket board afterwards loses the place you were working —
@@ -28,6 +31,8 @@ export default async function NewTicketPage({
   const values = await newTicketValues(options, sp.client, {
     projectId: sp.project,
     projectPhaseId: sp.phase,
+    agreementId: sp.agreement,
+    contactId: sp.contact,
   });
 
   // The trail is built from what the form is actually pointed at, not from the

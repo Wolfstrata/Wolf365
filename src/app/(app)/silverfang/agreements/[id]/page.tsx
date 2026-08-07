@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Plus, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -14,7 +14,7 @@ import { changeLogFor } from "@/lib/silverfang/change-log";
 import { renewalPreview } from "@/lib/silverfang/renewal";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_TYPE_LABELS } from "@/lib/silverfang/constants";
 import { getTicketRows } from "@/lib/silverfang/queries";
-import { safeReturnTo } from "@/lib/silverfang/return-to";
+import { safeReturnTo, withReturnTo } from "@/lib/silverfang/return-to";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
@@ -107,6 +107,8 @@ export default async function AgreementDetailPage({
     now,
   );
   const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  // Where the context-carrying buttons come back to.
+  const here = `/silverfang/agreements/${agreement.id}`;
 
   return (
     <div>
@@ -114,6 +116,35 @@ export default async function AgreementDetailPage({
         help={<PawTip topic="agreements" />}
         title={agreement.name}
         description={`${agreement.client.name} · ${AGREEMENT_TYPE_LABELS[agreement.type]} · ${AGREEMENT_STATUS_LABELS[agreement.status]}`}
+        actions={
+          // Both carry the client and this agreement, so neither has to be picked
+          // again — being on this page already says which client and which
+          // agreement the work is for.
+          <div className="flex flex-wrap items-center gap-2">
+            {can(user.role, "tickets:write") && (
+              <Link
+                href={withReturnTo(
+                  `/silverfang/tickets/new?client=${agreement.clientId}&agreement=${agreement.id}`,
+                  here,
+                )}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                <Plus className="h-4 w-4" /> New ticket
+              </Link>
+            )}
+            {can(user.role, "projects:manage") && (
+              <Link
+                href={withReturnTo(
+                  `/silverfang/projects/new?client=${agreement.clientId}&agreement=${agreement.id}`,
+                  here,
+                )}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                <Plus className="h-4 w-4" /> New project
+              </Link>
+            )}
+          </div>
+        }
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">

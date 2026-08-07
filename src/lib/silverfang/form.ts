@@ -17,6 +17,7 @@ export function blankTicketValues(
   defaults: {
     boardId?: string;
     clientId?: string;
+    contactId?: string;
     agreementId?: string;
     projectId?: string;
     projectPhaseId?: string;
@@ -24,7 +25,7 @@ export function blankTicketValues(
 ): TicketFormValues {
   return {
     clientId: defaults.clientId ?? "",
-    contactId: "",
+    contactId: defaults.contactId ?? "",
     boardId: defaults.boardId ?? "",
     statusId: "",
     priority: "P3",
@@ -50,7 +51,12 @@ export function blankTicketValues(
 export async function newTicketValues(
   options: TicketFormOptions,
   requestedClientId?: string,
-  requested: { projectId?: string; projectPhaseId?: string } = {},
+  requested: {
+    projectId?: string;
+    projectPhaseId?: string;
+    agreementId?: string;
+    contactId?: string;
+  } = {},
 ): Promise<TicketFormValues> {
   const firstBoardId = options.boards[0]?.id;
   const clientId =
@@ -71,12 +77,24 @@ export async function newTicketValues(
     defaultAgreementFor(clientId),
   ]);
 
-  // Only offer it if the form can actually show it selected; the picker is fed by
-  // `agreementsByClient`, and a value that isn't in the list would render as blank.
+  const clientAgreements = options.agreementsByClient[clientId] ?? [];
+  // An explicitly requested agreement wins — arriving from an agreement page means
+  // the ticket is for that agreement, which is more specific than the default.
+  // Validated against this client's list, so a stale link cannot file a ticket
+  // against another client's agreement.
+  const requestedAgreementId = requested.agreementId
+    ? clientAgreements.find((a) => a.id === requested.agreementId)?.id
+    : undefined;
+  // Only offer the default if the form can actually show it selected; the picker is
+  // fed by `agreementsByClient`, and a value not in the list would render as blank.
   const agreementId =
-    pick && (options.agreementsByClient[clientId] ?? []).some((a) => a.id === pick.id)
-      ? pick.id
-      : undefined;
+    requestedAgreementId ??
+    (pick && clientAgreements.some((a) => a.id === pick.id) ? pick.id : undefined);
+
+  // Same rule for the contact: honoured only when they belong to this client.
+  const contactId = requested.contactId
+    ? (options.contactsByClient[clientId] ?? []).find((c) => c.id === requested.contactId)?.id
+    : undefined;
 
   // A project (and phase) can be requested by the "New project ticket" button on
   // a phase — honoured only when it really belongs to this client.
@@ -88,7 +106,7 @@ export async function newTicketValues(
   // under a managed agreement on MSA, everything else on the catch-all. A client's
   // explicitly configured default board still wins, since somebody chose it.
   const agreementType = agreementId
-    ? (options.agreementsByClient[clientId] ?? []).find((a) => a.id === agreementId)?.type
+    ? clientAgreements.find((a) => a.id === agreementId)?.type
     : undefined;
   const routedName = boardNameFor({
     hasProject: Boolean(project),
@@ -115,6 +133,7 @@ export async function newTicketValues(
     clientId,
     boardId,
     agreementId,
+    contactId,
     projectId: project?.id,
     projectPhaseId: phase?.id,
   });

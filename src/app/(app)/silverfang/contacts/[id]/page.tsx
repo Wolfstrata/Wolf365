@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { contactRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
@@ -14,7 +14,7 @@ import { TicketsTable } from "../../tickets/tickets-table";
 import { ContactForm } from "../contact-form";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { changeLogFor } from "@/lib/silverfang/change-log";
-import { safeReturnTo } from "@/lib/silverfang/return-to";
+import { safeReturnTo, withReturnTo } from "@/lib/silverfang/return-to";
 import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +69,21 @@ export default async function ContactDetailPage({
         help={<PawTip topic="contacts" />}
         title={contactDisplayName(contact)}
         description={`Contact at ${contact.client.name}`}
+        actions={
+          canWrite ? (
+            // Carries both the client and this contact: being on someone's page
+            // already says who is raising the ticket and for which company.
+            <Link
+              href={withReturnTo(
+                `/silverfang/tickets/new?client=${contact.client.id}&contact=${contact.id}`,
+                `/silverfang/contacts/${contact.id}`,
+              )}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" /> New ticket
+            </Link>
+          ) : null
+        }
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">
