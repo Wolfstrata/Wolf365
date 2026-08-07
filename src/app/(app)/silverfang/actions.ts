@@ -22,6 +22,11 @@ import { contactEmailIndex, contactWrite, textWrite } from "@/lib/silverfang/pii
 import { safeReturnTo } from "@/lib/silverfang/return-to";
 import { pausedMinutesFor } from "@/lib/silverfang/sla";
 import {
+  describeDefaultAgreement,
+  type DefaultAgreementReason,
+} from "@/lib/silverfang/default-agreement";
+import {
+  defaultAgreementFor,
   ensureSilverFangDefaults,
   loadSla,
   nextTicketNumber,
@@ -542,6 +547,48 @@ const timeSchema = z.object({
 });
 
 /** Log (or edit) time against a ticket, resolving the rate at save time. */
+/**
+ * Write the defaulted agreement back onto the ticket.
+ *
+ * Without this the ticket keeps saying "no agreement" while its time entries all
+ * sit under the managed agreement, and the ticket page contradicts the invoice.
+ * Recorded in the change trail, and phrased as what happened and why, so nobody
+ * has to work out who set a field they never touched.
+ *
+ * Only ever fills a blank — it cannot overwrite an agreement somebody chose.
+ */
+async function applyDefaultedAgreement(
+  ticket: { id: string; number: number; agreementId: string | null },
+  defaulted: { id: string; reason: DefaultAgreementReason } | null,
+  actor: { id: string; email: string },
+): Promise<void> {
+  if (!defaulted || ticket.agreementId) return;
+  await prisma.sfTicket.update({
+    where: { id: ticket.id },
+    data: { agreementId: defaulted.id },
+  });
+  const { recordChanges } = await import("@/lib/silverfang/change-log");
+  await recordChanges({
+    entity: "sfTicket",
+    entityId: ticket.id,
+    entityLabel: `#${ticket.number}`,
+    actor,
+    before: { agreementId: null },
+    after: { agreementId: defaulted.id },
+    fields: ["agreementId"],
+  });
+  await audit({
+    action: "TICKET_UPDATED",
+    actorId: actor.id,
+    actorEmail: actor.email,
+    target: `sfTicket:${ticket.id}`,
+    metadata: {
+      agreementId: defaulted.id,
+      why: `Defaulted to ${describeDefaultAgreement(defaulted.reason)} when time was logged`,
+    },
+  });
+}
+
 export async function saveTimeEntryAction(
   _prev: SfActionResult | null,
   formData: FormData,
@@ -573,10 +620,28 @@ export async function saveTimeEntryAction(
     // from when the work really happened.
     const workedAt = input.workDate ?? new Date();
     const workDate = toWorkDate(workedAt);
+
+    // Time on a managed-services client goes to the managed agreement without
+    // anyone having to say so. Resolved here, at the point of logging, rather than
+    // only when the ticket was created: tickets arrive from email, from bulk moves
+    // and from a form where somebody left the field alone, and hours on no
+    // agreement at all are hours nobody rated and nobody billed.
+    //
+    // Never picks block time — see `default-agreement.ts` for why.
+    let agreementId = ticket.agreementId;
+    let agreementDefaulted: { id: string; reason: DefaultAgreementReason } | null = null;
+    if (!agreementId) {
+      const pick = await defaultAgreementFor(ticket.clientId, workedAt);
+      if (pick) {
+        agreementId = pick.id;
+        agreementDefaulted = { id: pick.id, reason: pick.reason };
+      }
+    }
+
     const resolved = await resolveTimeEntryRate({
       clientId: ticket.clientId,
       chargeCodeId: input.chargeCodeId,
-      agreementId: ticket.agreementId,
+      agreementId,
       userId: user.id,
       workedAt,
       hours,
@@ -605,12 +670,16 @@ export async function saveTimeEntryAction(
           notes: input.notes ?? null,
           internalOnly: input.internalOnly,
           billable: input.billable,
+          // Kept in step with the rate that was just resolved — an entry whose
+          // agreement and rate disagree cannot be reconciled later.
+          agreementId,
           timeBand: resolved.timeBand,
           rate: resolved.rate,
           costRate: resolved.costRate,
           amount: resolved.amount,
         },
       });
+      await applyDefaultedAgreement(ticket, agreementDefaulted, user);
       await recomputeTicketHours(input.ticketId);
       await audit({
         action: "TIME_ENTRY_UPDATED",
@@ -635,7 +704,7 @@ export async function saveTimeEntryAction(
       data: {
         userId: user.id,
         ticketId: input.ticketId,
-        agreementId: ticket.agreementId,
+        agreementId,
         chargeCodeId: input.chargeCodeId,
         timesheetId: timesheet.id,
         workDate,
@@ -649,6 +718,7 @@ export async function saveTimeEntryAction(
         amount: resolved.amount,
       },
     });
+    await applyDefaultedAgreement(ticket, agreementDefaulted, user);
     await recomputeTicketHours(input.ticketId);
 
     await audit({

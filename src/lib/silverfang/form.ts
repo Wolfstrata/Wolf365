@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { contactRead, textRead } from "@/lib/silverfang/pii";
 import { boardNameFor } from "@/lib/silverfang/boards";
+import { defaultAgreementFor } from "@/lib/silverfang/service";
 import type {
   TicketFormOptions,
   TicketFormValues,
@@ -58,16 +59,23 @@ export async function newTicketValues(
       : "";
   if (!clientId) return blankTicketValues({ boardId: firstBoardId });
 
-  const profile = await prisma.sfClientProfile.findUnique({
-    where: { clientId },
-    select: { defaultBoardId: true, defaultAgreementId: true },
-  });
+  const [profile, pick] = await Promise.all([
+    prisma.sfClientProfile.findUnique({
+      where: { clientId },
+      select: { defaultBoardId: true },
+    }),
+    // Honours the client's configured default first and falls back to their
+    // managed-services (then managed-NOC) agreement, so a managed client's ticket
+    // arrives already pointed at the agreement its time belongs on. Never picks
+    // block time — see `default-agreement.ts`.
+    defaultAgreementFor(clientId),
+  ]);
 
-  const defaultAgreementId = profile?.defaultAgreementId;
+  // Only offer it if the form can actually show it selected; the picker is fed by
+  // `agreementsByClient`, and a value that isn't in the list would render as blank.
   const agreementId =
-    defaultAgreementId &&
-    (options.agreementsByClient[clientId] ?? []).some((a) => a.id === defaultAgreementId)
-      ? defaultAgreementId
+    pick && (options.agreementsByClient[clientId] ?? []).some((a) => a.id === pick.id)
+      ? pick.id
       : undefined;
 
   // A project (and phase) can be requested by the "New project ticket" button on

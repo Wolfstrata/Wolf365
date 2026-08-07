@@ -27,7 +27,12 @@ import {
   markMessageRead,
   type FetchedMessage,
 } from "@/lib/silverfang/mail";
-import { loadSla, nextTicketNumber, slaDueDatesFor } from "@/lib/silverfang/service";
+import {
+  defaultAgreementFor,
+  loadSla,
+  nextTicketNumber,
+  slaDueDatesFor,
+} from "@/lib/silverfang/service";
 import { pausedMinutesFor } from "@/lib/silverfang/sla";
 
 /**
@@ -423,6 +428,10 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
     const status = board.statuses.find((s) => s.isDefault) ?? board.statuses[0]!;
     const openedAt = receivedAt;
     const sla = await slaDueDatesFor(board.slaId, mailbox.defaultPriority, openedAt);
+    // A managed client's emailed ticket lands on their managed agreement, same as
+    // one raised on the form. Nobody is at the keyboard to pick it here, so without
+    // this every emailed ticket for a managed client starts unrated.
+    const agreementPick = await defaultAgreementFor(sender.clientId, openedAt);
 
     const created = await prisma.$transaction(async (tx) => {
       const number = await nextTicketNumber(tx);
@@ -435,6 +444,7 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
           statusId: status.id,
           priority: mailbox.defaultPriority,
           source: "EMAIL",
+          agreementId: agreementPick?.id ?? null,
           summary: summaryFromSubject(input.subject),
           description: textWrite(text || null),
           slaId: board.slaId,

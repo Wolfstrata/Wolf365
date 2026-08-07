@@ -210,7 +210,10 @@ export function TicketForm({
           </select>
         </Field>
 
-        <Field label="Agreement" help="Determines which rates apply to time logged.">
+        <Field
+          label="Agreement"
+          help="Determines which rates apply to time logged. A managed client's agreement is filled in for you; block time is never chosen automatically."
+        >
           <select name="agreementId" defaultValue={values.agreementId} className={inputCls}>
             <option value="">None</option>
             {agreements.map((a) => (

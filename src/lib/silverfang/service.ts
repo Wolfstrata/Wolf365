@@ -15,6 +15,10 @@ import { computeDueDates, type SlaLike } from "@/lib/silverfang/sla";
 import type { BusinessCalendar } from "@/lib/silverfang/business-hours";
 import { classifyTimeBand } from "@/lib/silverfang/time";
 import { resolveRate, computeAmount, type RateRuleLike } from "@/lib/silverfang/rates";
+import {
+  pickDefaultAgreement,
+  type DefaultAgreementPick,
+} from "@/lib/silverfang/default-agreement";
 
 /**
  * Server-only SilverFang services: the I/O edges around the pure logic modules.
@@ -283,6 +287,34 @@ export async function resolveTimeEntryRate(input: {
     timeBand,
     source: resolution.source,
   };
+}
+
+/**
+ * The agreement a client's work should default to.
+ *
+ * Reads the client's SilverFang profile default and their live agreements, then
+ * defers to `pickDefaultAgreement` for the decision. Returns null when there is
+ * nothing safe to pick — which for a break-fix client is the correct answer, not
+ * a failure.
+ */
+export async function defaultAgreementFor(
+  clientId: string,
+  now: Date = new Date(),
+): Promise<DefaultAgreementPick | null> {
+  const [profile, agreements] = await Promise.all([
+    prisma.sfClientProfile.findUnique({
+      where: { clientId },
+      select: { defaultAgreementId: true },
+    }),
+    prisma.sfAgreement.findMany({
+      where: { clientId },
+      select: { id: true, type: true, status: true, startDate: true, endDate: true },
+    }),
+  ]);
+  return pickDefaultAgreement(agreements, {
+    profileDefaultId: profile?.defaultAgreementId ?? null,
+    now,
+  });
 }
 
 /** Recompute and store a ticket's actualHours from its time entries. */
