@@ -6,6 +6,7 @@ import { textRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
 import { safeReturnTo, withReturnTo } from "@/lib/silverfang/return-to";
 import { LocalTime } from "@/components/ui/local-time";
@@ -231,6 +232,7 @@ export default async function TicketDetailPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="ticketDetail" />}
         title={`#${ticket.number} — ${ticket.summary}`}
         description={`${ticket.client.name} · ${ticket.board.name}`}
         actions={

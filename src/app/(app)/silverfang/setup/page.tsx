@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, StatItem, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { formatCurrency } from "@/lib/utils";
 import {
   CHARGE_CODE_KIND_LABELS,
@@ -163,6 +164,7 @@ export default async function SilverFangSetupPage() {
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="setup" />}
         title="SilverFang Setup"
         description="Boards, statuses, SLAs, business hours, charge codes and rates."
         actions={<SeedButton />}

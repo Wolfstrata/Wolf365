@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
 import { contactRead } from "@/lib/silverfang/pii";
@@ -68,6 +69,7 @@ export default async function ContactsPage() {
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="contacts" />}
         title="Contacts"
         description="Client contacts used as ticket requesters."
         actions={

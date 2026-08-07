@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { getTicketRows, getTicketFormOptions } from "@/lib/silverfang/queries";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TICKET_ORDER_EXPLANATION } from "@/lib/silverfang/ticket-order";
@@ -99,6 +100,7 @@ export default async function TicketsPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="tickets" />}
         title={activeBoard ? `${activeBoard.name} tickets` : "Tickets"}
         description={
           (activeBoard

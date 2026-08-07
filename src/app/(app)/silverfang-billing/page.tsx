@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, EmptyState, Card } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
 
@@ -50,6 +51,7 @@ export default async function SilverFangBillingPage() {
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="billing" />}
         title="SilverFang Billing"
         description="Turn approved time, agreements and projects into QuickBooks invoices — reviewed and approved by a human first."
         actions={

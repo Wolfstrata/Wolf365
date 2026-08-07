@@ -6,6 +6,7 @@ import { contactRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
 import { getTicketRows } from "@/lib/silverfang/queries";
@@ -65,6 +66,7 @@ export default async function ContactDetailPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="contacts" />}
         title={contactDisplayName(contact)}
         description={`Contact at ${contact.client.name}`}
       />

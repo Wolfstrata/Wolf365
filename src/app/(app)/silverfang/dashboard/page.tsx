@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours, weekStartOf } from "@/lib/silverfang/time";
 import { shiftWeeks } from "@/lib/silverfang/timesheet";
@@ -182,7 +183,8 @@ export default async function SilverFangDashboardPage() {
   if (everything) {
     return (
       <div>
-        <PageHeader title="SilverFang Dashboard" description="Queue health, SLA, time and unbilled work." />
+        <PageHeader
+        help={<PawTip topic="dashboard" />} title="SilverFang Dashboard" description="Queue health, SLA, time and unbilled work." />
         <div className="p-4 sm:p-8">
           <Card>
             <EmptyState

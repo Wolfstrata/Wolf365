@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
@@ -55,6 +56,7 @@ export default async function AgreementsPage() {
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="agreements" />}
         title="Agreements"
         description="Block time, managed services, managed NOC and T&M agreements."
         actions={

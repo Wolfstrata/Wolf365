@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
 import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
 import { ImportSuperOpsButton } from "./import-button";
@@ -101,6 +102,7 @@ export default async function SilverFangClientsPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="clients" />}
         title="Clients"
         description="Wolf365 clients as seen by SilverFang — tickets, contacts, agreements and projects."
         actions={can(user.role, "silverfang:configure") ? <ImportSuperOpsButton /> : null}

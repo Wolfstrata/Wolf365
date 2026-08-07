@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatHours } from "@/lib/silverfang/time";
 import { PROJECT_STATUS_LABELS } from "@/lib/silverfang/constants";
@@ -34,7 +35,8 @@ export default async function ProjectsPage() {
 
   return (
     <div>
-      <PageHeader title="Projects" description="Project work, tasks and templates."
+      <PageHeader
+        help={<PawTip topic="projects" />} title="Projects" description="Project work, tasks and templates."
         actions={
           canManage ? (
             <div className="flex items-center gap-2">

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours, weekStartOf } from "@/lib/silverfang/time";
@@ -152,6 +153,7 @@ export default async function TimeEntriesPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="time" />}
         title="Time Entries"
         description="Time logged against tickets, by week. Log time from a ticket."
         actions={

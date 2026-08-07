@@ -1,20 +1,30 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/** Page header with title, optional description, and right-aligned actions. */
+/**
+ * Page header with title, optional description, and right-aligned actions.
+ *
+ * `help` sits beside the title — a single slot so a help affordance can be added to
+ * a page by passing one prop, rather than every page inventing its own placement.
+ */
 export function PageHeader({
   title,
   description,
   actions,
+  help,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
+  help?: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-8 sm:py-5">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight sm:text-xl">{title}</h1>
+        <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight sm:text-xl">
+          {title}
+          {help}
+        </h1>
         {description && (
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         )}

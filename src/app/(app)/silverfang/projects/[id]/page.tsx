@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { changeLogFor } from "@/lib/silverfang/change-log";
@@ -240,6 +241,7 @@ export default async function ProjectDetailPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="projects" />}
         title={project.name}
         description={`${project.client.name} · ${PROJECT_STATUS_LABELS[project.status]} · ${
           project.billingType === "FIXED_FEE" ? "Fixed fee" : "Time and materials"

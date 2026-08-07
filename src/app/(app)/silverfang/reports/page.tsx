@@ -2,6 +2,7 @@ import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState, StatItem } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { formatHours } from "@/lib/silverfang/time";
 import { serviceReport } from "@/lib/silverfang/reporting-service";
 import { PERIODS, PERIOD_LABELS, parsePeriod, periodRange } from "./period";
@@ -41,6 +42,7 @@ export default async function SilverFangReportsPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="reports" />}
         title="Service reporting"
         description="Utilisation, realisation and profitability for SilverFang service delivery."
       />

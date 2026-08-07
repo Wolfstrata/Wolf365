@@ -4,6 +4,7 @@ import { getEnv } from "@/env";
 import { requirePermission } from "@/lib/auth/session";
 import { graphConfigured } from "@/lib/crm/graph";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TEMPLATE_VARIABLES, TICKET_HEADER } from "@/lib/silverfang/email";
@@ -136,6 +137,7 @@ export default async function SilverFangEmailPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="email" />}
         title="Email"
         description="Support mailboxes, inbound routing and auto-responses for SilverFang tickets."
         actions={<PollMailboxesButton />}

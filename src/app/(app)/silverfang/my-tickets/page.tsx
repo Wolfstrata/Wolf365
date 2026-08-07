@@ -2,6 +2,7 @@ import Link from "next/link";
 import { UserCheck } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { getTicketRows } from "@/lib/silverfang/queries";
 import { TicketsTable } from "../tickets/tickets-table";
 
@@ -23,6 +24,7 @@ export default async function MyTicketsPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="myTickets" />}
         title="My Tickets"
         description="Tickets currently assigned to you."
         actions={

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem, EmptyState } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatHours } from "@/lib/silverfang/time";
 import { TIMESHEET_STATUS_LABELS } from "@/lib/silverfang/constants";
@@ -47,6 +48,7 @@ export default async function TimesheetsPage({
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="timesheets" />}
         title="Timesheets"
         description="Weekly time, submitted for approval. Approved time is what billing can draw on."
         actions={

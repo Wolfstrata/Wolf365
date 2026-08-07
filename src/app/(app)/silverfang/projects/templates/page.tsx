@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card } from "@/components/ui/primitives";
+import { PawTip } from "@/components/ui/paw-tip";
 import { formatTemplateTasks } from "@/lib/silverfang/project-templates";
 import { TemplateForm } from "./template-form";
 
@@ -23,6 +24,7 @@ export default async function ProjectTemplatesPage() {
   return (
     <div>
       <PageHeader
+        help={<PawTip topic="projectTemplates" />}
         title="Project templates"
         description="Standard task lists — a template's tasks are copied onto a project when it's created."
       />
