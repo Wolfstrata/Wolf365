@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { BookOpen, ExternalLink, Server, ShieldCheck } from "lucide-react";
-import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { canAccessRoute } from "@/lib/workspaces";
 import { Card } from "@/components/ui/primitives";
 import { LocalTime } from "@/components/ui/local-time";
+import { huduContextFor } from "@/lib/silverfang/hudu-context";
 
 /**
- * What Hudu already knows about this client, shown inside SilverFang so a tech
- * on a ticket does not have to go looking: the company record, its assets, and
- * links to its documentation.
+ * What Hudu already knows about this client: the company record, its assets, and
+ * links to its documentation. The ticket page shows a compact version of the same
+ * data — both read `huduContextFor`, so the confidential-field handling cannot
+ * drift between them.
  *
  * Everything here is a link back into Hudu for the detail. That is deliberate —
  * Hudu stays the system of record for documentation, and the values it holds
@@ -17,52 +18,15 @@ import { LocalTime } from "@/components/ui/local-time";
  * place to read them is Hudu itself.
  */
 
-interface SafeField {
-  label: string;
-  value: string;
-}
-
-function fieldsOf(value: unknown): SafeField[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (f): f is SafeField =>
-      typeof f === "object" &&
-      f !== null &&
-      typeof (f as SafeField).label === "string" &&
-      typeof (f as SafeField).value === "string",
-  );
-}
-
 export async function HuduCard({ clientId }: { clientId: string }) {
   const user = await requireUser();
-  const company = await prisma.huduCompany.findUnique({
-    where: { clientId },
-    include: {
-      assets: {
-        where: { archived: false },
-        orderBy: [{ assetLayout: "asc" }, { name: "asc" }],
-        take: 100,
-      },
-      articles: {
-        where: { archived: false },
-        orderBy: { name: "asc" },
-        take: 50,
-      },
-    },
-  });
-
-  // No linked Hudu company is the normal state for a client Hudu doesn't hold,
-  // so this says nothing rather than showing an empty shell.
+  // No linked Hudu company is the normal state for a client Hudu doesn't hold, so
+  // this says nothing rather than showing an empty shell.
+  const company = await huduContextFor(clientId);
   if (!company) return null;
 
-  const byLayout = new Map<string, typeof company.assets>();
-  for (const a of company.assets) {
-    const key = a.assetLayout ?? "Other";
-    const list = byLayout.get(key) ?? [];
-    list.push(a);
-    byLayout.set(key, list);
-  }
-  const withheld = company.assets.reduce((sum, a) => sum + a.redactedFieldCount, 0);
+  const byLayout = company.assetsByLayout;
+  const withheld = company.withheldFields;
 
   return (
     <Card>
@@ -81,7 +45,7 @@ export async function HuduCard({ clientId }: { clientId: string }) {
         {/* Connector Data is its own workspace; only offer it to roles allowed in. */}
         {canAccessRoute(user.role, "/synced") && (
           <Link
-            href={`/synced/hudu/${company.id}`}
+            href={`/synced/hudu/${company.companyId}`}
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             Synced record
@@ -131,12 +95,12 @@ export async function HuduCard({ clientId }: { clientId: string }) {
           <p className="text-sm text-muted-foreground">No assets synced for this company.</p>
         ) : (
           <div className="space-y-3">
-            {[...byLayout.entries()].map(([layout, assets]) => (
+            {byLayout.map(({ layout, assets }) => (
               <div key={layout}>
                 <p className="text-xs font-medium">{layout}</p>
                 <ul className="mt-1 divide-y rounded-md border text-sm">
                   {assets.map((a) => {
-                    const fields = fieldsOf(a.fields);
+                    const fields = a.fields;
                     return (
                       <li key={a.id} className="px-3 py-1.5">
                         <div className="flex flex-wrap items-center gap-x-3">

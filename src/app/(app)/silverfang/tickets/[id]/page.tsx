@@ -19,6 +19,7 @@ import { setTicketStatusAction, assignTicketAction } from "../../actions";
 import { EmailForm } from "./email-form";
 import { NoteForm } from "./note-form";
 import { TimeCard, type TimeEntryRow } from "./time-card";
+import { TicketHuduPanel } from "./hudu-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -314,6 +315,10 @@ export default async function TicketDetailPage({
             </div>
           )}
         </Card>
+
+        {/* What Hudu knows about this client — collapsed, and renders nothing
+            when Hudu holds no company for them. */}
+        <TicketHuduPanel clientId={ticket.clientId} />
 
         {/* Quick actions: status + assignment */}
         {(canWrite || canAssign) && (
