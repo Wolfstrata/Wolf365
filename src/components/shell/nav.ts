@@ -34,6 +34,10 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Timesheets", href: "/silverfang/timesheets", icon: "CalendarCheck", section: "SilverFang", permission: "time:log" },
   { label: "Agreements", href: "/silverfang/agreements", icon: "FileSignature", section: "SilverFang", permission: "agreements:read" },
   { label: "Projects", href: "/silverfang/projects", icon: "FolderKanban", section: "SilverFang", permission: "projects:read" },
+  // Gated on time:approve, not tickets:read: this shows every tech's utilisation
+  // and every client's margin, which is a service-manager view. A technician holds
+  // tickets:read and should not see their colleagues' numbers.
+  { label: "Service Reporting", href: "/silverfang/reports", icon: "BarChart3", section: "SilverFang", permission: "time:approve" },
   { label: "Email", href: "/silverfang/email", icon: "Inbox", section: "SilverFang", permission: "silverfang:configure" },
   { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
