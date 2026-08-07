@@ -6,6 +6,7 @@ import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { safeErrorMessage } from "@/lib/redact";
 import { pollAllMailboxes } from "@/lib/silverfang/email-ingest";
 import { sweepSlaBreaches } from "@/lib/silverfang/sla-sweep";
+import { sweepAgreementRenewals } from "@/lib/silverfang/renewal-service";
 
 // Mail polling is quick, but a backlog on first run can take a while.
 export const maxDuration = 300;
@@ -39,6 +40,11 @@ export async function GET(request: Request) {
   // not a mailbox is configured.
   const sla = await sweepSlaBreaches(500);
 
+  // Agreements whose term has ended renew themselves, with the uplift applied.
+  // Ticking auto-renew is the consent; `lastRenewedAt` makes this safe to run 96
+  // times a day, and every application is audited as automatic.
+  const renewals = await sweepAgreementRenewals(200);
+
   const mailboxes = await prisma.sfMailbox.count({
     where: { active: true, inbound: true, provider: "GRAPH" },
   });
@@ -46,6 +52,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       sla,
+      renewals,
       mail: { skipped: "No pollable inbound mailbox is configured" },
     });
   }
@@ -55,6 +62,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: results.every((r) => r.ok),
       sla,
+      renewals,
       mail: {
         mailboxes: results.length,
         created: results.reduce((a, r) => a + r.created, 0),
@@ -64,6 +72,9 @@ export async function GET(request: Request) {
       },
     });
   } catch (err) {
-    return NextResponse.json({ ok: false, sla, error: safeErrorMessage(err) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, sla, renewals, error: safeErrorMessage(err) },
+      { status: 500 },
+    );
   }
 }

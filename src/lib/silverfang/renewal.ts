@@ -3,9 +3,14 @@
  * shown and the uplift that gets written are the same number.
  *
  * An agreement marked auto-renew carries a percentage increase, 15% by default.
- * The increase is never applied automatically: renewing changes what a client
- * pays, and a price rise that appears on an invoice nobody approved is how you
- * lose the client. So this module computes and previews; a human applies.
+ * Ticking auto-renew is the consent: once the term ends, the sub-daily cron
+ * applies the uplift and rolls the term forward (see `renewal-service.ts`). This
+ * module stays pure — it decides what *would* happen, which is what makes both
+ * the automatic sweep and the on-screen preview describe the same thing.
+ *
+ * `due` and `alreadyRenewed` are the safety-critical pair. The sweep runs every
+ * 15 minutes, so without `alreadyRenewed` a 15% uplift would compound into 32%
+ * inside half an hour.
  */
 
 export interface RenewableAgreement {

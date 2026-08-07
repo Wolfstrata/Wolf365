@@ -1936,11 +1936,13 @@ model SfAgreement {
 
   /// Uplift applied when the agreement auto-renews, as a percentage. Defaults to
   /// 15% — the house standard — and is editable per agreement. Only meaningful
-  /// when `autoRenew` is on, and never applied on its own: renewing changes what
-  /// a client pays, so a human confirms it.
+  /// when `autoRenew` is on, which is itself the consent: once the term ends the
+  /// sub-daily cron applies the uplift to the recurring fee (never to hourly
+  /// rates) and rolls the term forward.
   renewalIncreasePercent Decimal   @default(15) @db.Decimal(5, 2)
-  /// When the uplift was last applied, so a renewal cannot be run twice for the
-  /// same term.
+  /// When the uplift was last applied. Compared against the term's end date, this
+  /// is what makes the every-15-minutes sweep safe to run: a term renews once,
+  /// however many times the sweep sees it.
   lastRenewedAt          DateTime?
 
   // Recurring billing (managed services / NOC).

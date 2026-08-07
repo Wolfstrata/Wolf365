@@ -75,9 +75,9 @@ export default async function AgreementsPage() {
               <span className="font-medium text-warning">
                 {dueCount} agreement{dueCount === 1 ? "" : "s"}
               </span>{" "}
-              {dueCount === 1 ? "has" : "have"} passed the end of their term with the auto-renew
-              uplift not yet applied. Open one to see exactly which prices would move, and confirm
-              it — renewals are never applied on their own.
+              {dueCount === 1 ? "has" : "have"} passed the end of their term and{" "}
+              {dueCount === 1 ? "is" : "are"} due to renew. The scheduled sweep applies the uplift
+              within 15 minutes; open one to apply it immediately or to see which prices move.
             </p>
           </Card>
         )}

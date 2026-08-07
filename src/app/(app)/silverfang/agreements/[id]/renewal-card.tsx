@@ -9,9 +9,9 @@ import { formatCurrency } from "@/lib/utils";
 /**
  * The auto-renew uplift, and what applying it would do.
  *
- * Applying is a button rather than something the app does on the renewal date.
- * A renewal raises what a client pays; doing that unattended is the same class of
- * mistake as pushing an invoice nobody approved.
+ * Renewals apply themselves once the term ends — the cron does it. This button is
+ * for the two cases the schedule cannot cover: renewing early, and catching one up
+ * after its dates were edited. Both run the same code as the sweep.
  *
  * Only the recurring fee moves — hourly rates are repriced on their own schedule.
  */
@@ -52,7 +52,7 @@ export function RenewalCard({
         {renewsOn ? (
           <span className={due ? "text-warning" : "text-muted-foreground"}>
             {due
-              ? `Term ended ${renewsOn} — renewal is due`
+              ? `Term ended ${renewsOn} — renewing automatically`
               : `Renews ${renewsOn}${daysUntil != null ? ` (in ${daysUntil} day${daysUntil === 1 ? "" : "s"})` : ""}`}
           </span>
         ) : (
@@ -61,6 +61,9 @@ export function RenewalCard({
           </span>
         )}
         <span className="text-xs text-muted-foreground">{termMonths}-month term</span>
+        <span className="text-xs text-muted-foreground">
+          Applies automatically at the end of the term
+        </span>
         {alreadyRenewed && (
           <span className="text-xs text-success">Already renewed for this term</span>
         )}
@@ -113,11 +116,11 @@ export function RenewalCard({
             <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} />
             {pending ? "Applying…" : `Apply renewal (+${percent}%)`}
           </button>
-          {!due && (
-            <span className="ml-3 text-xs text-muted-foreground">
-              The term has not ended yet — applying now renews it early.
-            </span>
-          )}
+          <span className="ml-3 text-xs text-muted-foreground">
+            {due
+              ? "Due now — the scheduled sweep will apply this within 15 minutes. Use the button only to do it immediately."
+              : "The term has not ended yet. It will renew on its own then; this applies the uplift early."}
+          </span>
         </form>
       )}
 

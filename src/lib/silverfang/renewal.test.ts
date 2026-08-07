@@ -261,3 +261,82 @@ describe("renewalApproaching", () => {
     expect(renewalApproaching({ autoRenew: true, endDate: null }, asOf)).toBe(false);
   });
 });
+
+/**
+ * The sweep runs every 15 minutes, so these are the properties that keep an
+ * automatic renewal from compounding. They exercise the pure predicates the
+ * sweep and `applyAgreementRenewal` both gate on.
+ */
+describe("safety under a repeating sweep", () => {
+  it("stops being due the moment the renewal is recorded", () => {
+    const term = { startDate: new Date("2026-01-01T00:00:00Z"), endDate: new Date("2027-01-01T00:00:00Z") };
+    const asOf = new Date("2027-01-01T00:05:00Z");
+
+    const before = renewalPreview(agreement({ ...term, lastRenewedAt: null }), asOf);
+    expect(before.due).toBe(true);
+
+    // What the service writes: lastRenewedAt = now, endDate rolled forward.
+    const after = renewalPreview(
+      agreement({
+        startDate: term.endDate,
+        endDate: before.newEndDate,
+        lastRenewedAt: asOf,
+      }),
+      asOf,
+    );
+    expect(after.due).toBe(false);
+    expect(after.alreadyRenewed).toBe(false); // the *next* term simply is not due yet
+  });
+
+  it("stays not-due across many subsequent sweeps in the same term", () => {
+    const renewed = agreement({
+      startDate: new Date("2027-01-01T00:00:00Z"),
+      endDate: new Date("2028-01-01T00:00:00Z"),
+      lastRenewedAt: new Date("2027-01-01T00:05:00Z"),
+    });
+    // 96 sweeps a day for a month — none of them may fire.
+    for (let i = 0; i < 96 * 30; i += 1) {
+      const asOf = new Date(Date.parse("2027-01-01T00:10:00Z") + i * 15 * 60_000);
+      if (asOf >= renewed.endDate!) break;
+      expect(renewalPreview(renewed, asOf).due).toBe(false);
+    }
+  });
+
+  it("becomes due again only once the new term ends", () => {
+    const renewed = agreement({
+      startDate: new Date("2027-01-01T00:00:00Z"),
+      endDate: new Date("2028-01-01T00:00:00Z"),
+      lastRenewedAt: new Date("2027-01-01T00:05:00Z"),
+    });
+    expect(renewalPreview(renewed, new Date("2027-12-31T00:00:00Z")).due).toBe(false);
+    expect(renewalPreview(renewed, new Date("2028-01-01T00:00:00Z")).due).toBe(true);
+  });
+
+  it("never fires for an agreement with auto-renew off, however overdue", () => {
+    expect(
+      renewalPreview(
+        agreement({ autoRenew: false, endDate: new Date("2020-01-01T00:00:00Z") }),
+        new Date("2027-01-01T00:00:00Z"),
+      ).due,
+    ).toBe(false);
+  });
+
+  it("never fires for an open-ended agreement", () => {
+    expect(renewalPreview(agreement({ endDate: null }), new Date("2030-01-01T00:00:00Z")).due).toBe(
+      false,
+    );
+  });
+
+  it("advances one term per application, so a stale agreement catches up in steps", () => {
+    // Three years overdue on an annual term.
+    const stale = agreement({
+      startDate: new Date("2024-01-01T00:00:00Z"),
+      endDate: new Date("2025-01-01T00:00:00Z"),
+    });
+    const asOf = new Date("2027-06-01T00:00:00Z");
+    const first = renewalPreview(stale, asOf);
+    expect(first.due).toBe(true);
+    // One term, not a jump straight to today.
+    expect(first.newEndDate?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
