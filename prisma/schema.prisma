@@ -2312,19 +2312,82 @@ model SfProjectTemplate {
   description String? @db.Text
   active      Boolean @default(true)
 
+  /// Project shape carried by the template, so generating one does not start from
+  /// blank. Deliberately NO client, agreement, manager or dates — those are what
+  /// make a project a specific piece of work rather than a reusable shape.
+  billingType         SfProjectBillingType @default(TIME_AND_MATERIALS)
+  contractedHours     Decimal? @db.Decimal(18, 4)
+  estimatedHours      Decimal? @db.Decimal(18, 4)
+  fixedFeeAmount      Decimal? @db.Decimal(18, 2)
+  billingIntervalDays Int?
+  depositPercent      Decimal? @db.Decimal(5, 2)
+
+  /// Set when the template was captured from a real project, for provenance.
+  sourceProjectId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  phases   SfProjectTemplatePhase[]
   tasks    SfProjectTemplateTask[]
+  tickets  SfProjectTemplateTicket[]
   projects SfProject[]
 
   @@index([active])
+}
+
+/// A phase in a template: the shape of the work and the hours sold against it.
+model SfProjectTemplatePhase {
+  id         String            @id @default(cuid())
+  templateId String
+  template   SfProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  name      String
+  sortOrder Int      @default(0)
+  hours     Decimal? @db.Decimal(18, 4)
+  notes     String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks   SfProjectTemplateTask[]
+  tickets SfProjectTemplateTicket[]
+
+  @@index([templateId, sortOrder])
+}
+
+/// A ticket the template stamps out, optionally inside one of its phases.
+model SfProjectTemplateTicket {
+  id         String            @id @default(cuid())
+  templateId String
+  template   SfProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  templatePhaseId String?
+  templatePhase   SfProjectTemplatePhase? @relation(fields: [templatePhaseId], references: [id], onDelete: SetNull)
+
+  summary        String
+  description    String?          @db.Text
+  priority       SfTicketPriority @default(P3)
+  estimatedHours Decimal?         @db.Decimal(18, 4)
+  sortOrder      Int              @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId, sortOrder])
+  @@index([templatePhaseId])
 }
 
 model SfProjectTemplateTask {
   id         String            @id @default(cuid())
   templateId String
   template   SfProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  /// The template phase this task belongs to. Nullable, and the legacy free-text
+  /// `phase` below is kept alongside it so templates written before phases became
+  /// real records still generate exactly as they did.
+  templatePhaseId String?
+  templatePhase   SfProjectTemplatePhase? @relation(fields: [templatePhaseId], references: [id], onDelete: SetNull)
 
   phase          String?
   name           String

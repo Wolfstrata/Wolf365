@@ -69,12 +69,16 @@ export function PawTip({
         <span
           id={id}
           role="tooltip"
-          className={`absolute top-6 z-50 w-72 rounded-md border bg-popover p-3 text-left shadow-lg ${
+          // bg-card, not bg-popover: this app's theme defines no --popover token, so
+          // that class produced no background and the panel rendered transparent over
+          // whatever was behind it. Opaque background plus a ring, so it reads as a
+          // panel floating above the page rather than text bleeding through it.
+          className={`absolute top-6 z-50 w-72 rounded-md border border-border bg-card p-3 text-left text-card-foreground shadow-xl ring-1 ring-black/10 ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >
           <span className="block text-xs font-semibold">{help.title}</span>
-          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+          <span className="mt-1 block text-xs leading-relaxed opacity-80">
             {help.body}
           </span>
           {help.todo && (
