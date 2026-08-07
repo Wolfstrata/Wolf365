@@ -141,13 +141,20 @@ export async function rotateEncryptionKeysAction(
       r.failed > 0 ? `${r.failed} failed` : null,
     ].filter(Boolean);
 
+    // Only mention removing the retired-key variable when one is actually set —
+    // telling someone to remove an env var they never configured sends them
+    // hunting for something that was never there.
+    const hasRetiredKeys = Boolean(process.env.WOLF365_ENCRYPTION_KEYS_OLD?.trim());
+    const remaining = r.status.outstanding + r.status.legacy + r.status.plaintext;
+
     return {
       ok: r.failed === 0,
       message:
         `${parts.join(", ")}. ` +
         (r.status.complete
-          ? "Everything is under the current key — you can now remove WOLF365_ENCRYPTION_KEYS_OLD."
-          : `${r.status.outstanding} value(s) still on a retired key — run it again.`) +
+          ? "Everything is under the current key." +
+            (hasRetiredKeys ? " WOLF365_ENCRYPTION_KEYS_OLD can now be removed." : "")
+          : `${remaining} value(s) still to convert — run it again.`) +
         (r.errors.length > 0 ? ` First error: ${r.errors[0]}` : ""),
     };
   } catch (err) {
