@@ -728,6 +728,45 @@ export async function importSuperOpsClientsAction(
   }
 }
 
+/**
+ * Give every SuperOps managed-services customer a placeholder managed agreement.
+ *
+ * Takes no input from the form on purpose: the candidate list is re-derived
+ * server-side, so a stale page can't decide which clients get agreements.
+ */
+export async function createManagedAgreementsAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("agreements:manage");
+  try {
+    const { createManagedAgreements, describeManagedRun } = await import(
+      "@/lib/silverfang/managed-service"
+    );
+    const result = await createManagedAgreements({ id: user.id, email: user.email });
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:managed-agreements",
+      metadata: {
+        created: result.created,
+        alreadyTagged: result.alreadyTagged,
+        blocked: result.blocked,
+        unmatched: result.unmatched,
+        considered: result.considered,
+        agreements: result.agreements,
+      },
+    });
+    revalidatePath("/silverfang/agreements");
+    revalidatePath("/silverfang/agreements/managed");
+    revalidatePath("/silverfang/clients");
+    return { ok: true, message: describeManagedRun(result) };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 const clientProfileSchema = z.object({
   clientId: z.string().min(1),
   accountManager: z.preprocess(emptyToUndefined, z.string().max(200).optional()),

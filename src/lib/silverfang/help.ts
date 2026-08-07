@@ -70,6 +70,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "What a client has bought: managed services with included hours, a NOC agreement, or prepaid block time. Included hours are consumed oldest-work-first; hours beyond them become overage on the next invoice.",
     todo: "Ticking auto-renew is the consent — the agreement then renews itself on its end date with the uplift applied, and every renewal is audited.",
   },
+  managedAgreements: {
+    title: "Tag managed customers",
+    body: "SuperOps has no managed-services flag, so this reads the client stage, status and contract names for the word \"managed\", then creates one draft 12-month agreement per match starting today. A client labelled \"unmanaged\" is excluded even if a contract says otherwise.",
+    todo: "Check the preview before pressing the button. What it creates is a draft with no amounts — drafts can't bill, so open each one, fill in the money, and set it Active.",
+  },
   projects: {
     title: "Projects",
     body: "Scoped work with phases, hours and its own budget. Phases hold tickets and hours that sum to the project total. A fixed-fee project tracks hours identically but never shows them to the client.",

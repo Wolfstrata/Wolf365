@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileSignature, Plus } from "lucide-react";
+import { FileSignature, Plus, ShieldCheck } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -61,12 +61,20 @@ export default async function AgreementsPage() {
         description="Block time, managed services, managed NOC and T&M agreements."
         actions={
           canManage ? (
-            <Link
-              href="/silverfang/agreements/new"
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              <Plus className="h-4 w-4" /> New agreement
-            </Link>
+            <>
+              <Link
+                href="/silverfang/agreements/managed"
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+              >
+                <ShieldCheck className="h-4 w-4" /> Tag managed customers
+              </Link>
+              <Link
+                href="/silverfang/agreements/new"
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                <Plus className="h-4 w-4" /> New agreement
+              </Link>
+            </>
           ) : null
         }
       />
