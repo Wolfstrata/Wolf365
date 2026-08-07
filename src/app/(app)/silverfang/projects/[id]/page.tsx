@@ -9,6 +9,7 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { changeLogFor } from "@/lib/silverfang/change-log";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
 import { PROJECT_STATUS_LABELS } from "@/lib/silverfang/constants";
 import {
   depositStatus,
@@ -39,12 +40,14 @@ const num = (v: { toString(): string } | null | undefined): number | null =>
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
   if (!can(user.role, "projects:read")) notFound();
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
 
   const project = await prisma.sfProject.findUnique({
     where: { id },
@@ -121,6 +124,8 @@ export default async function ProjectDetailPage({
   ]);
 
   const canManage = can(user.role, "projects:manage");
+  // The client page is the natural parent; an explicit target wins over it.
+  const backTo = safeReturnTo(sp.returnTo) ?? `/silverfang/clients/${project.client.id}`;
 
   // Time logged per phase: entries carrying the phase directly, plus those that
   // reach it through a phase ticket or a phase task.
@@ -245,10 +250,7 @@ export default async function ProjectDetailPage({
           <Breadcrumbs
             items={[
               { label: "Clients", href: "/silverfang/clients" },
-              {
-                label: project.client.name,
-                href: `/silverfang/clients/${project.client.id}`,
-              },
+              { label: project.client.name, href: backTo },
               { label: project.name },
             ]}
           />

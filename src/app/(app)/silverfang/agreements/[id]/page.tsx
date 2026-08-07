@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, TriangleAlert } from "lucide-react";
+import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -13,6 +13,8 @@ import { changeLogFor } from "@/lib/silverfang/change-log";
 import { renewalPreview } from "@/lib/silverfang/renewal";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_TYPE_LABELS } from "@/lib/silverfang/constants";
 import { getTicketRows } from "@/lib/silverfang/queries";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { AgreementForm } from "../agreement-form";
@@ -31,12 +33,14 @@ function numInput(v: unknown): string {
 
 export default async function AgreementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
   if (!can(user.role, "agreements:read")) notFound();
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
 
   const agreement = await prisma.sfAgreement.findUnique({
     where: { id },
@@ -69,6 +73,9 @@ export default async function AgreementDetailPage({
   ]);
 
   const canManage = can(user.role, "agreements:manage");
+  // The client page is the natural parent; an explicit target from wherever this
+  // was opened wins over it.
+  const backTo = safeReturnTo(sp.returnTo) ?? `/silverfang/clients/${agreement.client.id}`;
   const now = new Date();
   const blocks = agreement.blocks.map((b) => ({
     id: b.id,
@@ -108,17 +115,18 @@ export default async function AgreementDetailPage({
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">
+          <Breadcrumbs
+            items={[
+              { label: "Clients", href: "/silverfang/clients" },
+              { label: agreement.client.name, href: backTo },
+              { label: agreement.name },
+            ]}
+          />
           <Link
             href="/silverfang/agreements"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" /> Agreements
-          </Link>
-          <Link
-            href={`/silverfang/clients/${agreement.client.id}`}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {agreement.client.name}
+            <ArrowLeft className="h-4 w-4" /> All agreements
           </Link>
         </div>
 

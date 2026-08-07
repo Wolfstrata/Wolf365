@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card } from "@/components/ui/primitives";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
 import { ProjectForm } from "../project-form";
 
 export const dynamic = "force-dynamic";
@@ -40,16 +41,21 @@ export default async function NewProjectPage({
     }),
   ]);
   const clientId = sp.client && clients.some((c) => c.id === sp.client) ? sp.client : "";
+  const backTo =
+    safeReturnTo(sp.returnTo) ??
+    (clientId ? `/silverfang/clients/${clientId}` : "/silverfang/projects");
 
   return (
     <div>
       <PageHeader title="New project" description="Scoped work with a task list." />
       <div className="space-y-4 p-4 sm:p-8">
+        {/* Back to whoever opened this — usually a client page — rather than
+            always to the module list. */}
         <Link
-          href="/silverfang/projects"
+          href={backTo}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" /> Projects
+          <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <Card>
           <ProjectForm
