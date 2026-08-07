@@ -11,6 +11,8 @@ export interface RotationColumn {
   current: number;
   outstanding: number;
   plaintext: number;
+  capped?: boolean;
+  error?: string;
 }
 
 /**
@@ -24,22 +26,34 @@ export function RotateKeys({
   keyId,
   columns,
   outstanding,
+  plaintext,
   complete,
   hasRetiredKeys,
+  error,
 }: {
   keyId: string;
   columns: RotationColumn[];
   outstanding: number;
+  plaintext: number;
   complete: boolean;
   hasRetiredKeys: boolean;
+  error?: string;
 }) {
   const [result, action, pending] = useActionState<SsoActionResult | null, FormData>(
     rotateEncryptionKeysAction,
     null,
   );
 
+  const failedColumns = columns.filter((c) => c.error);
+
   return (
     <div className="space-y-3">
+      {error && (
+        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-xs">
+          Encryption status is unavailable: {error}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span className="inline-flex items-center gap-1.5 font-medium">
           <KeyRound className="h-4 w-4" /> Current key
@@ -62,6 +76,7 @@ export function RotateKeys({
               <th className="py-1 pr-4 text-right font-medium">Values</th>
               <th className="py-1 pr-4 text-right font-medium">Current key</th>
               <th className="py-1 pr-4 text-right font-medium">Retired key</th>
+              <th className="py-1 pr-4 text-right font-medium">Not encrypted</th>
             </tr>
           </thead>
           <tbody>
@@ -69,35 +84,69 @@ export function RotateKeys({
               <tr key={`${c.model}.${c.column}`} className="border-t">
                 <td className="py-1.5 pr-4">
                   {c.model}.{c.column}
+                  {c.capped && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">(first 5,000)</span>
+                  )}
                 </td>
-                <td className="py-1.5 pr-4 text-right tabular-nums">{c.total}</td>
-                <td className="py-1.5 pr-4 text-right tabular-nums">{c.current}</td>
-                <td
-                  className={`py-1.5 pr-4 text-right tabular-nums ${
-                    c.outstanding > 0 ? "font-medium text-warning" : "text-muted-foreground"
-                  }`}
-                >
-                  {c.outstanding}
-                </td>
+                {c.error ? (
+                  <td className="py-1.5 pr-4 text-danger" colSpan={4}>
+                    Could not read: {c.error}
+                  </td>
+                ) : (
+                  <>
+                    <td className="py-1.5 pr-4 text-right tabular-nums">{c.total}</td>
+                    <td className="py-1.5 pr-4 text-right tabular-nums">{c.current}</td>
+                    <td
+                      className={`py-1.5 pr-4 text-right tabular-nums ${
+                        c.outstanding > 0 ? "font-medium text-warning" : "text-muted-foreground"
+                      }`}
+                    >
+                      {c.outstanding}
+                    </td>
+                    <td
+                      className={`py-1.5 pr-4 text-right tabular-nums ${
+                        c.plaintext > 0 ? "font-medium text-warning" : "text-muted-foreground"
+                      }`}
+                    >
+                      {c.plaintext}
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {outstanding > 0 ? (
+      {failedColumns.length > 0 && (
+        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-xs">
+          {failedColumns.length} column(s) could not be read, so this report is incomplete and
+          the retired key must not be removed yet. The usual cause is a migration that has not
+          been applied — check <code>npm run db:status</code>.
+        </p>
+      )}
+
+      {outstanding > 0 && (
         <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
           {outstanding} stored value(s) are still encrypted under a retired key. Run the rotation
           until this reaches zero, then remove <code>WOLF365_ENCRYPTION_KEYS_OLD</code>. Removing it
           first would make those values permanently unreadable.
         </p>
-      ) : (
-        complete && (
-          <p className="text-xs text-success">
-            Everything is under the current key.
-            {hasRetiredKeys && " WOLF365_ENCRYPTION_KEYS_OLD can now be removed."}
-          </p>
-        )
+      )}
+
+      {plaintext > 0 && (
+        <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          {plaintext} value(s) are stored in the clear — a column that was encrypted after its
+          data was written. Reads tolerate this, so nothing is broken, but the data is not
+          protected until you run the rotation below and this reaches zero.
+        </p>
+      )}
+
+      {complete && (
+        <p className="text-xs text-success">
+          Everything is encrypted under the current key.
+          {hasRetiredKeys && " WOLF365_ENCRYPTION_KEYS_OLD can now be removed."}
+        </p>
       )}
 
       <form action={action}>

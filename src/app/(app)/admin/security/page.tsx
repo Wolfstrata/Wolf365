@@ -57,16 +57,20 @@ export default async function SecurityPage() {
         <Card>
           <h2 className="mb-1 text-sm font-semibold">Encryption at rest</h2>
           <p className="mb-3 text-xs text-muted-foreground">
-            Connector secrets and OAuth tokens are encrypted by the application
-            (AES-256-GCM) on top of Neon&rsquo;s storage encryption, so a raw database dump does
-            not yield credentials. This is where the key gets rotated.
+            Connector secrets, OAuth tokens, contact detail and ticket free text are encrypted
+            by the application (AES-256-GCM) on top of Neon&rsquo;s storage encryption, so a raw
+            database dump yields neither credentials nor personal data. This is where the key
+            gets rotated, and where a column encrypted after its data was written gets
+            backfilled.
           </p>
           <RotateKeys
             keyId={rotation.primaryKeyId}
             columns={rotation.columns}
             outstanding={rotation.outstanding}
+            plaintext={rotation.plaintext}
             complete={rotation.complete}
             hasRetiredKeys={hasRetiredKeys}
+            {...(rotation.error ? { error: rotation.error } : {})}
           />
         </Card>
       </div>

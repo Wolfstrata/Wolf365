@@ -46,8 +46,9 @@ export default function AppError({
           <>
             <p className="mt-1 text-sm text-muted-foreground">
               This page failed to load. It isn’t a permissions problem — your role has access.
-              An administrator can see the cause in Administration → Debug Logs, or in the
-              deployment logs.
+              The cause is in the Vercel function logs for this deployment, under the reference
+              below. (Administration → Debug Logs holds connector sync activity only, not page
+              errors.)
             </p>
             {error.digest && (
               <p className="mt-2 font-mono text-xs text-muted-foreground">

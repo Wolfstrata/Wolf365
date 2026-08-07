@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { safeErrorMessage } from "@/lib/redact";
 import {
   ciphertextKeyId,
   decryptField,
@@ -84,6 +85,10 @@ export interface ColumnStatus {
   outstanding: number;
   /** Still plaintext — never encrypted, or written before the column was. */
   plaintext: number;
+  /** True when the scan hit its row cap, so these counts are a lower bound. */
+  capped?: boolean;
+  /** Why this column could not be read. Counts are meaningless when set. */
+  error?: string;
 }
 
 export interface RotationStatus {
@@ -93,7 +98,17 @@ export interface RotationStatus {
   plaintext: number;
   /** True when nothing is left on a retired key AND nothing is plaintext. */
   complete: boolean;
+  /** Set when the status itself could not be determined at all. */
+  error?: string;
 }
+
+/**
+ * How many rows one column's scan will read. Answering "what key is this under?"
+ * means reading the value, so the scan is bounded — an administrative page must
+ * not be able to pull an unbounded amount of ticket text into memory. A capped
+ * column reports `capped`, and can never report complete.
+ */
+const SCAN_LIMIT = 5_000;
 
 /** Prisma's delegates are not indexable by name in its types; narrow once, here. */
 type Delegate = {
@@ -113,42 +128,77 @@ function delegate(model: string): Delegate {
  * is under is in the value, not in a summary column.
  */
 export async function rotationStatus(): Promise<RotationStatus> {
-  const current = primaryKeyId();
-  const columns: ColumnStatus[] = [];
+  // Resolving the key can fail on its own (missing or malformed env value), and
+  // that must read as a reportable condition rather than a blank page.
+  let current: string;
+  try {
+    current = primaryKeyId();
+  } catch (err) {
+    return {
+      primaryKeyId: "unavailable",
+      columns: [],
+      outstanding: 0,
+      plaintext: 0,
+      complete: false,
+      error: safeErrorMessage(err),
+    };
+  }
 
+  const columns: ColumnStatus[] = [];
   for (const entry of REGISTRY) {
-    const rows = await delegate(entry.model).findMany({
-      where: { [entry.column]: { not: null } },
-      select: { id: true, [entry.column]: true },
-    });
-    let onCurrent = 0;
-    let plaintext = 0;
-    let outstanding = 0;
-    for (const row of rows) {
-      const value = row[entry.column];
-      if (typeof value !== "string" || value === "") continue;
-      if (!isCiphertext(value)) plaintext += 1;
-      else if (ciphertextKeyId(value) === current) onCurrent += 1;
-      else outstanding += 1;
+    // One unreadable column must not cost the whole report — and, more to the
+    // point, must not take down the page this report sits on. Naming the column
+    // that failed is the difference between a fixable message and a mystery.
+    try {
+      const rows = await delegate(entry.model).findMany({
+        where: { [entry.column]: { not: null } },
+        select: { id: true, [entry.column]: true },
+        take: SCAN_LIMIT + 1,
+      });
+      let onCurrent = 0;
+      let plaintext = 0;
+      let outstanding = 0;
+      for (const row of rows.slice(0, SCAN_LIMIT)) {
+        const value = row[entry.column];
+        if (typeof value !== "string" || value === "") continue;
+        if (!isCiphertext(value)) plaintext += 1;
+        else if (ciphertextKeyId(value) === current) onCurrent += 1;
+        else outstanding += 1;
+      }
+      columns.push({
+        model: entry.model,
+        column: entry.column,
+        total: onCurrent + plaintext + outstanding,
+        current: onCurrent,
+        outstanding,
+        plaintext,
+        ...(rows.length > SCAN_LIMIT ? { capped: true } : {}),
+      });
+    } catch (err) {
+      columns.push({
+        model: entry.model,
+        column: entry.column,
+        total: 0,
+        current: 0,
+        outstanding: 0,
+        plaintext: 0,
+        error: safeErrorMessage(err),
+      });
     }
-    columns.push({
-      model: entry.model,
-      column: entry.column,
-      total: onCurrent + plaintext + outstanding,
-      current: onCurrent,
-      outstanding,
-      plaintext,
-    });
   }
 
   const outstanding = columns.reduce((a, c) => a + c.outstanding, 0);
   const plaintext = columns.reduce((a, c) => a + c.plaintext, 0);
+  const unknown = columns.some((c) => c.error || c.capped);
   return {
     primaryKeyId: current,
     columns,
     outstanding,
     plaintext,
-    complete: outstanding === 0 && plaintext === 0,
+    // A column we could not fully read might hold values on the retired key, so
+    // "complete" would be a guess. Dropping the old key on a guess makes data
+    // permanently unreadable, so this stays false until every column is known.
+    complete: outstanding === 0 && plaintext === 0 && !unknown,
   };
 }
 
@@ -181,11 +231,20 @@ export async function rotateEncryptedValues(limitPerColumn = 500): Promise<Rotat
   const errors: string[] = [];
 
   for (const entry of REGISTRY) {
-    const rows = await delegate(entry.model).findMany({
-      where: { [entry.column]: { not: null } },
-      select: { id: true, [entry.column]: true },
-      take: limitPerColumn * 4,
-    });
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await delegate(entry.model).findMany({
+        where: { [entry.column]: { not: null } },
+        select: { id: true, [entry.column]: true },
+        take: limitPerColumn * 4,
+      });
+    } catch (err) {
+      // A column that cannot even be read is reported and stepped over, so the
+      // rest of the rotation still happens.
+      failed += 1;
+      errors.push(`${entry.model}.${entry.column}: ${safeErrorMessage(err)}`);
+      continue;
+    }
 
     let done = 0;
     for (const row of rows) {
