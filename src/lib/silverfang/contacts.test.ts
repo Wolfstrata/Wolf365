@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   contactDisplayName,
   contactImportDecision,
+  nameFromAddress,
   splitName,
 } from "@/lib/silverfang/contacts";
 
@@ -61,5 +62,32 @@ describe("contactDisplayName", () => {
   it("falls back to the email local part, then a placeholder", () => {
     expect(contactDisplayName({ firstName: "", email: "sam@example.com" })).toBe("sam");
     expect(contactDisplayName({})).toBe("Unnamed contact");
+  });
+});
+
+describe("nameFromAddress", () => {
+  it("turns a dotted local part into a name", () => {
+    expect(nameFromAddress("sam.jones@acme.com")).toEqual({
+      firstName: "Sam",
+      lastName: "Jones",
+    });
+  });
+
+  it("handles underscores, plus tags and hyphens", () => {
+    expect(nameFromAddress("sam_jones@acme.com")?.lastName).toBe("Jones");
+    expect(nameFromAddress("sam-jones@acme.com")?.lastName).toBe("Jones");
+    expect(nameFromAddress("sam+tickets@acme.com")?.firstName).toBe("Sam");
+  });
+
+  it("gives a first name only for a single-word local part", () => {
+    expect(nameFromAddress("sam@acme.com")).toEqual({ firstName: "Sam", lastName: null });
+  });
+
+  it("returns null when there is no name to find", () => {
+    // Better to fall back than to create a contact called "12345".
+    expect(nameFromAddress("12345@acme.com")).toBeNull();
+    expect(nameFromAddress("@acme.com")).toBeNull();
+    expect(nameFromAddress(null)).toBeNull();
+    expect(nameFromAddress("")).toBeNull();
   });
 });

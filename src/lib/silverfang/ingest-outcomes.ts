@@ -40,7 +40,8 @@ const DECISIONS: Record<MailDecision, DecisionInfo> = {
   created: {
     label: "Opened a ticket",
     kind: "filed",
-    explanation: "The sender matched a client and a new ticket was opened.",
+    explanation:
+      "The sender matched a client and a new ticket was opened. A sender who was not a known contact but shares a business domain with one is matched to that client, and a contact is created for them so the next message matches by address.",
   },
   appended: {
     label: "Added to a ticket",
@@ -70,7 +71,7 @@ const DECISIONS: Record<MailDecision, DecisionInfo> = {
     label: "Sender not recognised",
     kind: "problem",
     explanation:
-      "No contact holds this address, no other contact shares its domain, and the mailbox has no fallback client — so there was no client to open the ticket against.",
+      "No contact holds this address, no other contact shares its domain, and the mailbox has no fallback client — so there was no client to open the ticket against. Consumer domains (gmail.com and friends) are deliberately never domain-matched, since sharing one says nothing about who someone works for.",
     remedy:
       "Add the sender as a contact on the right client, or set a fallback client on the mailbox so unmatched mail still lands somewhere.",
   },

@@ -1,7 +1,8 @@
 import "server-only";
 import type { Prisma, SfMailbox } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { contactEmailIndex, textWrite } from "@/lib/silverfang/pii";
+import { contactEmailIndex, contactWrite, textWrite } from "@/lib/silverfang/pii";
+import { nameFromAddress, splitName } from "@/lib/silverfang/contacts";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import {
@@ -210,6 +211,63 @@ async function resolveSender(from: string, mailbox: SfMailbox): Promise<SenderMa
 }
 
 /**
+ * Create a contact for a sender we matched by domain.
+ *
+ * The company is known — other contacts share this domain — but the person is not.
+ * Recording them turns a one-off match into a real requester: the next message
+ * matches by address instead of by domain, a reply has somewhere to go, and the
+ * ticket shows who raised it.
+ *
+ * Provenance is stamped as EMAIL/<address>, which the (sourceSystem, externalId)
+ * unique constraint turns into idempotency — two messages racing in from the same
+ * new sender cannot produce two contacts.
+ *
+ * Never throws. A contact we failed to create must not cost us the ticket; the
+ * ticket is simply filed without a requester, exactly as before.
+ */
+async function autoCreateContact(
+  from: string,
+  fromName: string | null,
+  clientId: string,
+): Promise<string | null> {
+  try {
+    // The display name the sender's own mail client set is better than anything
+    // derived from the address, so it wins when present.
+    const parsed = splitName(fromName) ?? nameFromAddress(from);
+    if (!parsed) return null;
+
+    const created = await prisma.sfContact.create({
+      data: {
+        clientId,
+        firstName: parsed.firstName,
+        lastName: parsed.lastName,
+        // Encrypted, with the blind index and domain derived in the same write —
+        // the index is what makes the NEXT message from them match by address.
+        ...contactWrite({ email: from }),
+        sourceSystem: AUTO_CONTACT_SOURCE,
+        externalId: from,
+        // Deliberately not primary: an unknown sender is not the main contact for a
+        // company just because they emailed first.
+        isPrimary: false,
+        active: true,
+      },
+      select: { id: true },
+    });
+    return created.id;
+  } catch {
+    // Most likely a unique-constraint collision from a concurrent ingest of the
+    // same sender. Look up whoever won the race so the ticket still gets them.
+    const existing = await prisma.sfContact
+      .findFirst({ where: { emailIndex: contactEmailIndex(from) }, select: { id: true } })
+      .catch(() => null);
+    return existing?.id ?? null;
+  }
+}
+
+/** Provenance for contacts the mail path created, distinct from an import. */
+export const AUTO_CONTACT_SOURCE = "EMAIL";
+
+/**
  * The board a new ticket from this mailbox opens on, with its statuses.
  *
  * Order of preference: the mailbox's configured board, then the client's default,
@@ -342,6 +400,18 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
         detail: `No contact, client domain or fallback client matches ${from}.`,
       };
     }
+    // A domain match means we know the company but not the person. Create the
+    // contact so the ticket has a real requester, the next mail from them matches
+    // by address rather than by domain, and a reply has somewhere to go.
+    //
+    // Only for a domain match. A `fallback` match is the mailbox's catch-all client
+    // — a guess, not evidence this person belongs there — so inventing a contact
+    // on it would attach strangers to whichever client happened to be configured.
+    let contactId = sender.contactId;
+    if (!contactId && sender.via === "domain") {
+      contactId = await autoCreateContact(from, input.fromName ?? null, sender.clientId);
+    }
+
     const board = await resolveBoard(mailbox, sender.clientId);
     if (!board) {
       return {
@@ -360,7 +430,7 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
         data: {
           number,
           clientId: sender.clientId,
-          contactId: sender.contactId,
+          contactId,
           boardId: board.id,
           statusId: status.id,
           priority: mailbox.defaultPriority,
@@ -406,6 +476,7 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
         number: created.number,
         mailbox: mailbox.address,
         clientMatchedVia: sender.via,
+        contactAutoCreated: contactId != null && sender.contactId == null,
         created: true,
       },
     });
