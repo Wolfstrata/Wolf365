@@ -45,4 +45,7 @@ export const ENCRYPTED_COLUMNS: EncryptedColumn[] = [
   { model: "sfTicketMessage", column: "fromAddress" },
   { model: "sfTicketMessage", column: "bodyText" },
   { model: "sfTicketMessage", column: "bodyHtml" },
+  // The sender on an inbound-mail decision. Same data as a ticket message's
+  // from-address, so it gets the same treatment.
+  { model: "sfMailEvent", column: "fromAddress" },
 ];

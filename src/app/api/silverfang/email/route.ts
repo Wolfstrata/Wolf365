@@ -4,7 +4,11 @@ import { getEnv } from "@/env";
 import { safeEqual } from "@/lib/crypto";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { safeErrorMessage } from "@/lib/redact";
-import { ingestInboundEmail, type InboundEmail } from "@/lib/silverfang/email-ingest";
+import {
+  ingestInboundEmail,
+  recordMailDecision,
+  type InboundEmail,
+} from "@/lib/silverfang/email-ingest";
 import { TICKET_HEADER } from "@/lib/silverfang/email";
 
 export const dynamic = "force-dynamic";
@@ -160,7 +164,11 @@ export async function POST(request: Request) {
         outcomes.push({ ok: false, reason: "not-an-object" });
         continue;
       }
-      const result = await ingestInboundEmail(mapMessage(item as Record<string, unknown>));
+      const input = mapMessage(item as Record<string, unknown>);
+      const result = await ingestInboundEmail(input);
+      // Recorded here as well as in the poll, so a message that arrives by webhook
+      // is just as visible on the Email page as one we fetched ourselves.
+      await recordMailDecision(input, result);
       if (result.ok) {
         if (result.action === "created") counts.created += 1;
         else if (result.action === "appended") counts.appended += 1;

@@ -8,7 +8,10 @@ import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TEMPLATE_VARIABLES, TICKET_HEADER } from "@/lib/silverfang/email";
 import { outboundEnabled } from "@/lib/silverfang/email-policy";
+import { SETTLED_DECISIONS } from "@/lib/silverfang/ingest-outcomes";
+import { textRead } from "@/lib/silverfang/pii";
 import { POLICY_ID } from "@/lib/silverfang/mail";
+import { MailEvents, type MailEventRow } from "./mail-events";
 import { toggleAutoResponseAction } from "../actions";
 import { MailboxForm, type MailboxValues } from "./mailbox-form";
 import { DiagnoseMail } from "./diagnose";
@@ -45,9 +48,17 @@ function Yes({ ok, label }: { ok: boolean; label: string }) {
  * SilverFang email configuration: which mailboxes we send from and poll, how
  * inbound mail can reach us, and the auto-response rules.
  */
-export default async function SilverFangEmailPage() {
+export default async function SilverFangEmailPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mail?: string }>;
+}) {
   await requirePermission("silverfang:configure");
   const env = getEnv();
+  // Default to the problems: on a healthy install almost every row is a
+  // deliberate skip, and burying the two that matter under fifty that don't is
+  // how this stayed invisible in the first place.
+  const showAllMail = (await searchParams).mail === "all";
 
   const [mailboxes, boards, clients, rules, graphReady, inboundCount] = await Promise.all([
     prisma.sfMailbox.findMany({
@@ -89,6 +100,34 @@ export default async function SilverFangEmailPage() {
   const masterOn = outboundEnabled(policy);
 
   const outboundCount = await prisma.sfTicketMessage.count({ where: { direction: "OUTBOUND" } });
+
+  // Recent inbound decisions. Filtered by excluding the settled outcomes rather
+  // than by listing the problems, so an outcome this build does not know about
+  // still surfaces instead of passing as fine.
+  const [mailEventRows, mailProblemCount] = await Promise.all([
+    prisma.sfMailEvent.findMany({
+      where: showAllMail ? {} : { decision: { notIn: SETTLED_DECISIONS } },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        mailbox: { select: { address: true } },
+        ticket: { select: { id: true, number: true } },
+      },
+    }),
+    prisma.sfMailEvent.count({ where: { decision: { notIn: SETTLED_DECISIONS } } }),
+  ]);
+  const mailEvents: MailEventRow[] = mailEventRows.map((e) => ({
+    id: e.id,
+    decision: e.decision,
+    detail: e.detail,
+    // Stored encrypted, like every other address in the system.
+    fromAddress: textRead(e.fromAddress),
+    subject: e.subject,
+    mailbox: e.mailbox?.address ?? null,
+    ticketId: e.ticket?.id ?? null,
+    ticketNumber: e.ticket?.number ?? null,
+    at: e.receivedAt ?? e.createdAt,
+  }));
   const webhookUrl = env.AUTH_URL
     ? `${env.AUTH_URL.replace(/\/$/, "")}/api/silverfang/email`
     : "/api/silverfang/email";
@@ -197,6 +236,17 @@ export default async function SilverFangEmailPage() {
         </Card>
 
         <DiagnoseMail />
+
+        {/* What happened to inbound mail */}
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">Inbound mail activity</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Every message the ingest decided on. Nothing is dropped silently — a message
+            that did not become a ticket says which of the reasons applied, and whether
+            that was deliberate or something to fix.
+          </p>
+          <MailEvents events={mailEvents} problems={mailProblemCount} showAll={showAllMail} />
+        </Card>
 
         {/* Mailboxes */}
         <Card>

@@ -1653,6 +1653,7 @@ model SfTicket {
   timeEntries SfTimeEntry[]
   slaEvents   SfSlaEvent[]
   calendarLinks SfCalendarLink[]
+  mailEvents  SfMailEvent[]
 
   @@index([clientId])
   @@index([boardId, statusId])
@@ -1738,10 +1739,50 @@ model SfMailbox {
   updatedAt DateTime @updatedAt
 
   messages SfTicketMessage[]
+  events   SfMailEvent[]
 
   @@index([active, inbound])
   @@index([boardId])
   @@index([fallbackClientId])
+}
+
+/// What happened to one inbound message.
+///
+/// The ingest has always decided honestly — it returns a named outcome for every
+/// path and never drops mail silently — but those names lived only in a JSON
+/// response nobody reads, so "1 fetched, 0 new tickets" was the whole story an
+/// operator got. One row per decided message makes the mail path answerable:
+/// which messages were deliberately ignored, and which were lost to a gap.
+model SfMailEvent {
+  id String @id @default(cuid())
+
+  mailboxId String?
+  mailbox   SfMailbox? @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+
+  /// "created" | "appended" | "deduped" | an IngestSkipReason. Text rather than an
+  /// enum so a new outcome needs no migration; the UI degrades unknown values to
+  /// "needs attention" rather than showing them as fine.
+  decision String
+  /// The specifics — the address that matched nothing, the error message.
+  detail   String? @db.Text
+
+  /// PERSONAL DATA — app-encrypted at rest (src/lib/crypto.ts).
+  fromAddress String?
+  subject     String?
+
+  messageId  String?
+  externalId String?
+
+  /// The ticket this landed on, for a filed or deduped message.
+  ticketId String?
+  ticket   SfTicket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  receivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([mailboxId, createdAt])
+  @@index([decision, createdAt])
 }
 
 // An email tied to a ticket, inbound or outbound. Threading headers are stored

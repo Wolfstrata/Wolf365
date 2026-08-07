@@ -1313,17 +1313,17 @@ export async function pollMailboxesAction(
       }),
       { fetched: 0, created: 0, appended: 0, deduped: 0 },
     );
-    const skipped = results.flatMap((r) =>
-      Object.entries(r.skipped).map(([reason, count]) => `${count} ${reason}`),
-    );
-    const parts = [
-      `${totals.fetched} fetched`,
-      `${totals.created} new ticket(s)`,
-      `${totals.appended} appended`,
-    ];
-    if (totals.deduped > 0) parts.push(`${totals.deduped} already seen`);
-    if (skipped.length > 0) parts.push(`skipped: ${skipped.join(", ")}`);
-    const summary = parts.join(", ") + ".";
+    // Merge the per-mailbox skip tallies, then let the shared vocabulary name them.
+    // This used to print raw reason slugs ("2 unknown-sender") and, worse, reported
+    // an empty mailbox and a mailbox where everything was skipped identically.
+    const skipped: Record<string, number> = {};
+    for (const r of results) {
+      for (const [reason, count] of Object.entries(r.skipped)) {
+        skipped[reason] = (skipped[reason] ?? 0) + count;
+      }
+    }
+    const { summarizePoll } = await import("@/lib/silverfang/ingest-outcomes");
+    const summary = summarizePoll({ ...totals, skipped }) + ".";
 
     return failed.length > 0
       ? {

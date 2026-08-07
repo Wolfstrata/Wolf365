@@ -19,6 +19,7 @@ import {
   summaryFromSubject,
 } from "@/lib/silverfang/email";
 import { runAutoResponses } from "@/lib/silverfang/auto-response";
+import { decisionOf } from "@/lib/silverfang/ingest-outcomes";
 import {
   fetchMailboxMessages,
   markMessageRead,
@@ -482,6 +483,72 @@ async function appendToTicket(
   });
 }
 
+/** How long a decision is kept. Long enough to investigate, short enough to bound. */
+const EVENT_RETENTION_DAYS = 30;
+
+/**
+ * Record what happened to one message.
+ *
+ * Called by every ingest caller rather than from inside `ingestInboundEmail`,
+ * which keeps that function a decision and this a side effect — and means the
+ * webhook path cannot accidentally record differently from the poll.
+ *
+ * Never throws: losing the audit trail for a message must not also lose the
+ * message. A failure here would otherwise turn a filed ticket into an error.
+ */
+export async function recordMailDecision(
+  input: InboundEmail,
+  outcome: IngestResult,
+  mailboxId?: string | null,
+): Promise<void> {
+  try {
+    await prisma.sfMailEvent.create({
+      data: {
+        // The webhook path does not know which mailbox the ingest settled on, so
+        // attribute by address when it was not given. Deliberately lenient — this
+        // is a label, not a routing decision, and a disabled mailbox is still the
+        // right answer to "where did this arrive?".
+        mailboxId: mailboxId ?? (await attributeMailbox(input.mailboxAddress ?? null)),
+        decision: decisionOf(outcome),
+        detail: outcome.ok ? null : (outcome.detail ?? null),
+        // The sender is the single most useful field here — it is who to add as a
+        // contact — and it is personal data, so it is stored the same way as
+        // everywhere else.
+        fromAddress: textWrite(normalizeAddress(input.from) ?? input.from),
+        subject: input.subject ?? null,
+        messageId: input.messageId ?? null,
+        externalId: input.externalId ?? null,
+        ticketId: outcome.ok ? outcome.ticketId : null,
+        receivedAt: input.receivedAt ?? null,
+      },
+    });
+  } catch {
+    // Deliberately silent: see above.
+  }
+}
+
+/** Best-effort mailbox for labelling an event, by polled or reply-as address. */
+async function attributeMailbox(address: string | null): Promise<string | null> {
+  const normalized = normalizeAddress(address);
+  if (!normalized) return null;
+  const mailbox = await prisma.sfMailbox.findFirst({
+    where: { OR: [{ address: normalized }, { sendAsAddress: normalized }] },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return mailbox?.id ?? null;
+}
+
+/** Drop decisions past the retention window. */
+async function pruneMailEvents(): Promise<void> {
+  const cutoff = new Date(Date.now() - EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  try {
+    await prisma.sfMailEvent.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  } catch {
+    // Housekeeping — never worth failing a poll over.
+  }
+}
+
 export interface MailboxPollResult {
   mailbox: string;
   ok: boolean;
@@ -526,7 +593,9 @@ export async function pollMailbox(
 
   let watermark = mailbox.lastMessageAt;
   for (const msg of fetched.messages) {
-    const outcome = await ingestInboundEmail(toInbound(mailbox, msg));
+    const input = toInbound(mailbox, msg);
+    const outcome = await ingestInboundEmail(input);
+    await recordMailDecision(input, outcome, mailbox.id);
     if (outcome.ok) {
       if (outcome.action === "created") result.created += 1;
       else if (outcome.action === "appended") result.appended += 1;
@@ -545,6 +614,7 @@ export async function pollMailbox(
     where: { id: mailbox.id },
     data: { lastPolledAt: new Date(), lastMessageAt: watermark, lastPollError: null },
   });
+  await pruneMailEvents();
   return result;
 }
 
