@@ -935,6 +935,90 @@ export async function importSuperOpsClientsAction(
   }
 }
 
+const adoptSenderSchema = z.object({
+  address: z.string().trim().min(3).max(320),
+  clientId: z.string().min(1, "Choose a client for this sender"),
+});
+
+/**
+ * Add one refused sender as a contact on a client, from the mail log.
+ *
+ * The email address is the whole input — the name comes from it and every other
+ * contact field is optional. Clearing this list should not cost a form per person.
+ *
+ * Gated on `tickets:write`, not `silverfang:configure`: a technician looking at
+ * unrecognised mail is exactly who should be able to file the sender, and it
+ * creates one contact rather than writing across every client.
+ */
+export async function adoptSenderAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = adoptSenderSchema.parse({
+      address: formValue(formData, "address"),
+      clientId: formValue(formData, "clientId"),
+    });
+
+    const { adoptSender } = await import("@/lib/silverfang/sender-triage");
+    const outcome = await adoptSender(input);
+    if (!outcome.ok) return outcome;
+
+    await audit({
+      action: "SF_CONTACT_CREATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `client:${input.clientId}`,
+      // The address is personal data; the trail records that a contact was created
+      // for this client from the mail log, not the person's address.
+      metadata: { via: "mail-triage", domain: input.address.split("@")[1] ?? null },
+    });
+    revalidatePath("/silverfang/email");
+    revalidatePath("/silverfang/contacts");
+    revalidatePath(`/silverfang/clients/${input.clientId}`);
+    return outcome;
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Add every refused sender that has a confident client match.
+ *
+ * Takes no input: the suggestions are re-derived server-side, so which person
+ * lands on which company is never decided by a stale page.
+ */
+export async function adoptAllSuggestedSendersAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { adoptAllSuggested, describeAdoptAll } = await import(
+      "@/lib/silverfang/sender-triage"
+    );
+    const outcome = await adoptAllSuggested();
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:sender-triage",
+      metadata: {
+        added: outcome.added,
+        skipped: outcome.skipped,
+        clients: outcome.clients,
+      },
+    });
+    revalidatePath("/silverfang/email");
+    revalidatePath("/silverfang/contacts");
+    revalidatePath("/silverfang/clients");
+    return { ok: outcome.added > 0 || outcome.skipped === 0, message: describeAdoptAll(outcome) };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 /**
  * Create contacts for inbound addresses that the domain rules can place.
  *

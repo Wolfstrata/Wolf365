@@ -14,6 +14,8 @@ import { INTERNAL_ONLY_RULE_TRIGGERS } from "@/lib/silverfang/auto-response-trig
 import { textRead } from "@/lib/silverfang/pii";
 import { POLICY_ID } from "@/lib/silverfang/mail";
 import { MailEvents, type MailEventRow } from "./mail-events";
+import { UnknownSenders, type UnknownSenderRow } from "./unknown-senders";
+import { unrecognisedSenders } from "@/lib/silverfang/sender-triage";
 import { toggleAutoResponseAction } from "../actions";
 import { MailboxForm, type MailboxValues } from "./mailbox-form";
 import { DiagnoseMail } from "./diagnose";
@@ -130,6 +132,22 @@ export default async function SilverFangEmailPage({
     ticketNumber: e.ticket?.number ?? null,
     at: e.receivedAt ?? e.createdAt,
   }));
+  // Senders nobody has on file, grouped per person with a client suggested for
+  // each. Loaded here rather than inside the log component because it needs the
+  // client list and the SuperOps domain map, neither of which the log has.
+  const triage = await unrecognisedSenders();
+  const triageRows: UnknownSenderRow[] = triage.rows.map((r) => ({
+    address: r.address,
+    domain: r.domain,
+    count: r.count,
+    lastAt: r.lastAt.toISOString(),
+    lastSubject: r.lastSubject,
+    mailbox: r.mailbox,
+    suggestedClientId: r.suggestion?.clientId ?? null,
+    suggestedTier: r.suggestion?.tier ?? null,
+    nameable: r.nameable,
+  }));
+
   const webhookUrl = env.AUTH_URL
     ? `${env.AUTH_URL.replace(/\/$/, "")}/api/silverfang/email`
     : "/api/silverfang/email";
@@ -240,13 +258,29 @@ export default async function SilverFangEmailPage({
 
         <DiagnoseMail />
 
+        {/* Senders to deal with. Above the log, because this is the part that has
+            an action attached; the log below is the record. */}
+        <Card>
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            Unrecognised senders <PawTip topic="unknownSenders" />
+          </h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            People who emailed and had no ticket opened, because nobody holds their address and no
+            other contact shares their domain. Grouped per person — file each against a client and
+            their next email lands properly.
+          </p>
+          <UnknownSenders rows={triageRows} clients={triage.clients} />
+        </Card>
+
         {/* What happened to inbound mail */}
         <Card>
           <h2 className="mb-1 text-sm font-semibold">Inbound mail activity</h2>
           <p className="mb-3 text-xs text-muted-foreground">
             Every message the ingest decided on. Nothing is dropped silently — a message
             that did not become a ticket says which of the reasons applied, and whether
-            that was deliberate or something to fix.
+            that was deliberate or something to fix. This is the record, so a sender you
+            have since filed still appears here; the panel above is what tracks what is
+            still outstanding.
           </p>
           <MailEvents events={mailEvents} problems={mailProblemCount} showAll={showAllMail} />
         </Card>

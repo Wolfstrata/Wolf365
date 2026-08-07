@@ -70,6 +70,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "What a client has bought: managed services with included hours, a NOC agreement, or prepaid block time. Included hours are consumed oldest-work-first; hours beyond them become overage on the next invoice.",
     todo: "Ticking auto-renew is the consent — the agreement then renews itself on its end date with the uplift applied, and every renewal is audited.",
   },
+  unknownSenders: {
+    title: "Unrecognised senders",
+    body: "People who emailed and got no ticket, because nobody holds their address and no other contact shares their domain. Grouped per person, not per message — someone who gets no reply emails again, and the fix is one decision per person.",
+    todo: "Pick the client and press Add contact; the address is all that's needed, the name comes from it. Their next email opens a ticket. The refused messages aren't retried — the mailbox poll has already moved past them.",
+  },
   authorizedTechs: {
     title: "Authorised technicians",
     body: "A per-agreement and per-project whitelist of who may log time. It exists to stop a tech drawing down the wrong client's prepaid block by accident. An empty list means everyone — the restriction only exists once you name somebody.",
