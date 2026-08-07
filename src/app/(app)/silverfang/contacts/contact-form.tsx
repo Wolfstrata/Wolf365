@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Save, Trash2 } from "lucide-react";
+import { Save, Star, Trash2 } from "lucide-react";
 import { saveContactAction, deleteContactAction, type SfActionResult } from "../actions";
 
 const inputCls =
@@ -17,6 +17,7 @@ export interface ContactFormValues {
   mobile: string;
   title: string;
   isPrimary: boolean;
+  vip: boolean;
   active: boolean;
   notes: string;
 }
@@ -148,6 +149,11 @@ export function ContactForm({
             Primary contact for this client
           </label>
           <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" name="vip" defaultChecked={values.vip} className="h-4 w-4" />
+            <Star className="h-3.5 w-3.5" />
+            VIP
+          </label>
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               name="active"
@@ -169,7 +175,9 @@ export function ContactForm({
         <p className="text-xs text-muted-foreground">
           Unticking <span className="font-medium">Active</span> keeps the contact and its ticket
           history but removes it from the requester picker. Marking someone primary moves the
-          flag off whoever held it.
+          flag off whoever held it. <span className="font-medium">VIP</span> lifts this
+          person&rsquo;s tickets above others <em>at the same priority</em> — it never outranks
+          priority itself, so a VIP&rsquo;s routine request cannot jump ahead of an outage.
         </p>
 
         {source && (

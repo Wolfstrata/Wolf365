@@ -52,7 +52,11 @@ export default async function ContactsPage() {
       phone: c.phone ?? c.mobile ?? "—",
       title: c.title ?? "—",
       tickets: c._count.tickets,
-      flags: [c.isPrimary ? "Primary" : null, c.active ? null : "Inactive"]
+      flags: [
+        c.vip ? "VIP" : null,
+        c.isPrimary ? "Primary" : null,
+        c.active ? null : "Inactive",
+      ]
         .filter(Boolean)
         .join(" · "),
       source: c.locallyModifiedAt

@@ -54,6 +54,7 @@ export default async function NewContactPage({
                 mobile: "",
                 title: "",
                 isPrimary: false,
+                vip: false,
                 active: true,
                 notes: "",
               }}

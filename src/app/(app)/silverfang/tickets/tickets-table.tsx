@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { Star } from "lucide-react";
 import type { SfTicketPriority } from "@prisma/client";
 import { SortableTable, type SortColumn } from "@/components/ui/sortable-table";
 import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS, PRIORITY_STYLES } from "@/lib/silverfang/constants";
 import { formatHours } from "@/lib/silverfang/time";
+import { queueSortKey } from "@/lib/silverfang/ticket-order";
 
 export interface TicketRow {
   id: string;
@@ -14,6 +16,8 @@ export interface TicketRow {
   client: string;
   clientId: string;
   contact: string | null;
+  /** The requester or their company is flagged VIP — shown, and drives the order. */
+  vip: boolean;
   board: string;
   status: string;
   statusIsClosed: boolean;
@@ -21,6 +25,8 @@ export interface TicketRow {
   assignee: string | null;
   actualHours: number;
   openedAt: string; // ISO
+  /** Creation instant, which is what the ordering tie-breaks on. */
+  createdAt: string; // ISO
   /** SLA state, precomputed server-side from business hours. */
   slaBreached: boolean;
   slaAtRisk: boolean;
@@ -84,10 +90,26 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
     {
       key: "priority",
       label: "Priority",
-      sortValue: (r) => r.priority,
+      // Sorts by the full queue rule, not the bare priority: this is the column
+      // that means "work order", and priority alone would leave the VIP and age
+      // tiebreaks to whatever order the rows arrived in.
+      sortValue: (r) => queueSortKey(r),
       render: (r) => (
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_STYLES[r.priority]}`}>
-          {PRIORITY_LABELS[r.priority]}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_STYLES[r.priority]}`}
+          >
+            {PRIORITY_LABELS[r.priority]}
+          </span>
+          {r.vip && (
+            <span
+              title="VIP requester — sorts above others at the same priority"
+              className="inline-flex items-center gap-0.5 rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+            >
+              <Star className="h-3 w-3" />
+              VIP
+            </span>
+          )}
         </span>
       ),
     },
@@ -132,7 +154,7 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       columns={columns}
       rows={rows}
       rowKey={(r) => r.id}
-      initialSort={{ key: "number", dir: "desc" }}
+      initialSort={{ key: "priority", dir: "asc" }}
       rowHref={(r) => `/silverfang/tickets/${r.id}`}
       rowClassName={(r) =>
         r.slaBreached && !r.statusIsClosed

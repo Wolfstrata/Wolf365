@@ -1521,6 +1521,10 @@ model SfContact {
   emailDomain String?
   title     String?
   isPrimary Boolean @default(false)
+  /// A VIP requester. Their tickets sort above others at the same priority — it
+  /// never outranks priority itself, so a VIP's routine request does not jump a
+  /// P1 outage.
+  vip       Boolean @default(false)
   active    Boolean @default(true)
   notes     String? @db.Text
 

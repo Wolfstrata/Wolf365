@@ -22,6 +22,10 @@ export interface PhaseTicketRow {
   summary: string;
   status: string;
   hours: number;
+  /** Ordering fields — a phase's tickets read in the same order as every list. */
+  priority: string;
+  createdAt: Date;
+  vip: boolean;
 }
 
 export interface PhaseRow {
@@ -225,6 +229,15 @@ export function PhaseBoard({
                         </Link>
                         <span>{t.summary}</span>
                         <span className="text-muted-foreground">· {t.status}</span>
+                        <span className="text-muted-foreground">· {t.priority}</span>
+                        {t.vip && (
+                          <span
+                            title="VIP requester"
+                            className="rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                          >
+                            VIP
+                          </span>
+                        )}
                         {showHours && (
                           <span className="ml-auto tabular-nums text-muted-foreground">
                             {formatHours(t.hours)}

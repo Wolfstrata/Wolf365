@@ -42,7 +42,7 @@ export default async function SilverFangClientPage({
     include: {
       sfClientProfile: true,
       superOpsMatch: { select: { id: true, name: true } },
-      sfContacts: { orderBy: [{ isPrimary: "desc" }, { firstName: "asc" }] },
+      sfContacts: { orderBy: [{ vip: "desc" }, { isPrimary: "desc" }, { firstName: "asc" }] },
       sfAgreements: {
         orderBy: [{ status: "asc" }, { name: "asc" }],
         include: { blocks: { include: { draws: { select: { hours: true } } } } },
@@ -245,6 +245,11 @@ export default async function SilverFangClientPage({
                         >
                           {contactDisplayName(c)}
                         </Link>
+                        {c.vip && (
+                          <span className="ml-2 rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                            VIP
+                          </span>
+                        )}
                         {c.isPrimary && (
                           <span className="ml-2 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground">
                             primary

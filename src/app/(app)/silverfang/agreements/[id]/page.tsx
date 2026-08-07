@@ -58,9 +58,9 @@ export default async function AgreementDetailPage({
       select: { id: true, name: true },
       take: 2000,
     }),
-    getTicketRows({ view: "all" }, 50).then((rows) =>
-      rows.filter((r) => r.clientId === agreement.clientId),
-    ),
+    // Filtered in SQL — the previous version fetched the 50 newest tickets across
+    // every client and then kept this client's, so a quiet client showed none.
+    getTicketRows({ clientId: agreement.clientId, view: "all" }, 50),
     changeLogFor("SfAgreement", id),
     prisma.sfTimeEntry.aggregate({
       where: { agreementId: id },

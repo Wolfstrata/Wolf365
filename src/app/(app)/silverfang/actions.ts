@@ -835,6 +835,7 @@ const contactSchema = z.object({
   mobile: z.preprocess(emptyToUndefined, z.string().max(60).optional()),
   title: z.preprocess(emptyToUndefined, z.string().max(160).optional()),
   isPrimary: z.coerce.boolean(),
+  vip: z.coerce.boolean(),
   active: z.coerce.boolean(),
   notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
 });
@@ -859,6 +860,7 @@ export async function saveContactAction(
       mobile: formValue(formData, "mobile"),
       title: formValue(formData, "title"),
       isPrimary: formData.get("isPrimary") === "on",
+      vip: formData.get("vip") === "on",
       active: formData.get("active") === "on",
       notes: formValue(formData, "notes"),
     });
@@ -900,6 +902,7 @@ export async function saveContactAction(
       ...contactWrite({ email: input.email, phone: input.phone, mobile: input.mobile }),
       title: input.title ?? null,
       isPrimary: input.isPrimary,
+      vip: input.vip,
       active: input.active,
       notes: input.notes ?? null,
       locallyModifiedAt: new Date(),
@@ -928,6 +931,7 @@ export async function saveContactAction(
         "clientId",
         "firstName",
         "lastName",
+        "vip",
         "title",
         "isPrimary",
         "active",

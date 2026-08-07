@@ -19,6 +19,7 @@ import {
   remainderAfterDeposit,
 } from "@/lib/silverfang/project-billing";
 import { getTicketRows } from "@/lib/silverfang/queries";
+import { sortTickets } from "@/lib/silverfang/ticket-order";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { ProjectForm } from "../project-form";
@@ -55,13 +56,20 @@ export default async function ProjectDetailPage({
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         include: {
           tickets: {
-            orderBy: { number: "asc" },
+            // Priority and age in SQL; the VIP tiebreak is applied below by the
+            // shared comparator, so a phase's tickets read in the same order as
+            // every other ticket list in the app.
+            orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
             select: {
               id: true,
               number: true,
               summary: true,
               actualHours: true,
+              priority: true,
+              createdAt: true,
               status: { select: { name: true } },
+              contact: { select: { vip: true } },
+              client: { select: { sfClientProfile: { select: { vip: true } } } },
             },
           },
           _count: { select: { tasks: true } },
@@ -98,7 +106,10 @@ export default async function ProjectDetailPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true },
     }),
-    getTicketRows({ view: "all" }, 200).then((rows) => rows.filter((r) => r.clientId === project.clientId)),
+    // Filtered in SQL, not after the fact: fetching a global window and then
+    // discarding rows meant a client whose tickets fell outside the first 200
+    // showed none at all.
+    getTicketRows({ clientId: project.clientId, view: "all" }, 200),
     changeLogFor("SfProject", id),
     // Hours logged straight against a phase of *this* project.
     prisma.sfTimeEntry.groupBy({
@@ -146,13 +157,18 @@ export default async function ProjectDetailPage({
     sortOrder: p.sortOrder,
     loggedHours: loggedByPhase.get(p.id) ?? 0,
     taskCount: p._count.tasks,
-    tickets: p.tickets.map((t) => ({
-      id: t.id,
-      number: t.number,
-      summary: t.summary,
-      status: t.status.name,
-      hours: Number(t.actualHours),
-    })),
+    tickets: sortTickets(
+      p.tickets.map((t) => ({
+        id: t.id,
+        number: t.number,
+        summary: t.summary,
+        status: t.status.name,
+        hours: Number(t.actualHours),
+        priority: t.priority,
+        createdAt: t.createdAt,
+        vip: t.contact?.vip === true || t.client.sfClientProfile?.vip === true,
+      })),
+    ),
   }));
 
   const taskRows: TaskRow[] = project.tasks.map((t) => ({

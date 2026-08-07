@@ -75,6 +75,16 @@ export default async function ContactDetailPage({
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatItem label="Tickets" value={contact._count.tickets} />
             <StatItem label="Primary" value={contact.isPrimary ? "Yes" : "No"} />
+            <StatItem
+              label="VIP"
+              value={
+                contact.vip ? (
+                  <span className="text-warning">Yes — sorts above peers</span>
+                ) : (
+                  "No"
+                )
+              }
+            />
             <StatItem label="Active" value={contact.active ? "Yes" : "No"} />
             <StatItem label="Source" value={contact.sourceSystem ?? "Created in Wolf365"} />
             {contact.sourceUpdatedAt && (
@@ -106,6 +116,7 @@ export default async function ContactDetailPage({
                 mobile: contact.mobile ?? "",
                 title: contact.title ?? "",
                 isPrimary: contact.isPrimary,
+                vip: contact.vip,
                 active: contact.active,
                 notes: contact.notes ?? "",
               }}

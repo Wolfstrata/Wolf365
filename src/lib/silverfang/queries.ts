@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { evaluateTarget } from "@/lib/silverfang/sla";
 import { loadSla } from "@/lib/silverfang/service";
+import { sortTickets } from "@/lib/silverfang/ticket-order";
 import type { TicketRow } from "@/app/(app)/silverfang/tickets/tickets-table";
 
 /**
@@ -17,6 +18,8 @@ export interface TicketFilters {
   assigneeId?: string;
   clientId?: string;
   contactId?: string;
+  agreementId?: string;
+  projectId?: string;
   priority?: string;
   /** "open" (default) | "closed" | "all" */
   view?: string;
@@ -34,6 +37,8 @@ export function buildTicketWhere(f: TicketFilters): Prisma.SfTicketWhereInput {
   if (f.assigneeId) where.assigneeId = f.assigneeId;
   if (f.clientId) where.clientId = f.clientId;
   if (f.contactId) where.contactId = f.contactId;
+  if (f.agreementId) where.agreementId = f.agreementId;
+  if (f.projectId) where.projectId = f.projectId;
   if (f.priority) {
     where.priority = f.priority as Prisma.SfTicketWhereInput["priority"];
   }
@@ -58,11 +63,17 @@ export async function getTicketRows(
 ): Promise<TicketRow[]> {
   const tickets = await prisma.sfTicket.findMany({
     where: buildTicketWhere(filters),
-    orderBy: { number: "desc" },
+    // Priority and age in SQL so the fetched window is the right one when `take`
+    // bites; the final order — which also weighs VIP — is applied below by the
+    // shared comparator. VIP cannot be ordered on here without joining through two
+    // relations, and defining the order twice is how two lists start disagreeing.
+    orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
     take,
     include: {
-      client: { select: { id: true, name: true } },
-      contact: { select: { firstName: true, lastName: true } },
+      client: {
+        select: { id: true, name: true, sfClientProfile: { select: { vip: true } } },
+      },
+      contact: { select: { firstName: true, lastName: true, vip: true } },
       board: { select: { name: true } },
       status: { select: { name: true, isClosed: true } },
       assignee: { select: { name: true, email: true } },
@@ -103,6 +114,10 @@ export async function getTicketRows(
       contact: t.contact
         ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ")
         : null,
+      // Either source counts: a VIP contact, or any contact at a client flagged
+      // VIP. Resolved once here so the comparator takes a plain boolean and every
+      // list agrees on what "VIP" means.
+      vip: t.contact?.vip === true || t.client.sfClientProfile?.vip === true,
       board: t.board.name,
       status: t.status.name,
       statusIsClosed: t.status.isClosed,
@@ -113,9 +128,12 @@ export async function getTicketRows(
       slaBreached: breached,
       slaAtRisk: atRisk,
       slaDueAt: dueAt ? dueAt.toISOString() : null,
+      createdAt: t.createdAt.toISOString(),
     });
   }
-  return rows;
+  // Priority, then VIP, then oldest first — the one definition, applied to every
+  // list rather than restated per page.
+  return sortTickets(rows);
 }
 
 /** Options needed by the ticket filter bar and form selects. */
