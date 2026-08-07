@@ -26,7 +26,10 @@ npm run lint           # next lint
 npm test               # vitest run
 npm run build          # prisma generate && next build
 npm run db:migrate     # prisma migrate dev   (local schema changes)
-npm run db:deploy      # prisma migrate deploy (prod; also run in CI)
+npm run db:deploy      # prisma migrate deploy (prod)
+npm run db:status      # which migrations the DB has vs this checkout
+npm run db:pending-sql # emit pending migration SQL (for the Neon console)
+npm run audit          # pnpm audit — the lockfile is pnpm, so npm audit won't work
 npm run db:studio      # prisma studio
 ```
 
@@ -38,8 +41,18 @@ npm run db:studio      # prisma studio
 ## Stack & deployment
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript strict**.
-- **Prisma 6** over **Neon Postgres**. Migrations applied in prod by the GitHub
-  Action `.github/workflows/migrate.yml` (`prisma migrate deploy`).
+- **Prisma 6** over **Neon Postgres**. Migrations are applied in prod **by the
+  Vercel production build** — `vercel.json`'s build command runs
+  `scripts/migrate-on-deploy.mjs`, which only acts when `VERCEL_ENV=production`
+  and fails the build if the schema cannot be applied (shipping code that expects
+  columns the DB lacks is worse than not shipping). Preview builds never migrate.
+  `.github/workflows/migrate.yml` is now **manual dispatch only**, kept for the
+  baseline/repair operations; its push trigger was removed both to avoid two
+  systems migrating the same DB and because Actions stopped being assigned
+  runners on 2026-08-06. Use `npm run db:status` when in doubt about what is
+  applied — a migration pasted into the Neon console changes the schema but is
+  not recorded in `_prisma_migrations`, so record it with
+  `prisma migrate resolve --applied <name>`.
 - **Auth.js v5** (`next-auth@5 beta`) + **Microsoft Entra ID** SSO; DB-backed,
   HTTP-only sessions. Bootstrap admins via `WOLF365_BOOTSTRAP_ADMINS`.
 - **Vercel** (Pro: 300s functions). `vercel.json` sets framework, build command

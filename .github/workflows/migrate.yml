@@ -1,18 +1,30 @@
 name: Migrate Neon Database
 
-# Applies pending Prisma migrations to Neon on every push to main, so the
-# database schema is always in sync with the deployed code. Runs in parallel
-# with the Vercel deploy; `migrate deploy` is idempotent and safe to re-run.
+# MANUAL FALLBACK ONLY. The automatic path is now the Vercel production build,
+# which runs `scripts/migrate-on-deploy.mjs` — see that file for why.
+#
+# This workflow used to run on every push to main. That trigger was removed for
+# two reasons:
+#
+#   1. Two systems migrating the same database on the same event is worse than
+#      one. The advisory lock in `migrate deploy` makes it safe, but "which one
+#      applied it?" is a question nobody should have to answer.
+#   2. It had stopped working. From 2026-08-06 16:30 UTC onward, every run
+#      queued and was dropped without a runner ever attaching (job conclusion
+#      `cancelled`, `runner_id: 0`, and each run lasting ~15 minutes against ~28
+#      seconds for the runs that succeeded). That is an account-side capacity or
+#      billing condition, not a fault in this file — check
+#      Settings → Billing → Actions minutes, and Settings → Actions → Runners.
+#      Nothing here will run until that is resolved.
+#
+# Kept because `workflow_dispatch` is still the right home for the one-off
+# baseline and repair operations below, and because it is the correct automatic
+# path again the moment runners are available.
 #
 # REQUIRED repository secrets (Settings → Secrets and variables → Actions):
 #   DATABASE_URL  — Neon pooled connection string
 #   DIRECT_URL    — Neon direct (non-pooled) connection string
 on:
-  push:
-    branches: [main]
-    paths:
-      - "prisma/**"
-      - ".github/workflows/migrate.yml"
   workflow_dispatch:
     inputs:
       baseline:
@@ -34,6 +46,10 @@ concurrency:
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    # Bounded so a wedged run fails visibly instead of occupying the concurrency
+    # group. (This caps execution time, not time spent queued for a runner —
+    # GitHub offers no setting for the latter.)
+    timeout-minutes: 15
     steps:
       # This job only reads the repo to run migrations; it never pushes back, so
       # don't leave the GITHUB_TOKEN in the local git config for later steps.
