@@ -121,6 +121,102 @@ export async function createSfBillingRunAction(
   redirect(`/silverfang-billing/${runId}`);
 }
 
+export interface SfPreviewLine {
+  kind: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  hoursVisible: boolean;
+}
+
+export interface SfPreviewResult {
+  ok: boolean;
+  message: string;
+  preview?: {
+    clientName: string;
+    total: number;
+    lines: SfPreviewLine[];
+    notes: { severity: string; message: string }[];
+    /** Hours that produced no charge, grouped by why. */
+    covered: { reason: string; hours: number; entries: number }[];
+  };
+}
+
+/**
+ * Show what a run would bill, without creating it.
+ *
+ * `previewSfBillingRun` has been implemented and tested since the billing pipeline
+ * landed but had nothing calling it, so the only way to find out what a period
+ * would produce was to generate a real draft and delete it — which leaves audit
+ * rows behind for a question that should cost nothing to ask.
+ *
+ * Read-only: no run, no lines, no audit entry, nothing to clean up.
+ */
+export async function previewSfBillingRunAction(
+  _prev: SfPreviewResult | null,
+  formData: FormData,
+): Promise<SfPreviewResult> {
+  await requirePermission("billing:read");
+  try {
+    const input = createSchema.parse({
+      clientId: formValue(formData, "clientId"),
+      month: formValue(formData, "month"),
+      periodStart: formValue(formData, "periodStart"),
+      periodEnd: formValue(formData, "periodEnd"),
+      invoiceDate: formValue(formData, "invoiceDate"),
+      groupBy: formValue(formData, "groupBy"),
+    });
+    const { periodStart, periodEnd } = resolvePeriod(input);
+
+    const { previewSfBillingRun } = await import("@/lib/sfbilling/service");
+    const result = await previewSfBillingRun({
+      clientId: input.clientId,
+      periodStart,
+      periodEnd,
+      groupBy: input.groupBy,
+    });
+
+    // Roll the covered entries up by reason: "6.5h absorbed by an inclusion" is
+    // the useful shape, not eleven individual entry ids.
+    const byReason = new Map<string, { hours: number; entries: number }>();
+    for (const c of result.covered) {
+      const bucket = byReason.get(c.reason) ?? { hours: 0, entries: 0 };
+      bucket.hours += c.hours;
+      bucket.entries += 1;
+      byReason.set(c.reason, bucket);
+    }
+
+    return {
+      ok: true,
+      message:
+        result.lines.length === 0
+          ? "This period would bill nothing. The notes below say why."
+          : `${result.lines.length} line(s), ${result.total.toFixed(2)} total.`,
+      preview: {
+        clientName: result.clientName,
+        total: result.total,
+        lines: result.lines.map((l) => ({
+          kind: l.kind,
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          total: l.total,
+          hoursVisible: l.hoursVisible,
+        })),
+        notes: result.notes.map((n) => ({ severity: n.severity, message: n.message })),
+        covered: [...byReason.entries()].map(([reason, v]) => ({
+          reason,
+          hours: Math.round(v.hours * 10_000) / 10_000,
+          entries: v.entries,
+        })),
+      },
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 /**
  * Create a run for each selected client. One client failing never fails the
  * batch — each result is reported, so a bad agreement on one client does not
@@ -310,6 +406,197 @@ export async function updateSfBillingLineAction(
     });
     revalidatePath(`/silverfang-billing/${line.run.id}`);
     return { ok: true, message: `Saved ${changes.map((c) => c.field).join(", ")}.` };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+const lineAddSchema = z.object({
+  runId: z.string().min(1),
+  description: z.string().trim().min(1, "A description is required").max(2_000),
+  quantity: z.coerce.number().min(0).max(1_000_000),
+  unitPrice: z.coerce.number().min(0).max(10_000_000),
+  discount: z.coerce.number().min(0).max(10_000_000),
+  adjustment: z.coerce.number().min(-10_000_000).max(10_000_000),
+  qboItemId: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
+});
+
+/**
+ * Add a line by hand to a draft run.
+ *
+ * Always kind MANUAL: the generated kinds are claims about where money came from
+ * (this agreement's fee, these hours, that deposit), and a line typed in by a
+ * human is not evidence of any of those. Mislabelling it would make the audit
+ * trail lie about provenance.
+ *
+ * Created with no time entries attached and no `estimatedCost`, so it shows up as
+ * pure margin — which is the truth about a line nobody logged hours for.
+ */
+export async function createSfBillingLineAction(
+  _prev: SfBillingActionResult | null,
+  formData: FormData,
+): Promise<SfBillingActionResult> {
+  const user = await requirePermission("billing:edit");
+  try {
+    const input = lineAddSchema.parse({
+      runId: formValue(formData, "runId"),
+      description: formValue(formData, "description"),
+      quantity: formValue(formData, "quantity"),
+      unitPrice: formValue(formData, "unitPrice"),
+      discount: formValue(formData, "discount") ?? 0,
+      adjustment: formValue(formData, "adjustment") ?? 0,
+      qboItemId: formValue(formData, "qboItemId"),
+    });
+
+    const run = await prisma.sfBillingRun.findUnique({
+      where: { id: input.runId },
+      select: { id: true, status: true },
+    });
+    if (!run) return { ok: false, message: "That run no longer exists." };
+    if (!linesEditable(run.status)) {
+      return {
+        ok: false,
+        message: `Lines can only be added while the run is a draft — this one is ${run.status}.`,
+      };
+    }
+
+    const { subtotal, total } = computeLine({
+      quantity: input.quantity,
+      unitPrice: input.unitPrice,
+      discount: input.discount,
+      adjustment: input.adjustment,
+    });
+
+    // Fall back to the MANUAL kind's mapped item, so the common case needs no
+    // per-line choice. An unmapped line is still created and still flagged — it is
+    // real revenue, and hiding it would be worse than showing it unpushable.
+    let qboItemId = input.qboItemId ?? null;
+    let qboItemName: string | null = null;
+    if (qboItemId) {
+      const item = await prisma.qboItem.findUnique({
+        where: { qboId: qboItemId },
+        select: { name: true },
+      });
+      qboItemName = item?.name ?? null;
+    } else {
+      const mapped = await prisma.sfBillingKindItemMap.findUnique({
+        where: { kind: "MANUAL" },
+        select: { qboItemId: true, qboItemName: true },
+      });
+      qboItemId = mapped?.qboItemId ?? null;
+      qboItemName = mapped?.qboItemName ?? null;
+    }
+
+    const line = await prisma.sfBillingLine.create({
+      data: {
+        runId: run.id,
+        kind: "MANUAL",
+        description: input.description,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+        discount: input.discount,
+        adjustment: input.adjustment,
+        subtotal,
+        total,
+        qboItemId,
+      },
+    });
+
+    // Recorded on the run's edit trail like any other change, so a line that
+    // appeared by hand is as traceable as one that was edited.
+    await prisma.sfBillingLineEdit.create({
+      data: {
+        runId: run.id,
+        lineId: line.id,
+        field: "created",
+        oldValue: null,
+        newValue: `MANUAL ${input.description} — ${total}`,
+        editedById: user.id,
+        editedByEmail: user.email,
+      },
+    });
+    await audit({
+      action: "BILLING_LINE_EDITED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfBillingRun:${run.id}`,
+      metadata: { source: "silverfang", lineId: line.id, created: true, kind: "MANUAL", total },
+    });
+    revalidatePath(`/silverfang-billing/${run.id}`);
+    return {
+      ok: true,
+      message: qboItemId
+        ? `Added a manual line for ${total}, pushing as “${qboItemName ?? qboItemId}”.`
+        : `Added a manual line for ${total}. It has no QuickBooks item, so it will be skipped at push — set one on the line or map the MANUAL kind under Item mapping.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Remove a line from a draft run — MANUAL lines only.
+ *
+ * A generated line is derived from real work: hours, an agreement fee, a deposit.
+ * Deleting one would make the run silently disagree with what happened, and the
+ * way to bill less is to adjust the line so the reduction is visible. A hand-added
+ * line has no such evidence behind it, so removing it loses nothing.
+ */
+export async function deleteSfBillingLineAction(
+  _prev: SfBillingActionResult | null,
+  formData: FormData,
+): Promise<SfBillingActionResult> {
+  const user = await requirePermission("billing:edit");
+  try {
+    const lineId = z.string().min(1).parse(formValue(formData, "lineId"));
+    const line = await prisma.sfBillingLine.findUnique({
+      where: { id: lineId },
+      include: { run: { select: { id: true, status: true } } },
+    });
+    if (!line) return { ok: false, message: "That line no longer exists." };
+    if (!linesEditable(line.run.status)) {
+      return {
+        ok: false,
+        message: `Lines can only be removed while the run is a draft — this one is ${line.run.status}.`,
+      };
+    }
+    if (line.kind !== "MANUAL") {
+      return {
+        ok: false,
+        message:
+          "Only manually added lines can be removed. This line came from real work — set its quantity or discount instead, so the reduction is visible on the invoice trail.",
+      };
+    }
+
+    // The edit trail survives the delete: SfBillingLineEdit.lineId is nullable with
+    // ON DELETE SET NULL, so prior rows keep their runId and the record of what the
+    // line was, and who removed it, outlives the line itself.
+    await prisma.sfBillingLineEdit.create({
+      data: {
+        runId: line.run.id,
+        field: "deleted",
+        oldValue: `MANUAL ${line.description} — ${Number(line.total)}`,
+        newValue: null,
+        editedById: user.id,
+        editedByEmail: user.email,
+      },
+    });
+    await prisma.sfBillingLine.delete({ where: { id: lineId } });
+
+    await audit({
+      action: "BILLING_LINE_EDITED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfBillingRun:${line.run.id}`,
+      metadata: {
+        source: "silverfang",
+        lineId,
+        deleted: true,
+        total: Number(line.total),
+      },
+    });
+    revalidatePath(`/silverfang-billing/${line.run.id}`);
+    return { ok: true, message: "Manual line removed." };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }

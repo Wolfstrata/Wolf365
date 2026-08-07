@@ -1,8 +1,13 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { Save } from "lucide-react";
-import { updateSfBillingLineAction, type SfBillingActionResult } from "../actions";
+import { Plus, Save, Trash2 } from "lucide-react";
+import {
+  createSfBillingLineAction,
+  deleteSfBillingLineAction,
+  updateSfBillingLineAction,
+  type SfBillingActionResult,
+} from "../actions";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 
@@ -45,11 +50,13 @@ function round2(n: number): number {
 }
 
 export function SfLinesCard({
+  runId,
   lines,
   editable,
   hasQbo,
   items,
 }: {
+  runId: string;
   lines: SfEditableLine[];
   editable: boolean;
   hasQbo: boolean;
@@ -57,6 +64,7 @@ export function SfLinesCard({
   items: { qboId: string; name: string }[];
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const colCount = editable ? 9 : 8;
 
   const grandTotal = lines.reduce((a, l) => a + l.total, 0);
@@ -68,10 +76,20 @@ export function SfLinesCard({
 
   if (lines.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        This run has no lines. Nothing in the period was billable — the run&rsquo;s notes above say
-        why.
-      </p>
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          This run has no lines. Nothing in the period was billable — the run&rsquo;s notes above
+          say why.
+        </p>
+        {/* An empty run is the most likely place to want a hand-written line: the
+            generator found nothing, but there is something to charge for. */}
+        {editable &&
+          (adding ? (
+            <AddLineForm runId={runId} items={items} onDone={() => setAdding(false)} />
+          ) : (
+            <AddLineButton onClick={() => setAdding(true)} />
+          ))}
+      </div>
     );
   }
 
@@ -163,13 +181,18 @@ export function SfLinesCard({
                   </td>
                   {editable && (
                     <td className="py-1.5 pr-3">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(l.id)}
-                        className="rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
-                      >
-                        Edit
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(l.id)}
+                          className="rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
+                        >
+                          Edit
+                        </button>
+                        {/* Only manual lines: a generated line is evidence of real
+                            work, and the way to bill less for it is to adjust it. */}
+                        {l.kind === "MANUAL" && <DeleteLineButton lineId={l.id} />}
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -188,6 +211,13 @@ export function SfLinesCard({
         </table>
       </div>
 
+      {editable &&
+        (adding ? (
+          <AddLineForm runId={runId} items={items} onDone={() => setAdding(false)} />
+        ) : (
+          <AddLineButton onClick={() => setAdding(true)} />
+        ))}
+
       <p className="text-xs text-muted-foreground">
         {formatHours(hours)} billable hours on this run.
         {cost > 0 &&
@@ -196,6 +226,201 @@ export function SfLinesCard({
           " This client has no matched QuickBooks customer, so the run cannot be pushed yet."}
       </p>
     </div>
+  );
+}
+
+function AddLineButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
+    >
+      <Plus className="h-3.5 w-3.5" />
+      Add a line by hand
+    </button>
+  );
+}
+
+/**
+ * Add a MANUAL line to a draft run.
+ *
+ * The kind is not offered as a choice. The generated kinds each assert where money
+ * came from — this agreement's fee, these hours, that deposit — and a line typed in
+ * by a person is not evidence of any of them.
+ */
+function AddLineForm({
+  runId,
+  items,
+  onDone,
+}: {
+  runId: string;
+  items: { qboId: string; name: string }[];
+  onDone: () => void;
+}) {
+  const [state, action, pending] = useActionState<SfBillingActionResult | null, FormData>(
+    createSfBillingLineAction,
+    null,
+  );
+  const [quantity, setQuantity] = useState("1");
+  const [unitPrice, setUnitPrice] = useState("0");
+  const [discount, setDiscount] = useState("0");
+  const [adjustment, setAdjustment] = useState("0");
+
+  useEffect(() => {
+    if (state?.ok) onDone();
+  }, [state, onDone]);
+
+  const n = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const subtotal = round2(n(quantity) * n(unitPrice));
+  const total = round2(subtotal - n(discount) + n(adjustment));
+
+  return (
+    <form action={action} className="space-y-3 rounded-md border bg-accent/30 p-3">
+      <input type="hidden" name="runId" value={runId} />
+      <p className="text-xs font-medium">New manual line</p>
+      <label className="block text-xs font-medium">
+        Description
+        <input
+          name="description"
+          required
+          maxLength={2000}
+          placeholder="What is being charged for"
+          className={`mt-1 ${inputCls}`}
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <label className="block text-xs font-medium">
+          Qty
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            name="quantity"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className={`mt-1 ${inputCls}`}
+          />
+        </label>
+        <label className="block text-xs font-medium">
+          Unit price
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            name="unitPrice"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            className={`mt-1 ${inputCls}`}
+          />
+        </label>
+        <label className="block text-xs font-medium">
+          Discount
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            name="discount"
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
+            className={`mt-1 ${inputCls}`}
+          />
+        </label>
+        <label className="block text-xs font-medium">
+          Adjustment
+          <input
+            type="number"
+            step="0.01"
+            name="adjustment"
+            value={adjustment}
+            onChange={(e) => setAdjustment(e.target.value)}
+            className={`mt-1 ${inputCls}`}
+          />
+        </label>
+        <label className="block text-xs font-medium">
+          QuickBooks item
+          <select name="qboItemId" defaultValue="" className={`mt-1 ${inputCls}`}>
+            {/* Blank falls back to whatever the MANUAL kind is mapped to, so the
+                usual case needs no choice here. */}
+            <option value="">Use the mapping for manual lines</option>
+            {items.map((i) => (
+              <option key={i.qboId} value={i.qboId}>
+                {i.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Preview: subtotal {formatCurrency(subtotal)} · total {formatCurrency(total)}. A manual line
+        carries no cost, so it counts as pure margin — which is true of a charge nobody logged
+        hours for.
+      </p>
+
+      {state && !state.ok && <p className="text-xs text-danger">{state.message}</p>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {pending ? "Adding…" : "Add line"}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Remove a manual line. Two-step, because a mis-click here changes an invoice. */
+function DeleteLineButton({ lineId }: { lineId: string }) {
+  const [state, action, pending] = useActionState<SfBillingActionResult | null, FormData>(
+    deleteSfBillingLineAction,
+    null,
+  );
+  const [confirming, setConfirming] = useState(false);
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        title="Remove this manual line"
+        className="rounded-md border px-2 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    );
+  }
+
+  return (
+    <form action={action} className="flex items-center gap-1">
+      <input type="hidden" name="lineId" value={lineId} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md bg-danger px-2 py-0.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+      >
+        {pending ? "Removing…" : "Remove"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirming(false)}
+        className="rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
+      >
+        No
+      </button>
+      {state && !state.ok && <span className="text-xs text-danger">{state.message}</span>}
+    </form>
   );
 }
 

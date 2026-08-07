@@ -5,9 +5,13 @@ import Link from "next/link";
 import {
   createBulkSfBillingRunsAction,
   createSfBillingRunAction,
+  previewSfBillingRunAction,
   type SfBillingActionResult,
   type SfBulkRunResult,
+  type SfPreviewResult,
 } from "../actions";
+import { formatCurrency } from "@/lib/utils";
+import { formatHours } from "@/lib/silverfang/time";
 
 const inputCls =
   "w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -148,6 +152,13 @@ function SingleForm({
     createSfBillingRunAction,
     null,
   );
+  // A second action on the same form, reached from its own submit button via
+  // formAction, so the preview reuses the fields already filled in rather than
+  // duplicating them.
+  const [preview, previewAction, previewPending] = useActionState<
+    SfPreviewResult | null,
+    FormData
+  >(previewSfBillingRunAction, null);
   const [clientId, setClientId] = useState(defaultClientId ?? "");
   const chosen = clients.find((c) => c.id === clientId);
 
@@ -188,14 +199,147 @@ function SingleForm({
       {state && !state.ok && (
         <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{state.message}</p>
       )}
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
-      >
-        {pending ? "Generating…" : "Generate run"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={pending || previewPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+        >
+          {pending ? "Generating…" : "Generate run"}
+        </button>
+        <button
+          type="submit"
+          formAction={previewAction}
+          disabled={pending || previewPending}
+          className="rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent disabled:opacity-60"
+        >
+          {previewPending ? "Checking…" : "Preview without creating"}
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The preview creates nothing — no run, no audit trail, nothing to delete afterwards.
+      </p>
+
+      {preview && <PreviewPanel result={preview} />}
     </form>
+  );
+}
+
+const PREVIEW_KIND_LABELS: Record<string, string> = {
+  TIME: "Time",
+  OVERAGE: "Overage",
+  RECURRING: "Recurring",
+  BLOCK_PURCHASE: "Block purchase",
+  PROJECT_FEE: "Project fee",
+  PROJECT_DEPOSIT: "Deposit",
+  MANUAL: "Manual",
+};
+
+/** Why hours produced no charge. Absorbed work is normal; unpriced work is not. */
+const COVERED_LABELS: Record<string, string> = {
+  NOT_BILLABLE: "logged as non-billable",
+  PREPAID_BLOCK: "drawn from a prepaid block",
+  AGREEMENT_INCLUSION: "inside an agreement's included hours",
+  FIXED_FEE_PROJECT: "on a fixed-fee project",
+  NO_RATE: "no rate resolved — nobody priced these",
+};
+
+function PreviewPanel({ result }: { result: SfPreviewResult }) {
+  if (!result.ok) {
+    return (
+      <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{result.message}</p>
+    );
+  }
+  const p = result.preview;
+  if (!p) return null;
+
+  return (
+    <div className="space-y-3 rounded-md border bg-accent/30 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-medium">
+          {p.clientName} would bill {formatCurrency(p.total)}
+        </p>
+        <span className="text-xs text-muted-foreground">Nothing has been created.</span>
+      </div>
+
+      {p.lines.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3 font-medium">Kind</th>
+                <th className="py-1 pr-3 font-medium">Description</th>
+                <th className="py-1 pr-3 text-right font-medium">Qty</th>
+                <th className="py-1 pr-3 text-right font-medium">Unit</th>
+                <th className="py-1 pr-3 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.lines.map((l, i) => (
+                <tr key={i} className="border-t">
+                  <td className="py-1.5 pr-3">
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                      {PREVIEW_KIND_LABELS[l.kind] ?? l.kind}
+                    </span>
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    {l.description}
+                    {!l.hoursVisible && (
+                      <span className="ml-2 text-[10px] text-muted-foreground">
+                        (hours stay internal)
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{l.quantity}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {formatCurrency(l.unitPrice)}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right font-medium tabular-nums">
+                    {formatCurrency(l.total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {p.covered.length > 0 && (
+        <div className="text-xs">
+          <p className="font-medium">Hours that bill nothing</p>
+          <ul className="mt-1 space-y-0.5">
+            {p.covered.map((c) => (
+              <li
+                key={c.reason}
+                className={c.reason === "NO_RATE" ? "text-warning" : "text-muted-foreground"}
+              >
+                {formatHours(c.hours)} across {c.entries} entr{c.entries === 1 ? "y" : "ies"} —{" "}
+                {COVERED_LABELS[c.reason] ?? c.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {p.notes.length > 0 && (
+        <ul className="space-y-0.5 text-xs">
+          {p.notes.map((n, i) => (
+            <li
+              key={i}
+              className={
+                n.severity === "error"
+                  ? "text-danger"
+                  : n.severity === "warning"
+                    ? "text-warning"
+                    : "text-muted-foreground"
+              }
+            >
+              {n.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

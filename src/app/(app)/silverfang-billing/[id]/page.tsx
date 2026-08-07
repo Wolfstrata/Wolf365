@@ -233,7 +233,13 @@ export default async function SfBillingRunPage({
 
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Lines ({lines.length})</h2>
-          <SfLinesCard lines={lines} editable={editable} hasQbo={hasQbo} items={items} />
+          <SfLinesCard
+            runId={run.id}
+            lines={lines}
+            editable={editable}
+            hasQbo={hasQbo}
+            items={items}
+          />
         </Card>
 
         {coveredEntries.length > 0 && (
