@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
@@ -45,7 +44,9 @@ export default async function NewTicketPage({
         },
       })
     : null;
-  if (values.projectId && !project) notFound();
+  // Deliberately no notFound() here: newTicketValues only keeps a project that
+  // belongs to the chosen client, so a miss means the row vanished between the two
+  // reads. Losing a breadcrumb is better than 404-ing a form that would work.
   const phase = values.projectPhaseId
     ? project?.phases.find((p) => p.id === values.projectPhaseId)
     : undefined;
@@ -59,11 +60,14 @@ export default async function NewTicketPage({
         })
       : null);
 
-  const crumbs: Crumb[] = [{ label: "Tickets", href: "/silverfang/tickets" }];
-  if (client) {
-    crumbs.splice(0, 1, { label: "Clients", href: "/silverfang/clients" });
-    crumbs.push({ label: client.name, href: `/silverfang/clients/${client.id}` });
-  }
+  // Built root-down rather than patched afterwards: with no client chosen there is
+  // no client trail to show, so the root is the queue instead.
+  const crumbs: Crumb[] = client
+    ? [
+        { label: "Clients", href: "/silverfang/clients" },
+        { label: client.name, href: `/silverfang/clients/${client.id}` },
+      ]
+    : [{ label: "Tickets", href: "/silverfang/tickets" }];
   if (project) {
     crumbs.push({ label: project.name, href: `/silverfang/projects/${project.id}` });
   }

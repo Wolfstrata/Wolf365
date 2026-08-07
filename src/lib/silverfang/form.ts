@@ -90,10 +90,18 @@ export async function newTicketValues(
 
   // Only honour defaults that are still selectable — a board can be deactivated
   // or an agreement expire after the profile was saved.
-  const boardId =
+  const clientDefaultBoardId =
     profile?.defaultBoardId && options.boards.some((b) => b.id === profile.defaultBoardId)
       ? profile.defaultBoardId
-      : (routedBoardId ?? firstBoardId);
+      : undefined;
+
+  // A project ticket goes on Projects even when the client has a default board.
+  // That default is about where this client's ad-hoc work lands; it was not a
+  // decision to file their project work outside the project queue, and honouring
+  // it there is how a project's tickets end up scattered.
+  const boardId = project
+    ? (routedBoardId ?? clientDefaultBoardId ?? firstBoardId)
+    : (clientDefaultBoardId ?? routedBoardId ?? firstBoardId);
 
   return blankTicketValues({
     clientId,
