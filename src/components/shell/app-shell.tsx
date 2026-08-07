@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X, PanelLeft, PanelLeftClose } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NavItem } from "@/components/shell/nav";
+import { workspaceOf } from "@/lib/workspaces";
 import { Sidebar } from "@/components/shell/sidebar";
 
 /**
@@ -61,9 +62,21 @@ export function AppShell({
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // The mark follows the workspace, so the logo is a standing answer to "which
+  // part of the app am I in?" rather than something to infer from the menu.
+  //
+  // Resolved through workspaceOf rather than a path prefix test, which gets the
+  // awkward case right for free: /silverfang-billing is deliberately in the FINANCE
+  // workspace, so it keeps the Wolf365 mark. A `startsWith("/silverfang")` check
+  // would badge it as SilverFang and undo the separation the workspaces exist for.
+  const brand =
+    workspaceOf(pathname) === "SILVERFANG"
+      ? { src: "/silverfang-logo.png", alt: "SilverFang" }
+      : { src: "/Wolf365 Logo.png", alt: "Wolf365" };
+
   const logo = (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src="/Wolf365 Logo.png" alt="Wolf365 logo" className="h-auto w-3/4 object-contain" />
+    <img src={brand.src} alt={`${brand.alt} logo`} className="h-auto w-3/4 object-contain" />
   );
 
   return (
@@ -130,7 +143,7 @@ export function AppShell({
             <Menu className="h-5 w-5" />
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/Wolf365 Logo.png" alt="Wolf365" className="h-6 w-auto object-contain" />
+          <img src={brand.src} alt={brand.alt} className="h-6 w-auto object-contain" />
         </div>
 
         {/* Desktop expand button — shown only while the sidebar is collapsed */}
