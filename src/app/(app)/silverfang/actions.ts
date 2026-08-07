@@ -1544,3 +1544,257 @@ export async function saveTechProfileAction(
     return { ok: false, message: safeErrorMessage(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Bulk ticket moves
+// ---------------------------------------------------------------------------
+
+const bulkMoveSchema = z.object({
+  ticketIds: z.array(z.string().min(1)).min(1, "Select at least one ticket").max(500),
+  boardId: optionalId,
+  projectId: optionalId,
+  projectPhaseId: optionalId,
+});
+
+/** Ticket ids arrive as repeated form fields, which is how checkboxes post. */
+function ticketIdsFrom(formData: FormData): string[] {
+  return formData
+    .getAll("ticketIds")
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "");
+}
+
+/**
+ * Move a selection of tickets to another board.
+ *
+ * Remaps each ticket's status, because a status belongs to a board — rewriting
+ * only `boardId` would leave the ticket pointing at a status the new board does
+ * not have. A ticket whose state cannot be honestly preserved (a closed one moving
+ * to a board with no closed status) is refused and named, never quietly reopened.
+ *
+ * Each move is recorded on the ticket's own history, so a bulk change is as
+ * traceable as fifty individual edits.
+ */
+export async function moveTicketsToBoardAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = bulkMoveSchema.parse({
+      ticketIds: ticketIdsFrom(formData),
+      boardId: formValue(formData, "boardId"),
+    });
+    if (!input.boardId) return { ok: false, message: "Choose the board to move them to." };
+
+    const board = await prisma.sfBoard.findUnique({
+      where: { id: input.boardId },
+      include: { statuses: { orderBy: { sortOrder: "asc" } } },
+    });
+    if (!board) return { ok: false, message: "That board no longer exists." };
+    if (!board.active) return { ok: false, message: `${board.name} is not an active board.` };
+
+    const tickets = await prisma.sfTicket.findMany({
+      where: { id: { in: input.ticketIds } },
+      include: { status: true, board: { select: { name: true } } },
+    });
+
+    const { mapStatusToBoard, summarizeMove } = await import("@/lib/silverfang/ticket-move");
+    const refusals: { number: number; reason: MoveRefusalName }[] = [];
+    let moved = 0;
+
+    for (const t of tickets) {
+      if (t.boardId === board.id) {
+        refusals.push({ number: t.number, reason: "same-board" });
+        continue;
+      }
+      const mapping = mapStatusToBoard(t.status, board.statuses);
+      if (!mapping) {
+        refusals.push({
+          number: t.number,
+          reason: board.statuses.length === 0 ? "no-target-statuses" : "no-equivalent-status",
+        });
+        continue;
+      }
+
+      await prisma.$transaction([
+        prisma.sfTicket.update({
+          where: { id: t.id },
+          data: { boardId: board.id, statusId: mapping.statusId },
+        }),
+        // Two history rows, because two things changed and either one alone would
+        // be a confusing record of what happened.
+        prisma.sfTicketHistory.create({
+          data: {
+            ticketId: t.id,
+            field: "board",
+            oldValue: t.board.name,
+            newValue: board.name,
+            changedById: user.id,
+            changedByEmail: user.email,
+          },
+        }),
+        ...(mapping.statusId !== t.statusId
+          ? [
+              prisma.sfTicketHistory.create({
+                data: {
+                  ticketId: t.id,
+                  field: "status",
+                  oldValue: t.status.name,
+                  newValue:
+                    board.statuses.find((s) => s.id === mapping.statusId)?.name ?? "unknown",
+                  changedById: user.id,
+                  changedByEmail: user.email,
+                },
+              }),
+            ]
+          : []),
+      ]);
+      moved += 1;
+    }
+
+    // Tickets that were selected but no longer exist — reported rather than
+    // silently making the counts not add up.
+    const found = new Set(tickets.map((t) => t.id));
+    const missing = input.ticketIds.filter((id) => !found.has(id)).length;
+
+    await audit({
+      action: "TICKET_UPDATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfBoard:${board.id}`,
+      metadata: { bulkMove: "board", boardName: board.name, moved, refused: refusals.length },
+    });
+    revalidatePath("/silverfang/tickets");
+    revalidatePath("/silverfang/dashboard");
+
+    const summary = summarizeMove(moved, refusals);
+    return {
+      ok: moved > 0 || refusals.length === 0,
+      message:
+        `${summary.replace(/\.$/, "")} to ${board.name}.` +
+        (missing > 0 ? ` ${missing} selected ticket(s) no longer exist.` : ""),
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/** Refusal reasons, mirrored from the pure module so the schema stays server-side. */
+type MoveRefusalName =
+  | "same-board"
+  | "no-target-statuses"
+  | "no-equivalent-status"
+  | "different-client"
+  | "same-project"
+  | "phase-not-in-project"
+  | "not-found";
+
+/**
+ * Move a selection of tickets onto a project, optionally into one of its phases.
+ *
+ * A project belongs to one client, so a ticket for a different client is refused —
+ * its hours would land on somebody else's project total, and reassigning the
+ * ticket's client to make the move work would be a much larger change than the one
+ * requested.
+ */
+export async function moveTicketsToProjectAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = bulkMoveSchema.parse({
+      ticketIds: ticketIdsFrom(formData),
+      projectId: formValue(formData, "projectId"),
+      projectPhaseId: formValue(formData, "projectPhaseId"),
+    });
+    if (!input.projectId) return { ok: false, message: "Choose the project to move them to." };
+
+    const project = await prisma.sfProject.findUnique({
+      where: { id: input.projectId },
+      select: { id: true, name: true, clientId: true },
+    });
+    if (!project) return { ok: false, message: "That project no longer exists." };
+
+    const phase = input.projectPhaseId
+      ? await prisma.sfProjectPhase.findUnique({
+          where: { id: input.projectPhaseId },
+          select: { id: true, name: true, projectId: true },
+        })
+      : null;
+    if (input.projectPhaseId && !phase) {
+      return { ok: false, message: "That phase no longer exists." };
+    }
+
+    const tickets = await prisma.sfTicket.findMany({
+      where: { id: { in: input.ticketIds } },
+      select: {
+        id: true,
+        number: true,
+        clientId: true,
+        projectId: true,
+        project: { select: { name: true } },
+      },
+    });
+
+    const { canJoinProject, summarizeMove } = await import("@/lib/silverfang/ticket-move");
+    const refusals: { number: number; reason: MoveRefusalName }[] = [];
+    let moved = 0;
+
+    for (const t of tickets) {
+      const refusal = canJoinProject(t, project, phase);
+      if (refusal) {
+        refusals.push({ number: t.number, reason: refusal });
+        continue;
+      }
+      await prisma.$transaction([
+        prisma.sfTicket.update({
+          where: { id: t.id },
+          // The phase is cleared when none was chosen: keeping a phase from the old
+          // project would point the ticket at a phase of a project it has left.
+          data: { projectId: project.id, projectPhaseId: phase?.id ?? null },
+        }),
+        prisma.sfTicketHistory.create({
+          data: {
+            ticketId: t.id,
+            field: "project",
+            oldValue: t.project?.name ?? null,
+            newValue: phase ? `${project.name} — ${phase.name}` : project.name,
+            changedById: user.id,
+            changedByEmail: user.email,
+          },
+        }),
+      ]);
+      moved += 1;
+    }
+
+    const found = new Set(tickets.map((t) => t.id));
+    const missing = input.ticketIds.filter((id) => !found.has(id)).length;
+
+    await audit({
+      action: "TICKET_UPDATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfProject:${project.id}`,
+      metadata: {
+        bulkMove: "project",
+        projectName: project.name,
+        phase: phase?.name ?? null,
+        moved,
+        refused: refusals.length,
+      },
+    });
+    revalidatePath("/silverfang/tickets");
+    revalidatePath(`/silverfang/projects/${project.id}`);
+
+    const where = phase ? `${project.name} — ${phase.name}` : project.name;
+    return {
+      ok: moved > 0 || refusals.length === 0,
+      message:
+        `${summarizeMove(moved, refusals).replace(/\.$/, "")} to ${where}.` +
+        (missing > 0 ? ` ${missing} selected ticket(s) no longer exist.` : ""),
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}

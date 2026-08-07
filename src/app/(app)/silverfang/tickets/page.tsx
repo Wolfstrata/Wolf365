@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Ticket } from "lucide-react";
+import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
@@ -31,7 +32,8 @@ export default async function TicketsPage({
   const sp = await searchParams;
   const view = sp.view ?? "open";
 
-  const [rows, options] = await Promise.all([
+  const canWrite = can(user.role, "tickets:write");
+  const [rows, options, moveProjects] = await Promise.all([
     getTicketRows({
       view,
       boardId: sp.board,
@@ -42,6 +44,24 @@ export default async function TicketsPage({
       q: sp.q,
     }),
     getTicketFormOptions(),
+    // Live projects only: moving a ticket onto a finished project would put new
+    // work on something already closed out.
+    canWrite
+      ? prisma.sfProject.findMany({
+          where: { status: { in: ["PLANNED", "ACTIVE", "ON_HOLD"] } },
+          orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            client: { select: { name: true } },
+            phases: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+              select: { id: true, name: true },
+            },
+          },
+          take: 500,
+        })
+      : Promise.resolve([]),
   ]);
 
   const noSetup = options.boards.length === 0;
@@ -231,7 +251,23 @@ export default async function TicketsPage({
                   description="No tickets match these filters. Try the All tab, or open a new ticket."
                 />
               ) : (
-                <TicketsTable rows={rows} returnTo={filterHref()} />
+                <TicketsTable
+                  rows={rows}
+                  returnTo={filterHref()}
+                  {...(canWrite
+                    ? {
+                        bulk: {
+                          boards: options.boards.map((b) => ({ id: b.id, name: b.name })),
+                          projects: moveProjects.map((p) => ({
+                            id: p.id,
+                            name: p.name,
+                            clientName: p.client.name,
+                            phases: p.phases,
+                          })),
+                        },
+                      }
+                    : {})}
+                />
               )}
             </Card>
           </>
