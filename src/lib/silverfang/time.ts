@@ -112,3 +112,34 @@ export function toWorkDate(date: Date): Date {
 function round4(n: number): number {
   return Math.round((n + Number.EPSILON) * 10_000) / 10_000;
 }
+
+/**
+ * One-click durations for logging time, in quarter-hour blocks.
+ *
+ * The quarter hour is the billing increment, so these are the values a tech
+ * actually reaches for. Ordered by how often they get used rather than
+ * arithmetically — most entries are under two hours.
+ */
+export const QUICK_HOUR_BLOCKS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
+
+/** Compact label for a duration chip: "15m", "1h", "1h30". */
+export function quickHourLabel(hours: number): string {
+  if (hours < 1) return `${Math.round(hours * 60)}m`;
+  const whole = Math.floor(hours);
+  const mins = Math.round((hours - whole) * 60);
+  return mins === 0 ? `${whole}h` : `${whole}h${String(mins).padStart(2, "0")}`;
+}
+
+/**
+ * Nudge a duration by a quarter hour, snapping to the quarter-hour grid first so
+ * repeated presses walk 0.25, 0.5, 0.75 … rather than carrying an odd remainder.
+ * Never goes below one block — zero hours is not a time entry.
+ */
+export function stepQuarterHours(hours: number | null, direction: 1 | -1): number {
+  const step = 0.25;
+  const base = hours != null && hours > 0 ? hours : 0;
+  // Snap onto the grid in the direction of travel, so +0.25 from 0.3 gives 0.5.
+  const snapped = direction > 0 ? Math.floor(base / step) * step : Math.ceil(base / step) * step;
+  const next = round4(snapped + direction * step);
+  return next < step ? step : next;
+}

@@ -5,7 +5,9 @@ import {
   formatHours,
   hoursBetween,
   parseHours,
+  quickHourLabel,
   roundHours,
+  stepQuarterHours,
   toWorkDate,
   weekStartOf,
 } from "@/lib/silverfang/time";
@@ -110,5 +112,44 @@ describe("weekStartOf / toWorkDate", () => {
     expect(toWorkDate(new Date("2026-08-05T18:42:11Z")).toISOString()).toBe(
       "2026-08-05T00:00:00.000Z",
     );
+  });
+});
+
+describe("quickHourLabel", () => {
+  it("labels sub-hour blocks in minutes", () => {
+    expect(quickHourLabel(0.25)).toBe("15m");
+    expect(quickHourLabel(0.5)).toBe("30m");
+    expect(quickHourLabel(0.75)).toBe("45m");
+  });
+
+  it("labels whole and part hours", () => {
+    expect(quickHourLabel(1)).toBe("1h");
+    expect(quickHourLabel(1.5)).toBe("1h30");
+    expect(quickHourLabel(2.25)).toBe("2h15");
+    expect(quickHourLabel(8)).toBe("8h");
+  });
+});
+
+describe("stepQuarterHours", () => {
+  it("walks the quarter-hour grid upward", () => {
+    expect(stepQuarterHours(0.25, 1)).toBe(0.5);
+    expect(stepQuarterHours(1, 1)).toBe(1.25);
+  });
+
+  it("walks downward and never below one block", () => {
+    expect(stepQuarterHours(0.5, -1)).toBe(0.25);
+    expect(stepQuarterHours(0.25, -1)).toBe(0.25);
+    expect(stepQuarterHours(0, -1)).toBe(0.25);
+    expect(stepQuarterHours(null, -1)).toBe(0.25);
+  });
+
+  it("snaps an off-grid value onto the grid in the direction of travel", () => {
+    // 0.3h is 18 minutes: up lands on 30m, down lands on 15m.
+    expect(stepQuarterHours(0.3, 1)).toBe(0.5);
+    expect(stepQuarterHours(0.3, -1)).toBe(0.25);
+  });
+
+  it("starts from one block when nothing is entered yet", () => {
+    expect(stepQuarterHours(null, 1)).toBe(0.25);
   });
 });

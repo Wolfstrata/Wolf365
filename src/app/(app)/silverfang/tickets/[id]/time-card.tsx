@@ -1,11 +1,19 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Plus, Timer } from "lucide-react";
+import { Minus, Plus, Timer } from "lucide-react";
 import { Card } from "@/components/ui/primitives";
+import { DatePicker } from "@/components/ui/date-picker";
 import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
-import { formatHours } from "@/lib/silverfang/time";
+import {
+  formatHours,
+  parseHours,
+  QUICK_HOUR_BLOCKS,
+  quickHourLabel,
+  roundHours,
+  stepQuarterHours,
+} from "@/lib/silverfang/time";
 import { TIME_ENTRY_STATUS_LABELS, TIME_BAND_LABELS } from "@/lib/silverfang/constants";
 import type { SfTimeBand, SfTimeEntryStatus } from "@prisma/client";
 import { saveTimeEntryAction, deleteTimeEntryAction, type SfActionResult } from "../../actions";
@@ -51,11 +59,18 @@ export function TimeCard({
     null,
   );
   const [open, setOpen] = useState(false);
+  // Controlled so the chips and the stepper can write to it.
+  const [hours, setHours] = useState("");
+  // Hidden by default: logging time now is the common case, and an omitted date
+  // means today on the server.
+  const [backdate, setBackdate] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (result?.ok) {
       formRef.current?.reset();
+      setHours("");
+      setBackdate(false);
       setOpen(false);
     }
   }, [result]);
@@ -87,16 +102,56 @@ export function TimeCard({
       {canLog && open && (
         <form ref={formRef} action={action} className="mb-4 rounded-md border bg-accent/30 p-3">
           <input type="hidden" name="ticketId" value={ticketId} />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+          {/* One click per common duration. This is the fast path: pick a block,
+              press Save. Everything else on this form has a usable default. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {QUICK_HOUR_BLOCKS.map((h) => {
+              const active = parseHours(hours) === h;
+              return (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setHours(String(h))}
+                  aria-pressed={active}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "hover:bg-accent"
+                  }`}
+                >
+                  {quickHourLabel(h)}
+                </button>
+              );
+            })}
+            <span className="mx-1 inline-flex items-center rounded-md border">
+              <button
+                type="button"
+                onClick={() => setHours(String(stepQuarterHours(parseHours(hours), -1)))}
+                aria-label="Fifteen minutes less"
+                className="px-2 py-1 transition hover:bg-accent"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setHours(String(stepQuarterHours(parseHours(hours), 1)))}
+                aria-label="Fifteen minutes more"
+                className="border-l px-2 py-1 transition hover:bg-accent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <label className="text-xs font-medium text-muted-foreground">
-              Date
-              <input type="date" name="workDate" defaultValue={today} required className={`mt-1 ${inputCls}`} />
-            </label>
-            <label className="text-xs font-medium text-muted-foreground">
-              Time
+              Time <span className="text-danger">*</span>
               <input
                 name="hours"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
                 required
+                autoFocus
                 placeholder="1.5, 1:30, 90m"
                 className={`mt-1 ${inputCls}`}
               />
@@ -111,6 +166,31 @@ export function TimeCard({
                 ))}
               </select>
             </label>
+            <div className="text-xs font-medium text-muted-foreground">
+              Date
+              {/* Optional: blank means now. Only shown when someone actually wants
+                  to back-date, so the common case is one field fewer. */}
+              {backdate ? (
+                <div className="mt-1">
+                  <DatePicker name="workDate" defaultValue={today} />
+                  <button
+                    type="button"
+                    onClick={() => setBackdate(false)}
+                    className="mt-1 text-xs text-primary hover:underline"
+                  >
+                    Use now instead
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setBackdate(true)}
+                  className={`mt-1 ${inputCls} text-left`}
+                >
+                  Today — change
+                </button>
+              )}
+            </div>
             <label className="text-xs font-medium text-muted-foreground sm:col-span-4">
               Notes
               <textarea name="notes" rows={2} className={`mt-1 ${inputCls}`} />
@@ -132,8 +212,12 @@ export function TimeCard({
             </button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Time rounds up to the next 15 minutes. The rate is resolved from the client, agreement,
-            charge code and time of day.
+            {parseHours(hours) != null
+              ? `Saving ${formatHours(roundHours(parseHours(hours) ?? 0))}`
+              : "Pick a block above, or type 1.5, 1:30 or 90m."}
+            {" · "}Rounds up to the next 15 minutes.
+            {!backdate && " Dated today."} The rate is resolved from the client, agreement, charge
+            code and time of day.
           </p>
         </form>
       )}

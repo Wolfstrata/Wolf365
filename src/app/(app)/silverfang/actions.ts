@@ -524,7 +524,10 @@ const timeSchema = z.object({
   id: optionalId,
   ticketId: z.string().min(1),
   chargeCodeId: z.string().min(1, "Select a charge code"),
-  workDate: z.coerce.date(),
+  // Optional: logging time now is the common case, so an omitted date means
+  // today rather than a validation error. Speed matters more here than ceremony —
+  // an entry nobody bothers to make is worse than one dated by default.
+  workDate: z.preprocess(emptyToUndefined, z.coerce.date().optional()),
   hours: z.string().min(1, "Enter time worked"),
   notes: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
   internalOnly: z.coerce.boolean(),
@@ -558,13 +561,17 @@ export async function saveTimeEntryAction(
     const ticket = await prisma.sfTicket.findUnique({ where: { id: input.ticketId } });
     if (!ticket) return { ok: false, message: "That ticket no longer exists." };
 
-    const workDate = toWorkDate(input.workDate);
+    // No date given means "now": the work date is today and the entry keeps the
+    // actual timestamp, so the time band (after-hours, weekend) is still resolved
+    // from when the work really happened.
+    const workedAt = input.workDate ?? new Date();
+    const workDate = toWorkDate(workedAt);
     const resolved = await resolveTimeEntryRate({
       clientId: ticket.clientId,
       chargeCodeId: input.chargeCodeId,
       agreementId: ticket.agreementId,
       userId: user.id,
-      workedAt: input.workDate,
+      workedAt,
       hours,
       billable: input.billable,
     });
