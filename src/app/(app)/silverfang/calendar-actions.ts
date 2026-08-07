@@ -212,6 +212,7 @@ export async function saveTimeBlockAction(
       amount: resolved.amount,
     };
 
+    let savedId: string;
     if (input.id) {
       const existing = await prisma.sfTimeEntry.findUnique({ where: { id: input.id } });
       if (!existing) return { ok: false, message: "That time block no longer exists." };
@@ -223,9 +224,17 @@ export async function saveTimeBlockAction(
         };
       }
       await prisma.sfTimeEntry.update({ where: { id: input.id }, data });
+      savedId = input.id;
     } else {
-      await prisma.sfTimeEntry.create({ data });
+      const created = await prisma.sfTimeEntry.create({ data });
+      savedId = created.id;
     }
+
+    // Outlook, after the block is safely saved and never in the same transaction.
+    // A calendar that will not update must not roll back the time a tech just
+    // logged, so the outcome is reported alongside the save rather than thrown.
+    const { syncTimeBlock } = await import("@/lib/silverfang/calendar-service");
+    const calendar = await syncTimeBlock(savedId);
 
     if (ticketId) {
       const { recomputeTicketHours } = await import("@/lib/silverfang/service");
@@ -247,12 +256,22 @@ export async function saveTimeBlockAction(
       resolved.rate == null && input.billable
         ? " No rate resolved, so it has no value yet — add a rate rule or an agreement rate."
         : "";
+    // Only mentioned when it failed, or when it actually put something on a
+    // calendar. A skip because the tech has sync switched off is the normal case
+    // and does not need saying every time they log time.
+    const calendarNote = !calendar.ok
+      ? ` Not added to Outlook: ${calendar.detail}`
+      : calendar.action === "created" || calendar.action === "updated"
+        ? " Outlook calendar updated."
+        : "";
     return {
       ok: true,
       message:
         (createdTicketNumber
           ? `Logged ${hours}h and opened ticket #${createdTicketNumber}.`
-          : `Logged ${hours}h.`) + rateNote,
+          : `Logged ${hours}h.`) +
+        rateNote +
+        calendarNote,
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
@@ -267,6 +286,12 @@ export async function deleteTimeBlockAction(formData: FormData): Promise<void> {
   if (!entry) return;
   if (entry.userId !== user.id) await requirePermission("time:approve");
   if (!timeEntryEditable(entry.status)) return;
+
+  // Before the delete: the link row cascades with the entry and takes the Graph
+  // event id with it, and afterwards there is nothing left to say which event to
+  // remove — it would sit in the mailbox forever.
+  const { removeTimeBlockEvent } = await import("@/lib/silverfang/calendar-service");
+  await removeTimeBlockEvent(id);
 
   await prisma.sfTimeEntry.delete({ where: { id } });
   if (entry.ticketId) {

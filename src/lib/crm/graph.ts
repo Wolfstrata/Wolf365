@@ -107,7 +107,7 @@ export interface GraphResult<T> {
 
 async function graphRequest<T>(
   token: string,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   pathAndQuery: string,
   body?: unknown,
 ): Promise<GraphResult<T>> {
@@ -159,6 +159,22 @@ export function graphPatch<T>(
   body: unknown,
 ): Promise<GraphResult<T>> {
   return graphRequest<T>(token, "PATCH", pathAndQuery, body);
+}
+
+/**
+ * DELETE a Graph resource (e.g. removing a calendar event).
+ *
+ * A 404 is reported as success: the caller's intent is "this should not exist",
+ * and an event already gone satisfies that. Treating it as an error would make
+ * every retry of a partially-completed delete look like a failure.
+ */
+export async function graphDelete(
+  token: string,
+  pathAndQuery: string,
+): Promise<GraphResult<never>> {
+  const result = await graphRequest<never>(token, "DELETE", pathAndQuery);
+  if (!result.ok && result.status === 404) return { ok: true, status: 404 };
+  return result;
 }
 
 /** The domain part of an email address, lowercased; null when unparseable. */

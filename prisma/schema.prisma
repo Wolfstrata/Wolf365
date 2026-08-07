@@ -1988,6 +1988,7 @@ model SfTimeEntry {
 
   blockDraws SfAgreementBlockDraw[]
   billingLines SfBillingLineTimeEntry[]
+  calendarLink SfCalendarLink?
 
   @@index([userId, workDate])
   @@index([ticketId])
@@ -2394,6 +2395,16 @@ model SfCalendarLink {
   id       String    @id @default(cuid())
   ticketId String?
   ticket   SfTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  /// The time block this event represents. Unique, so one block can only ever
+  /// own one event — the guard against a re-sync creating a duplicate rather
+  /// than updating what is already there.
+  timeEntryId String?      @unique
+  timeEntry   SfTimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  /// Set when the last sync attempt failed, so a calendar that is quietly not
+  /// updating has a visible reason instead of looking like nothing happened.
+  lastError String?
 
   // Graph event identity.
   mailbox  String

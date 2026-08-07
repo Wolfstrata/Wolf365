@@ -1443,3 +1443,86 @@ export async function seedSilverFangAction(
     return { ok: false, message: safeErrorMessage(err) };
   }
 }
+
+const techProfileSchema = z.object({
+  userId: z.string().min(1),
+  calendarMailbox: z.preprocess(
+    emptyToUndefined,
+    z.string().email("The calendar mailbox must be an email address").max(200).optional(),
+  ),
+  calendarSyncEnabled: z.coerce.boolean(),
+});
+
+/**
+ * Save one technician's calendar settings.
+ *
+ * Upserts the profile, because most users have no SfTechProfile row until
+ * something needs one — requiring it to exist first would mean nobody could ever
+ * enable sync.
+ *
+ * Refuses to enable sync without a mailbox. That combination is not dangerous, it
+ * is just silently inert, and "I turned it on and nothing happened" is a worse
+ * outcome than being told why up front.
+ */
+export async function saveTechProfileAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const actor = await requirePermission("silverfang:configure");
+  try {
+    const input = techProfileSchema.parse({
+      userId: formValue(formData, "userId"),
+      calendarMailbox: formValue(formData, "calendarMailbox"),
+      calendarSyncEnabled: formData.get("calendarSyncEnabled") === "on",
+    });
+
+    if (input.calendarSyncEnabled && !input.calendarMailbox) {
+      return {
+        ok: false,
+        message: "Set a calendar mailbox before enabling sync — without one nothing is written.",
+      };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: input.userId },
+      select: { email: true },
+    });
+    if (!user) return { ok: false, message: "That user no longer exists." };
+
+    await prisma.sfTechProfile.upsert({
+      where: { userId: input.userId },
+      create: {
+        userId: input.userId,
+        calendarMailbox: input.calendarMailbox ?? null,
+        calendarSyncEnabled: input.calendarSyncEnabled,
+      },
+      update: {
+        calendarMailbox: input.calendarMailbox ?? null,
+        calendarSyncEnabled: input.calendarSyncEnabled,
+      },
+    });
+
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: actor.id,
+      actorEmail: actor.email,
+      target: `silverfang:techProfile:${input.userId}`,
+      // Writing to someone's calendar is worth an audit trail naming who enabled
+      // it and for which mailbox.
+      metadata: {
+        subject: user.email,
+        calendarMailbox: input.calendarMailbox ?? null,
+        calendarSyncEnabled: input.calendarSyncEnabled,
+      },
+    });
+    revalidatePath("/silverfang/setup");
+    return {
+      ok: true,
+      message: input.calendarSyncEnabled
+        ? `Calendar sync on for ${input.calendarMailbox}. Blocks with a start and end time appear there from now on; existing ones sync when next edited.`
+        : "Calendar sync off. Events already written stay put until their block is edited or deleted.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}

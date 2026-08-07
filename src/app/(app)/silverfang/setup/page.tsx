@@ -18,6 +18,8 @@ import {
   type RateRuleRow,
 } from "./config-forms";
 
+import { TechProfiles, type TechProfileRow } from "./tech-profiles";
+
 export const dynamic = "force-dynamic";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -71,7 +73,8 @@ export default async function SilverFangSetupPage() {
   const [tickets, contacts, agreements, projects, timeEntries] = counts;
 
   // Extra lookups for the configuration editors.
-  const [setupClients, setupAgreementRows, chargeCodeUsage] = await Promise.all([
+  const [setupClients, setupAgreementRows, chargeCodeUsage, techUsers, techProfiles, syncedLinks] =
+    await Promise.all([
     prisma.client.findMany({
       where: { archived: false },
       orderBy: { name: "asc" },
@@ -84,8 +87,48 @@ export default async function SilverFangSetupPage() {
       take: 500,
     }),
     prisma.sfTimeEntry.groupBy({ by: ["chargeCodeId"], _count: { _all: true } }),
+    // Only users who can actually log time — a calendar setting for someone with
+    // no SilverFang access is a row nobody will ever use.
+    prisma.user.findMany({
+      where: { disabled: false, role: { in: ["ADMINISTRATOR", "POWER_USER", "SILVERFANG_ADMIN", "SILVERFANG_USER"] } },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+      select: { id: true, name: true, email: true },
+      take: 500,
+    }),
+    prisma.sfTechProfile.findMany({
+      select: { userId: true, calendarMailbox: true, calendarSyncEnabled: true },
+    }),
+    // Blocks currently mirrored, plus the most recent failure per mailbox, so a
+    // calendar that has quietly stopped updating is visible here.
+    prisma.sfCalendarLink.findMany({
+      select: { mailbox: true, lastError: true, syncedAt: true },
+      orderBy: { syncedAt: "desc" },
+      take: 2000,
+    }),
   ]);
   const usageByCode = new Map(chargeCodeUsage.map((u) => [u.chargeCodeId, u._count._all]));
+  const profileByUser = new Map(techProfiles.map((p) => [p.userId, p]));
+  const linkStats = new Map<string, { count: number; lastError: string | null }>();
+  for (const link of syncedLinks) {
+    const stat = linkStats.get(link.mailbox) ?? { count: 0, lastError: null };
+    stat.count += 1;
+    // Ordered newest first, so the first error encountered is the latest one.
+    if (!stat.lastError && link.lastError) stat.lastError = link.lastError;
+    linkStats.set(link.mailbox, stat);
+  }
+  const techProfileRows: TechProfileRow[] = techUsers.map((u) => {
+    const profile = profileByUser.get(u.id);
+    const stat = profile?.calendarMailbox ? linkStats.get(profile.calendarMailbox) : undefined;
+    return {
+      userId: u.id,
+      name: u.name ?? "",
+      email: u.email,
+      calendarMailbox: profile?.calendarMailbox ?? null,
+      calendarSyncEnabled: profile?.calendarSyncEnabled ?? false,
+      syncedBlocks: stat?.count ?? 0,
+      lastError: stat?.lastError ?? null,
+    };
+  });
   const clientNames = new Map(setupClients.map((c) => [c.id, c.name]));
   const setupAgreements = setupAgreementRows.map((a) => ({
     id: a.id,
@@ -357,6 +400,24 @@ export default async function SilverFangSetupPage() {
             What kind of work a time entry is, and whether it bills by default.
           </p>
           <ChargeCodeEditor codes={chargeCodeRows} />
+        </Card>
+
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">Technician calendars</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Mirror scheduled time blocks onto a technician&rsquo;s Outlook calendar. One-way:
+            Wolf365 is the record, so an event edited in Outlook is overwritten on the next sync.
+            Only blocks with a start <em>and</em> end time become events — time logged as a
+            duration has no place to sit on a calendar. Off per person by default, because
+            writing to somebody&rsquo;s calendar is not a company-wide switch.
+          </p>
+          <p className="mb-3 rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-xs">
+            Needs the <span className="font-mono">Calendars.ReadWrite</span> application
+            permission in Entra, and the app&rsquo;s mailbox access scope must include these
+            mailboxes — the SilverFang mail scope covers the shared mailboxes only. Without
+            both, sync fails with 403 and the reason is shown against the technician.
+          </p>
+          <TechProfiles rows={techProfileRows} />
         </Card>
 
         <Card>
