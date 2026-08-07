@@ -49,8 +49,14 @@ export function ProjectForm({
   clients: { id: string; name: string }[];
   agreements: { id: string; label: string }[];
   users: { id: string; name: string | null; email: string }[];
-  /** Only offered on creation — a template stamps out tasks once. */
-  templates: { id: string; name: string; taskCount: number }[];
+  /** Only offered on creation — a template stamps out its contents once. */
+  templates: {
+    id: string;
+    name: string;
+    phaseCount: number;
+    taskCount: number;
+    ticketCount: number;
+  }[];
   submitLabel: string;
 }) {
   const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
@@ -66,6 +72,11 @@ export function ProjectForm({
   const [fixedFee, setFixedFee] = useState(values.fixedFeeAmount);
   const [budget, setBudget] = useState(values.budgetAmount);
   const [depositPercent, setDepositPercent] = useState(values.depositPercent);
+  // A template brings its own phases, so the "Phase 1…n" scaffold is hidden once
+  // one is chosen. Mirrors what the action does, rather than letting the form
+  // offer a field the server then ignores.
+  const [templateId, setTemplateId] = useState("");
+  const template = templates.find((t) => t.id === templateId) ?? null;
   const fixedFeeType = billingType === "FIXED_FEE";
 
   const num = (v: string) => {
@@ -152,16 +163,25 @@ export function ProjectForm({
         {isNew && (
           <label className="block text-sm font-medium">
             Start from a template
-            <select name="templateId" defaultValue="" className={`mt-1 ${inputCls}`}>
+            <select
+              name="templateId"
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              className={`mt-1 ${inputCls}`}
+            >
               <option value="">No template</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.taskCount} task{t.taskCount === 1 ? "" : "s"})
+                  {t.name} ({t.phaseCount} phase{t.phaseCount === 1 ? "" : "s"},{" "}
+                  {t.taskCount} task{t.taskCount === 1 ? "" : "s"}, {t.ticketCount} ticket
+                  {t.ticketCount === 1 ? "" : "s"})
                 </option>
               ))}
             </select>
             <span className="mt-1 block text-xs font-normal text-muted-foreground">
-              Tasks are created now, with due dates offset from the start date.
+              {template
+                ? `Creates ${template.phaseCount} phase(s), ${template.taskCount} task(s) and ${template.ticketCount} ticket(s) now. Task due dates are offset from the start date.`
+                : "Phases, tasks and tickets are created now, with task due dates offset from the start date."}
             </span>
           </label>
         )}
@@ -228,7 +248,7 @@ export function ProjectForm({
             </span>
           )}
         </label>
-        {isNew && (
+        {isNew && !template && (
           <label className="block text-sm font-medium">
             Phases
             <input
@@ -245,6 +265,15 @@ export function ProjectForm({
               across them; adjust each phase afterwards.
             </span>
           </label>
+        )}
+        {isNew && template && (
+          <div className="text-sm font-medium">
+            Phases
+            <p className="mt-1 text-xs font-normal text-muted-foreground">
+              Coming from &ldquo;{template.name}&rdquo; — {template.phaseCount} phase
+              {template.phaseCount === 1 ? "" : "s"} with the hours the template carries.
+            </p>
+          </div>
         )}
       </div>
 

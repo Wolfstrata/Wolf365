@@ -29,6 +29,7 @@ import { ProjectForm } from "../project-form";
 import { DepositCard } from "./deposit-card";
 import { PhaseBoard, type PhaseRow } from "./phase-board";
 import { TaskBoard, type TaskRow } from "./task-board";
+import { SaveAsTemplate } from "./save-as-template";
 
 export const dynamic = "force-dynamic";
 
@@ -272,6 +273,14 @@ export default async function ProjectDetailPage({
           )}
         </div>
 
+        {/* Carried through the create redirect: something a template could not
+            stamp out, said here rather than left for someone to notice. */}
+        {sp.notice && (
+          <Card>
+            <p className="text-sm text-warning">{sp.notice}</p>
+          </Card>
+        )}
+
         <Card>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatItem label="Phases" value={phaseRows.length} />
@@ -446,6 +455,22 @@ export default async function ProjectDetailPage({
             <TicketsTable rows={tickets} returnTo={`/silverfang/projects/${project.id}`} />
           )}
         </Card>
+
+        {canManage && (
+          <Card>
+            <details>
+              <summary className="cursor-pointer text-sm font-semibold">
+                Save as template{" "}
+                <span className="font-normal text-muted-foreground">
+                  · reuse this project&rsquo;s phases and tickets, without the client
+                </span>
+              </summary>
+              <div className="mt-4">
+                <SaveAsTemplate projectId={project.id} suggestedName={project.name} />
+              </div>
+            </details>
+          </Card>
+        )}
 
         <Card>
           <ChangeTrailHeading count={trail.length} />

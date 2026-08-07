@@ -37,7 +37,11 @@ export default async function NewProjectPage({
     prisma.sfProjectTemplate.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, _count: { select: { tasks: true } } },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { phases: true, tasks: true, tickets: true } },
+      },
     }),
   ]);
   const clientId = sp.client && clients.some((c) => c.id === sp.client) ? sp.client : "";
@@ -85,7 +89,9 @@ export default async function NewProjectPage({
             templates={templates.map((t) => ({
               id: t.id,
               name: t.name,
+              phaseCount: t._count.phases,
               taskCount: t._count.tasks,
+              ticketCount: t._count.tickets,
             }))}
             submitLabel="Create project"
           />
