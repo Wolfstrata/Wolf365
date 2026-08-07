@@ -231,7 +231,7 @@ export default async function TicketsPage({
                   description="No tickets match these filters. Try the All tab, or open a new ticket."
                 />
               ) : (
-                <TicketsTable rows={rows} />
+                <TicketsTable rows={rows} returnTo={filterHref()} />
               )}
             </Card>
           </>

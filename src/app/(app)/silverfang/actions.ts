@@ -19,6 +19,7 @@ import {
 } from "@/lib/silverfang/status";
 import { parseHours, roundHours, toWorkDate, weekStartOf } from "@/lib/silverfang/time";
 import { contactEmailIndex, contactWrite, textWrite } from "@/lib/silverfang/pii";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
 import { pausedMinutesFor } from "@/lib/silverfang/sla";
 import {
   ensureSilverFangDefaults,
@@ -139,6 +140,9 @@ export async function saveTicketAction(
 ): Promise<SfActionResult> {
   const user = await requirePermission("tickets:write");
   let ticketId: string;
+  // Where to land afterwards. Validated, because a redirect target that came in on
+  // a form field is an open redirect otherwise.
+  let destination: string | null = null;
   try {
     const input = parseTicketForm(formData);
 
@@ -334,11 +338,13 @@ export async function saveTicketAction(
     });
     revalidatePath("/silverfang/tickets");
     if (link.projectId) revalidatePath(`/silverfang/projects/${link.projectId}`);
+    destination = safeReturnTo(formValue(formData, "returnTo"));
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }
   // Outside the try so Next's redirect control-flow isn't caught as an error.
-  redirect(`/silverfang/tickets/${ticketId}`);
+  // Back where the form was opened from when it said, else the ticket itself.
+  redirect(destination ?? `/silverfang/tickets/${ticketId}`);
 }
 
 /** Move a ticket to another status (queue-style quick action). */
@@ -849,6 +855,9 @@ export async function saveContactAction(
   formData: FormData,
 ): Promise<SfActionResult> {
   const user = await requirePermission("tickets:write");
+  // Set when the form said where to go back to; the redirect happens outside the
+  // try so Next's control-flow exception is not caught as a failure.
+  let destination: string | null = null;
   try {
     const input = contactSchema.parse({
       id: formValue(formData, "id"),
@@ -963,17 +972,22 @@ export async function saveContactAction(
     revalidatePath("/silverfang/contacts");
     revalidatePath(`/silverfang/clients/${input.clientId}`);
     revalidatePath("/silverfang/clients");
-    return {
-      ok: true,
-      message: input.id
-        ? changes.length === 0
-          ? "No changes to save."
-          : `Saved ${describeChanges(changes)}. Future SuperOps imports will leave this contact alone.`
-        : "Contact created.",
-    };
+    destination = safeReturnTo(formValue(formData, "returnTo"));
+    if (!destination) {
+      return {
+        ok: true,
+        message: input.id
+          ? changes.length === 0
+            ? "No changes to save."
+            : `Saved ${describeChanges(changes)}. Future SuperOps imports will leave this contact alone.`
+          : "Contact created.",
+      };
+    }
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }
+  // Saving closes the screen and returns to where it was opened from.
+  redirect(destination);
 }
 
 /**

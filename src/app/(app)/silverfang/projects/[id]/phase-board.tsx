@@ -11,6 +11,7 @@ import {
 import type { SfActionResult } from "../../actions";
 import { TASK_STATUS_LABELS } from "@/lib/silverfang/constants";
 import { formatHours } from "@/lib/silverfang/time";
+import { withReturnTo } from "@/lib/silverfang/return-to";
 import { phaseHoursReconcile } from "@/lib/silverfang/project-billing";
 
 const inputCls =
@@ -181,7 +182,12 @@ export function PhaseBoard({
                   )}
                   <span className="ml-auto flex items-center gap-2">
                     <Link
-                      href={`/silverfang/tickets/new?client=${clientId}&project=${projectId}&phase=${p.id}`}
+                      // Carries the way back, so creating the ticket returns here
+                      // instead of dumping you on the global ticket board.
+                      href={withReturnTo(
+                        `/silverfang/tickets/new?client=${clientId}&project=${projectId}&phase=${p.id}`,
+                        `/silverfang/projects/${projectId}`,
+                      )}
                       className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
                     >
                       <Ticket className="h-3.5 w-3.5" /> New project ticket
@@ -222,7 +228,10 @@ export function PhaseBoard({
                     {p.tickets.map((t) => (
                       <li key={t.id} className="flex flex-wrap items-center gap-x-2 text-xs">
                         <Link
-                          href={`/silverfang/tickets/${t.id}`}
+                          href={withReturnTo(
+                            `/silverfang/tickets/${t.id}`,
+                            `/silverfang/projects/${projectId}`,
+                          )}
                           className="font-medium text-primary hover:underline"
                         >
                           #{t.number}

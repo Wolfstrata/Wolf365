@@ -8,6 +8,7 @@ import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { changeLogFor } from "@/lib/silverfang/change-log";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { PROJECT_STATUS_LABELS } from "@/lib/silverfang/constants";
 import {
   depositStatus,
@@ -241,17 +242,21 @@ export default async function ProjectDetailPage({
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">
+          <Breadcrumbs
+            items={[
+              { label: "Clients", href: "/silverfang/clients" },
+              {
+                label: project.client.name,
+                href: `/silverfang/clients/${project.client.id}`,
+              },
+              { label: project.name },
+            ]}
+          />
           <Link
             href="/silverfang/projects"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" /> Projects
-          </Link>
-          <Link
-            href={`/silverfang/clients/${project.client.id}`}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {project.client.name}
+            <ArrowLeft className="h-4 w-4" /> All projects
           </Link>
           {project.agreement && (
             <Link
@@ -434,7 +439,7 @@ export default async function ProjectDetailPage({
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">No tickets for this client yet.</p>
           ) : (
-            <TicketsTable rows={tickets} />
+            <TicketsTable rows={tickets} returnTo={`/silverfang/projects/${project.id}`} />
           )}
         </Card>
 

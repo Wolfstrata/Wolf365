@@ -327,7 +327,7 @@ export default async function AgreementDetailPage({
               No tickets for this client yet.
             </p>
           ) : (
-            <TicketsTable rows={tickets} />
+            <TicketsTable rows={tickets} returnTo={`/silverfang/agreements/${agreement.id}`} />
           )}
         </Card>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useActionState, useState } from "react";
 import type { ReactNode } from "react";
 import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/silverfang/constants";
@@ -75,6 +77,8 @@ export function TicketForm({
   options,
   saveAction,
   submitLabel,
+  returnTo,
+  cancelHref,
 }: {
   values: TicketFormValues;
   options: TicketFormOptions;
@@ -83,6 +87,11 @@ export function TicketForm({
     formData: FormData,
   ) => Promise<SfActionResult>;
   submitLabel: string;
+  /** Where the action sends you after a successful save. */
+  returnTo?: string;
+  /** Where Cancel goes. Usually the same place — leaving without saving and saving
+   *  should both land you back where you started. */
+  cancelHref?: string;
 }) {
   const [result, action, pending] = useActionState(saveAction, null);
 
@@ -102,6 +111,7 @@ export function TicketForm({
   return (
     <form action={action} className="space-y-6">
       {values.id && <input type="hidden" name="id" value={values.id} />}
+      {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Client" required>
@@ -310,13 +320,23 @@ export function TicketForm({
         <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{result.message}</p>
       )}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
-      >
-        {pending ? "Saving…" : submitLabel}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+        >
+          {pending ? "Saving…" : submitLabel}
+        </button>
+        {cancelHref && (
+          <Link
+            href={cancelHref}
+            className="rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-accent"
+          >
+            Cancel
+          </Link>
+        )}
+      </div>
     </form>
   );
 }

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { ContactForm } from "../contact-form";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,10 @@ export default async function NewContactPage({
   // Honour the hint only when it names a real client, so a stale link cannot
   // preselect something that no longer exists.
   const clientId = sp.client && clients.some((c) => c.id === sp.client) ? sp.client : "";
+  // Back to the client whose page the button was on, else the contacts list.
+  const returnTo =
+    safeReturnTo(sp.returnTo) ??
+    (clientId ? `/silverfang/clients/${clientId}` : "/silverfang/contacts");
 
   return (
     <div>
@@ -61,6 +66,8 @@ export default async function NewContactPage({
               clients={clients}
               submitLabel="Create contact"
               canDelete={false}
+              returnTo={returnTo}
+              cancelHref={returnTo}
             />
           )}
         </Card>

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useActionState } from "react";
 import { Save, Star, Trash2 } from "lucide-react";
 import { saveContactAction, deleteContactAction, type SfActionResult } from "../actions";
@@ -31,6 +33,8 @@ export function ContactForm({
   values,
   clients,
   submitLabel,
+  returnTo,
+  cancelHref,
   canDelete,
   source,
   lockedFromImport,
@@ -38,6 +42,9 @@ export function ContactForm({
   values: ContactFormValues;
   clients: { id: string; name: string }[];
   submitLabel: string;
+  /** Where saving returns to. Absent means stay on the form and report inline. */
+  returnTo?: string;
+  cancelHref?: string;
   canDelete: boolean;
   /** Where this contact came from, when it wasn't created here. */
   source?: string | null;
@@ -57,6 +64,7 @@ export function ContactForm({
     <div className="space-y-4">
       <form action={action} className="space-y-4">
         {values.id && <input type="hidden" name="id" value={values.id} />}
+        {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="block text-sm font-medium">
@@ -170,6 +178,14 @@ export function ContactForm({
             <Save className="h-4 w-4" />
             {pending ? "Saving…" : submitLabel}
           </button>
+          {cancelHref && (
+            <Link
+              href={cancelHref}
+              className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+            >
+              Cancel
+            </Link>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground">

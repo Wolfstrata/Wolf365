@@ -1,8 +1,10 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
+import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
+import { prisma } from "@/lib/db";
 import { getTicketFormData, newTicketValues } from "@/lib/silverfang/form";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
 import { TicketForm } from "../../ticket-form";
 import { saveTicketAction } from "../../actions";
 
@@ -12,6 +14,10 @@ export const dynamic = "force-dynamic";
  * `?client=<id>` preselects that client (and its profile defaults);
  * `?project=`/`?phase=` preselect a project phase, so "New project ticket" on a
  * phase lands on a form already pointed at it.
+ *
+ * `?returnTo=` is where saving goes back to. Opening this form from a phase and
+ * being dropped on the ticket board afterwards loses the place you were working —
+ * which is exactly what Nathan hit.
  */
 export default async function NewTicketPage({
   searchParams,
@@ -25,21 +31,71 @@ export default async function NewTicketPage({
     projectPhaseId: sp.phase,
   });
 
+  // The trail is built from what the form is actually pointed at, not from the
+  // query string, so a stale ?project= that no longer belongs to the client cannot
+  // produce a breadcrumb to somewhere the ticket will not be filed.
+  const project = values.projectId
+    ? await prisma.sfProject.findUnique({
+        where: { id: values.projectId },
+        select: {
+          id: true,
+          name: true,
+          client: { select: { id: true, name: true } },
+          phases: { select: { id: true, name: true } },
+        },
+      })
+    : null;
+  if (values.projectId && !project) notFound();
+  const phase = values.projectPhaseId
+    ? project?.phases.find((p) => p.id === values.projectPhaseId)
+    : undefined;
+
+  const client =
+    project?.client ??
+    (values.clientId
+      ? await prisma.client.findUnique({
+          where: { id: values.clientId },
+          select: { id: true, name: true },
+        })
+      : null);
+
+  const crumbs: Crumb[] = [{ label: "Tickets", href: "/silverfang/tickets" }];
+  if (client) {
+    crumbs.splice(0, 1, { label: "Clients", href: "/silverfang/clients" });
+    crumbs.push({ label: client.name, href: `/silverfang/clients/${client.id}` });
+  }
+  if (project) {
+    crumbs.push({ label: project.name, href: `/silverfang/projects/${project.id}` });
+  }
+  if (phase) crumbs.push({ label: phase.name });
+  crumbs.push({ label: "New ticket" });
+
+  // Default back to the project when one is in play, since that is where the
+  // button that opens this form lives.
+  const fallback = project
+    ? `/silverfang/projects/${project.id}`
+    : client
+      ? `/silverfang/clients/${client.id}`
+      : "/silverfang/tickets";
+  const returnTo = safeReturnTo(sp.returnTo) ?? fallback;
+
   return (
     <div>
-      <PageHeader title="New ticket" description="Open a service ticket for a client." />
+      <PageHeader
+        title={phase ? `New ticket in ${phase.name}` : "New ticket"}
+        description={
+          project
+            ? `Opens on the Projects board and counts against ${project.name}.`
+            : "Open a service ticket for a client."
+        }
+      />
       <div className="space-y-4 p-4 sm:p-8">
-        <Link
-          href="/silverfang/tickets"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Tickets
-        </Link>
+        <Breadcrumbs items={crumbs} />
         <Card>
           {options.boards.length === 0 ? (
             <EmptyState
               title="No service board yet"
-              description="Run the SilverFang setup to create the default board, statuses and SLA before opening tickets."
+              description="Run the SilverFang setup to create the MSA, Projects and Service Desk boards, their statuses and the SLA before opening tickets."
             />
           ) : options.clients.length === 0 ? (
             <EmptyState
@@ -52,6 +108,8 @@ export default async function NewTicketPage({
               options={options}
               saveAction={saveTicketAction}
               submitLabel="Create ticket"
+              returnTo={returnTo}
+              cancelHref={returnTo}
             />
           )}
         </Card>

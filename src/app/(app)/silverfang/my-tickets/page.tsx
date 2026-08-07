@@ -52,7 +52,7 @@ export default async function MyTicketsPage({
               }
             />
           ) : (
-            <TicketsTable rows={rows} />
+            <TicketsTable rows={rows} returnTo="/silverfang/my-tickets" />
           )}
         </Card>
       </div>

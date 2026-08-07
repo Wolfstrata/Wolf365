@@ -8,6 +8,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS, PRIORITY_STYLES } from "@/lib/silverfang/constants";
 import { formatHours } from "@/lib/silverfang/time";
 import { queueSortKey } from "@/lib/silverfang/ticket-order";
+import { withReturnTo } from "@/lib/silverfang/return-to";
 
 export interface TicketRow {
   id: string;
@@ -53,7 +54,18 @@ function SlaCell({ row }: { row: TicketRow }) {
   );
 }
 
-export function TicketsTable({ rows }: { rows: TicketRow[] }) {
+export function TicketsTable({
+  rows,
+  returnTo,
+}: {
+  rows: TicketRow[];
+  /**
+   * Where a ticket opened from this table should return to. Set it on an embedded
+   * table (a client, a project) so drilling in and coming back lands on the page
+   * you were reading, not the global queue.
+   */
+  returnTo?: string;
+}) {
   const columns: SortColumn<TicketRow>[] = [
     {
       key: "number",
@@ -63,7 +75,10 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       // Kept as a real link so keyboard and middle-click behave, even though the
       // whole row now navigates here too.
       render: (r) => (
-        <Link href={`/silverfang/tickets/${r.id}`} className="font-medium text-primary hover:underline">
+        <Link
+          href={withReturnTo(`/silverfang/tickets/${r.id}`, returnTo)}
+          className="font-medium text-primary hover:underline"
+        >
           {r.number}
         </Link>
       ),
@@ -155,7 +170,7 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       rows={rows}
       rowKey={(r) => r.id}
       initialSort={{ key: "priority", dir: "asc" }}
-      rowHref={(r) => `/silverfang/tickets/${r.id}`}
+      rowHref={(r) => withReturnTo(`/silverfang/tickets/${r.id}`, returnTo)}
       rowClassName={(r) =>
         r.slaBreached && !r.statusIsClosed
           ? "bg-danger/5"

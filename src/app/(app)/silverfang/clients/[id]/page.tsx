@@ -9,6 +9,7 @@ import { LocalTime } from "@/components/ui/local-time";
 import { formatCurrency } from "@/lib/utils";
 import { formatHours } from "@/lib/silverfang/time";
 import { availableHours } from "@/lib/silverfang/block-time";
+import { withReturnTo } from "@/lib/silverfang/return-to";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
 import { clientEmailAllowed } from "@/lib/silverfang/email-policy";
 import { getTicketRows } from "@/lib/silverfang/queries";
@@ -76,6 +77,9 @@ export default async function SilverFangClientPage({
 
   const canConfigure = can(user.role, "silverfang:configure");
   const canWrite = can(user.role, "tickets:write");
+  // Every drill-down from this page carries the way back, so saving or cancelling
+  // over there returns here instead of to a list.
+  const backHere = `/silverfang/clients/${client.id}`;
   const now = new Date();
   const totalHours = hoursAgg._sum.hours != null ? Number(hoursAgg._sum.hours) : 0;
   const totalRevenue = hoursAgg._sum.amount != null ? Number(hoursAgg._sum.amount) : 0;
@@ -114,7 +118,7 @@ export default async function SilverFangClientPage({
             href="/silverfang/clients"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" /> Clients
+            <ArrowLeft className="h-4 w-4" /> All clients
           </Link>
           {/* Links out of SilverFang are only offered to roles allowed to leave —
               otherwise clicking one just bounces you back, which reads as a bug. */}
@@ -209,7 +213,7 @@ export default async function SilverFangClientPage({
             <h2 className="text-sm font-semibold">Contacts ({client.sfContacts.length})</h2>
             {canWrite && (
               <Link
-                href={`/silverfang/contacts/new?client=${client.id}`}
+                href={withReturnTo(`/silverfang/contacts/new?client=${client.id}`, backHere)}
                 className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
               >
                 <Plus className="h-4 w-4" /> Add contact
@@ -240,7 +244,7 @@ export default async function SilverFangClientPage({
                     <tr key={c.id} className="border-t align-top">
                       <td className="py-1.5 pr-4">
                         <Link
-                          href={`/silverfang/contacts/${c.id}`}
+                          href={withReturnTo(`/silverfang/contacts/${c.id}`, backHere)}
                           className="text-primary hover:underline"
                         >
                           {contactDisplayName(c)}
@@ -292,7 +296,7 @@ export default async function SilverFangClientPage({
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">No tickets for this client yet.</p>
           ) : (
-            <TicketsTable rows={tickets} />
+            <TicketsTable rows={tickets} returnTo={`/silverfang/clients/${client.id}`} />
           )}
         </Card>
 
@@ -304,7 +308,7 @@ export default async function SilverFangClientPage({
             </h2>
             {canConfigure && (
               <Link
-                href={`/silverfang/agreements/new?client=${client.id}`}
+                href={withReturnTo(`/silverfang/agreements/new?client=${client.id}`, backHere)}
                 className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
               >
                 <Plus className="h-4 w-4" /> Add agreement
@@ -338,7 +342,7 @@ export default async function SilverFangClientPage({
                       <tr key={a.id} className="border-t align-top">
                         <td className="py-1.5 pr-4 font-medium">
                           <Link
-                            href={`/silverfang/agreements/${a.id}`}
+                            href={withReturnTo(`/silverfang/agreements/${a.id}`, backHere)}
                             className="text-primary hover:underline"
                           >
                             {a.name}
@@ -367,7 +371,7 @@ export default async function SilverFangClientPage({
             <h2 className="text-sm font-semibold">Projects ({client.sfProjects.length})</h2>
             {canConfigure && (
               <Link
-                href={`/silverfang/projects/new?client=${client.id}`}
+                href={withReturnTo(`/silverfang/projects/new?client=${client.id}`, backHere)}
                 className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
               >
                 <Plus className="h-4 w-4" /> Add project
@@ -381,7 +385,7 @@ export default async function SilverFangClientPage({
               {client.sfProjects.map((p) => (
                 <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                   <Link
-                    href={`/silverfang/projects/${p.id}`}
+                    href={withReturnTo(`/silverfang/projects/${p.id}`, backHere)}
                     className="font-medium text-primary hover:underline"
                   >
                     {p.name}

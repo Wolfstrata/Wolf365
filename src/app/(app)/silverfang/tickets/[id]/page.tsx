@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Lock, Mail, MailOpen, Pencil } from "lucide-react";
+import { Lock, Mail, MailOpen, Pencil } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { textRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
+import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
+import { safeReturnTo, withReturnTo } from "@/lib/silverfang/return-to";
 import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS, PRIORITY_STYLES, SOURCE_LABELS } from "@/lib/silverfang/constants";
 import { formatHours } from "@/lib/silverfang/time";
@@ -69,12 +71,14 @@ function SlaBadge({
 
 export default async function TicketDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
   if (!can(user.role, "tickets:read")) notFound();
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
 
   const ticket = await prisma.sfTicket.findUnique({
     where: { id },
@@ -92,6 +96,7 @@ export default async function TicketDetailPage({
       assignee: { select: { id: true, name: true, email: true } },
       agreement: { select: { id: true, name: true, type: true } },
       project: { select: { id: true, name: true } },
+      projectPhase: { select: { id: true, name: true } },
       notes: { orderBy: { createdAt: "desc" } },
       messages: { orderBy: { createdAt: "desc" }, take: 100 },
       history: { orderBy: { createdAt: "desc" }, take: 50 },
@@ -139,6 +144,24 @@ export default async function TicketDetailPage({
         pausedMinutes: ticket.slaPausedMinutes,
       })
     : { breached: false, atRisk: false, remainingMinutes: null };
+
+  // Where this ticket sits, so both the trail and the Edit link know the way back.
+  const crumbs: Crumb[] = [
+    { label: "Clients", href: "/silverfang/clients" },
+    { label: ticket.client.name, href: `/silverfang/clients/${ticket.client.id}` },
+  ];
+  if (ticket.project) {
+    crumbs.push({ label: ticket.project.name, href: `/silverfang/projects/${ticket.project.id}` });
+  }
+  if (ticket.projectPhase) crumbs.push({ label: ticket.projectPhase.name });
+  crumbs.push({ label: `#${ticket.number}` });
+  // An explicit ?returnTo= wins — it is where the viewer actually came from — else
+  // the ticket's own project or client, which is nearer than the global queue.
+  const backTo =
+    safeReturnTo(sp.returnTo) ??
+    (ticket.project
+      ? `/silverfang/projects/${ticket.project.id}`
+      : `/silverfang/clients/${ticket.client.id}`);
 
   const canWrite = can(user.role, "tickets:write");
   const canAssign = can(user.role, "tickets:assign");
@@ -222,7 +245,7 @@ export default async function TicketDetailPage({
             </span>
             {canWrite && (
               <Link
-                href={`/silverfang/tickets/${ticket.id}/edit`}
+                href={withReturnTo(`/silverfang/tickets/${ticket.id}/edit`, backTo)}
                 className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
               >
                 <Pencil className="h-4 w-4" /> Edit
@@ -232,12 +255,9 @@ export default async function TicketDetailPage({
         }
       />
       <div className="space-y-6 p-4 sm:p-8">
-        <Link
-          href="/silverfang/tickets"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Tickets
-        </Link>
+        {/* A trail rather than a single back-link: a project ticket reached from a
+            phase used to offer only "Tickets", which is not where you came from. */}
+        <Breadcrumbs items={crumbs} />
 
         {/* Summary + SLA */}
         <Card>

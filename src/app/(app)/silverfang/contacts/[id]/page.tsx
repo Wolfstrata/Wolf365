@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { contactRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
@@ -13,17 +13,21 @@ import { TicketsTable } from "../../tickets/tickets-table";
 import { ContactForm } from "../contact-form";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { changeLogFor } from "@/lib/silverfang/change-log";
+import { safeReturnTo } from "@/lib/silverfang/return-to";
+import { Breadcrumbs, type Crumb } from "@/components/ui/breadcrumbs";
 
 export const dynamic = "force-dynamic";
 
 export default async function ContactDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const user = await requireUser();
   if (!can(user.role, "tickets:read")) notFound();
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
 
   const stored = await prisma.sfContact.findUnique({
     where: { id },
@@ -48,6 +52,15 @@ export default async function ContactDetailPage({
   ]);
 
   const canWrite = can(user.role, "tickets:write");
+  // Saving closes back to wherever this was opened from — usually the client page,
+  // since that is where the contacts table lives.
+  const returnTo =
+    safeReturnTo(sp.returnTo) ?? `/silverfang/clients/${contact.client.id}`;
+  const crumbs: Crumb[] = [
+    { label: "Clients", href: "/silverfang/clients" },
+    { label: contact.client.name, href: `/silverfang/clients/${contact.client.id}` },
+    { label: contactDisplayName(contact) },
+  ];
 
   return (
     <div>
@@ -57,17 +70,12 @@ export default async function ContactDetailPage({
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">
+          <Breadcrumbs items={crumbs} />
           <Link
             href="/silverfang/contacts"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" /> Contacts
-          </Link>
-          <Link
-            href={`/silverfang/clients/${contact.client.id}`}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {contact.client.name}
+            <ArrowLeft className="h-4 w-4" /> All contacts
           </Link>
         </div>
 
@@ -122,6 +130,8 @@ export default async function ContactDetailPage({
               }}
               clients={clients}
               submitLabel="Save contact"
+              returnTo={returnTo}
+              cancelHref={returnTo}
               canDelete={can(user.role, "silverfang:configure")}
               source={contact.sourceSystem}
               lockedFromImport={Boolean(contact.locallyModifiedAt)}
@@ -151,7 +161,7 @@ export default async function ContactDetailPage({
               No tickets have been raised by this contact.
             </p>
           ) : (
-            <TicketsTable rows={tickets} />
+            <TicketsTable rows={tickets} returnTo={`/silverfang/contacts/${contact.id}`} />
           )}
         </Card>
       </div>
