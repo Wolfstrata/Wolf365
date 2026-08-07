@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { materializeClients } from "@/lib/mapping/service";
 import { contactImportDecision, splitName } from "@/lib/silverfang/contacts";
+import { contactWrite } from "@/lib/silverfang/pii";
 
 /**
  * Import SuperOps clients + contacts into SilverFang.
@@ -97,12 +98,18 @@ export async function importSuperOpsClients(actor: {
         result.skippedNoName += 1;
         continue;
       }
+      const secrets = contactWrite({ email: c.email, phone: c.phone });
       const data = {
         clientId,
         firstName: parsed.firstName,
         lastName: parsed.lastName,
-        email: c.email,
-        phone: c.phone,
+        // Encrypted, with the email's lookup columns derived in the same write.
+        // `mobile` is deliberately not copied across: SuperOps has no mobile
+        // field, so writing it would wipe a number entered here by hand.
+        email: secrets.email,
+        phone: secrets.phone,
+        emailIndex: secrets.emailIndex,
+        emailDomain: secrets.emailDomain,
         title: c.role,
         sourceUpdatedAt: c.lastSyncedAt,
       };
@@ -171,9 +178,11 @@ async function ensurePrimaryContacts(): Promise<void> {
       where: { clientId: g.clientId, isPrimary: true },
     });
     if (hasPrimary > 0) continue;
+    // Ordered by name, not email: the email column is ciphertext, so sorting on
+    // it would pick an arbitrary contact rather than a predictable one.
     const first = await prisma.sfContact.findFirst({
       where: { clientId: g.clientId, active: true },
-      orderBy: [{ email: "asc" }, { firstName: "asc" }],
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { createdAt: "asc" }],
       select: { id: true },
     });
     if (first) {

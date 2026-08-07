@@ -14,6 +14,7 @@ import {
   sendTicketMail,
   type MailAudience,
 } from "@/lib/silverfang/mail";
+import { textRead, textWrite } from "@/lib/silverfang/pii";
 
 /**
  * Auto-response rules: templated mail sent to the contact and/or the assignee
@@ -111,7 +112,10 @@ export async function runAutoResponses(
       const clientTo: string[] = [];
       const internalTo: string[] = [];
       if (rule.audience === "CONTACT" || rule.audience === "BOTH") {
-        if (ticket.contact?.email) clientTo.push(ticket.contact.email);
+        // Stored encrypted — decrypt, or the "address" handed to the mail
+        // transport would be a ciphertext string.
+        const contactEmail = textRead(ticket.contact?.email);
+        if (contactEmail) clientTo.push(contactEmail);
       }
       if (rule.audience === "ASSIGNEE" || rule.audience === "BOTH") {
         if (ticket.assignee?.email) internalTo.push(ticket.assignee.email);
@@ -139,6 +143,7 @@ export async function runAutoResponses(
       const subject = renderTemplate(rule.subjectTemplate, vars);
       const fullSubject = buildOutboundSubject(ticket.number, subject);
 
+      const fromAddr = outboundAddress(mailbox);
       const deliver = async (to: string[], audience: MailAudience) => {
         if (to.length === 0) return;
         const result = await sendTicketMail(mailbox, {
@@ -155,11 +160,11 @@ export async function runAutoResponses(
               ticketId: ticket.id,
               mailboxId: mailbox.id,
               direction: "OUTBOUND",
-              fromAddress: outboundAddress(mailbox),
+              fromAddress: textWrite(fromAddr) ?? fromAddr,
               toAddresses: to,
               subject: fullSubject,
-              bodyText: body,
-              bodyHtml: textToHtml(body),
+              bodyText: textWrite(body),
+              bodyHtml: textWrite(textToHtml(body)),
               sentAt: new Date(),
             },
           });

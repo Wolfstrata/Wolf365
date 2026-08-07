@@ -2,13 +2,13 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import {
-  blindIndex,
   ciphertextKeyId,
   decryptField,
   encryptField,
   isCiphertext,
   primaryKeyId,
 } from "@/lib/crypto";
+import { contactEmailLookup } from "@/lib/silverfang/pii";
 
 /**
  * Re-encrypting stored values under a new key.
@@ -36,16 +36,18 @@ import {
  * Every column holding app-encrypted data. Adding an encrypted column means
  * adding it here, or rotation will silently leave it behind on the old key.
  *
- * `reindex` names a blind-index column recomputed from the plaintext during
- * rotation: the index is derived from the data key, so rotating the key changes
- * every index and they must be rebuilt in the same pass or equality lookups stop
- * matching.
+ * `derived` returns the lookup columns computed from the plaintext. They must be
+ * rebuilt in the same write as the rotation, because a blind index is an HMAC
+ * under the data key — change the key and every index changes, so a rotation that
+ * skipped this would leave equality lookups silently matching nothing. It
+ * delegates to the same helper the write path uses; deriving the index a second
+ * way here is exactly how the two drift apart.
  */
 interface EncryptedColumn {
   /** Prisma model delegate name, for the report. */
   model: string;
   column: string;
-  reindex?: { column: string; domain?: string };
+  derived?: (plain: string) => Record<string, unknown>;
 }
 
 const REGISTRY: EncryptedColumn[] = [
@@ -54,15 +56,21 @@ const REGISTRY: EncryptedColumn[] = [
   { model: "connector", column: "secretsEnc" },
   // Entra SSO client secret.
   { model: "ssoSettings", column: "clientSecretEnc" },
-  // NOT YET LISTED — the personal-data columns.
+  // Personal data. The read paths decrypt these (src/lib/silverfang/pii.ts) and
+  // tolerate plaintext, so a column can be listed here before its data is
+  // converted — the first rotation pass is what converts it.
   //
-  // SfContact.email/phone/mobile, SfTicket.description, SfTicketNote.body and
-  // SfTicketMessage.fromAddress/bodyText/bodyHtml have their schema, their
-  // lookup columns (emailIndex, emailDomain) and their crypto helpers in place,
-  // but the read paths do not decrypt yet. Listing them here now would be
-  // actively harmful: the backfill would encrypt values the UI still reads
-  // literally, and every contact email and ticket body would render as
-  // "v2:a1b2c3d4:…". They go in the same change that wires the call sites.
+  // The contact address carries `derived` because inbound mail finds its contact
+  // by `emailIndex`; a rotation that left the index behind would silently stop
+  // matching senders.
+  { model: "sfContact", column: "email", derived: contactEmailLookup },
+  { model: "sfContact", column: "phone" },
+  { model: "sfContact", column: "mobile" },
+  { model: "sfTicket", column: "description" },
+  { model: "sfTicketNote", column: "body" },
+  { model: "sfTicketMessage", column: "fromAddress" },
+  { model: "sfTicketMessage", column: "bodyText" },
+  { model: "sfTicketMessage", column: "bodyHtml" },
 ];
 
 export interface ColumnStatus {
@@ -197,16 +205,8 @@ export async function rotateEncryptedValues(limitPerColumn = 500): Promise<Rotat
         // write it back under the primary key.
         const plain = decryptField(value);
         const data: Record<string, unknown> = { [entry.column]: encryptField(plain) };
-        // The blind index is derived from the data key, so it must be rebuilt from
-        // the plaintext in the same write — otherwise lookups silently stop
-        // matching after a rotation.
-        if (entry.reindex && plain) {
-          data[entry.reindex.column] = blindIndex(plain);
-          if (entry.reindex.domain) {
-            const at = plain.lastIndexOf("@");
-            data[entry.reindex.domain] = at > 0 ? plain.slice(at + 1).toLowerCase() : null;
-          }
-        }
+        // Rebuild the lookup columns from the plaintext in the same write.
+        if (entry.derived) Object.assign(data, entry.derived(plain ?? ""));
         await delegate(entry.model).update({ where: { id }, data });
         if (wasCiphertext) rotated += 1;
         else encrypted += 1;

@@ -18,6 +18,7 @@ import {
   type StatusLike,
 } from "@/lib/silverfang/status";
 import { parseHours, roundHours, toWorkDate, weekStartOf } from "@/lib/silverfang/time";
+import { contactEmailIndex, contactWrite, textWrite } from "@/lib/silverfang/pii";
 import { pausedMinutesFor } from "@/lib/silverfang/sla";
 import {
   ensureSilverFangDefaults,
@@ -233,7 +234,7 @@ export async function saveTicketAction(
             priority: input.priority,
             source: input.source,
             summary: input.summary,
-            description: input.description ?? null,
+            description: textWrite(input.description),
             assigneeId: input.assigneeId ?? null,
             agreementId: input.agreementId ?? null,
             projectId: link.projectId,
@@ -304,7 +305,7 @@ export async function saveTicketAction(
           priority: input.priority,
           source: input.source,
           summary: input.summary,
-          description: input.description ?? null,
+          description: textWrite(input.description),
           assigneeId: input.assigneeId ?? null,
           agreementId: input.agreementId ?? null,
           projectId: link.projectId,
@@ -475,7 +476,7 @@ export async function addTicketNoteAction(
       prisma.sfTicketNote.create({
         data: {
           ticketId: input.ticketId,
-          body: input.body,
+          body: textWrite(input.body) ?? "",
           internalOnly: input.internalOnly,
           authorId: user.id,
           authorEmail: user.email,
@@ -872,9 +873,11 @@ export async function saveContactAction(
     // sender, so a duplicate would silently file tickets against whichever record
     // happened to sort first.
     if (input.email) {
+      // The address is encrypted, so equality on the column can never match.
+      // The blind index is what makes this uniqueness check possible at all.
       const clash = await prisma.sfContact.findFirst({
         where: {
-          email: { equals: input.email, mode: "insensitive" },
+          emailIndex: contactEmailIndex(input.email),
           ...(input.id ? { id: { not: input.id } } : {}),
         },
         select: { firstName: true, lastName: true, client: { select: { name: true } } },
@@ -893,9 +896,8 @@ export async function saveContactAction(
       clientId: input.clientId,
       firstName: input.firstName,
       lastName: input.lastName ?? null,
-      email: input.email ?? null,
-      phone: input.phone ?? null,
-      mobile: input.mobile ?? null,
+      // Encrypted, with the blind index and domain derived in the same step.
+      ...contactWrite({ email: input.email, phone: input.phone, mobile: input.mobile }),
       title: input.title ?? null,
       isPrimary: input.isPrimary,
       active: input.active,
@@ -919,13 +921,13 @@ export async function saveContactAction(
       actor: { id: user.id, email: user.email },
       before,
       after: saved as unknown as Record<string, unknown>,
+      // Contact detail is deliberately absent: the trail stores old and new
+      // values as text, so recording email/phone here would copy the personal
+      // data straight back out of the encrypted column into a plaintext one.
       fields: [
         "clientId",
         "firstName",
         "lastName",
-        "email",
-        "phone",
-        "mobile",
         "title",
         "isPrimary",
         "active",
@@ -1122,7 +1124,7 @@ export async function sendTicketEmailAction(
       to: input.to.split(/[,;]/),
       cc: input.cc ? input.cc.split(/[,;]/) : [],
       subject: input.subject ?? null,
-      body: input.body,
+      body: textWrite(input.body) ?? "",
       actor: { id: user.id, email: user.email },
     });
     if (!result.ok) return result;

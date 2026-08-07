@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma, SfMailbox } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { contactEmailIndex, textWrite } from "@/lib/silverfang/pii";
 import { audit } from "@/lib/audit";
 import { safeErrorMessage } from "@/lib/redact";
 import {
@@ -155,9 +156,10 @@ interface SenderMatch {
  * configured fallback client. Consumer domains are never domain-matched.
  */
 async function resolveSender(from: string, mailbox: SfMailbox): Promise<SenderMatch | null> {
+  // The address column is encrypted, so it is matched via its blind index.
   const contact = await prisma.sfContact.findFirst({
     where: {
-      email: { equals: from, mode: "insensitive" },
+      emailIndex: contactEmailIndex(from),
       active: true,
       client: { archived: false },
     },
@@ -170,7 +172,9 @@ async function resolveSender(from: string, mailbox: SfMailbox): Promise<SenderMa
   if (domain && !isPublicEmailDomain(domain)) {
     const peers = await prisma.sfContact.findMany({
       where: {
-        email: { endsWith: `@${domain}`, mode: "insensitive" },
+        // Matched on the domain column, kept in the clear precisely so this
+        // fallback still works with the address itself encrypted.
+        emailDomain: domain,
         active: true,
         client: { archived: false },
       },
@@ -335,7 +339,7 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
           priority: mailbox.defaultPriority,
           source: "EMAIL",
           summary: summaryFromSubject(input.subject),
-          description: text || null,
+          description: textWrite(text || null),
           slaId: board.slaId,
           responseDueAt: sla.responseDueAt,
           resolutionDueAt: sla.resolutionDueAt,
@@ -349,12 +353,12 @@ export async function ingestInboundEmail(input: InboundEmail): Promise<IngestRes
           ticketId: ticket.id,
           mailboxId: mailbox.id,
           direction: "INBOUND",
-          fromAddress: from,
+          fromAddress: textWrite(from) ?? from,
           toAddresses,
           ccAddresses,
           subject: input.subject ?? null,
-          bodyText: text || null,
-          bodyHtml: input.html ?? null,
+          bodyText: textWrite(text || null),
+          bodyHtml: textWrite(input.html ?? null),
           messageId: input.messageId ?? null,
           inReplyTo: input.inReplyTo ?? null,
           references: input.references ?? null,
@@ -434,12 +438,12 @@ async function appendToTicket(
         ticketId,
         mailboxId: ctx.mailbox.id,
         direction: "INBOUND",
-        fromAddress: ctx.from,
+        fromAddress: textWrite(ctx.from) ?? ctx.from,
         toAddresses: ctx.toAddresses,
         ccAddresses: ctx.ccAddresses,
         subject: ctx.input.subject ?? null,
-        bodyText: ctx.text || null,
-        bodyHtml: ctx.input.html ?? null,
+        bodyText: textWrite(ctx.text || null),
+        bodyHtml: textWrite(ctx.input.html ?? null),
         messageId: ctx.input.messageId ?? null,
         inReplyTo: ctx.input.inReplyTo ?? null,
         references: ctx.input.references ?? null,

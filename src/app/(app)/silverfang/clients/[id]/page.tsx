@@ -23,6 +23,7 @@ import { HuduCard } from "./hudu-card";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { changeLogFor } from "@/lib/silverfang/change-log";
 import { canAccessRoute } from "@/lib/workspaces";
+import { contactRead } from "@/lib/silverfang/pii";
 
 export const dynamic = "force-dynamic";
 
@@ -235,7 +236,7 @@ export default async function SilverFangClientPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {client.sfContacts.map((c) => (
+                  {client.sfContacts.map(contactRead).map((c) => (
                     <tr key={c.id} className="border-t align-top">
                       <td className="py-1.5 pr-4">
                         <Link

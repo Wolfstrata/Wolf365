@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Lock, Mail, MailOpen, Pencil } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { textRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
@@ -180,7 +181,7 @@ export default async function TicketDetailPage({
     ...ticket.notes.map((n) => ({
       kind: "note" as const,
       at: n.createdAt,
-      body: n.body,
+      body: textRead(n.body) ?? "",
       internalOnly: n.internalOnly,
       author: n.authorEmail,
     })),
@@ -188,9 +189,9 @@ export default async function TicketDetailPage({
       kind: "email" as const,
       at: m.receivedAt ?? m.sentAt ?? m.createdAt,
       inbound: m.direction === "INBOUND",
-      body: m.bodyText ?? "(no text body)",
+      body: textRead(m.bodyText) ?? "(no text body)",
       subject: m.subject,
-      author: m.fromAddress,
+      author: textRead(m.fromAddress) ?? "(unknown sender)",
       recipients: m.toAddresses,
     })),
     ...ticket.history.map((h) => ({
@@ -309,7 +310,7 @@ export default async function TicketDetailPage({
               <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
                 Description
               </p>
-              <p className="whitespace-pre-wrap text-sm">{ticket.description}</p>
+              <p className="whitespace-pre-wrap text-sm">{textRead(ticket.description)}</p>
             </div>
           )}
         </Card>

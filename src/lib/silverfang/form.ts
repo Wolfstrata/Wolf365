@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { contactRead, textRead } from "@/lib/silverfang/pii";
 import type {
   TicketFormOptions,
   TicketFormValues,
@@ -135,7 +136,9 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
   ]);
 
   const contactsByClient: TicketFormOptions["contactsByClient"] = {};
-  for (const c of contacts) {
+  for (const raw of contacts) {
+    // The address is encrypted at rest; the picker shows it, so decrypt here.
+    const c = contactRead(raw);
     const label =
       [c.firstName, c.lastName].filter(Boolean).join(" ") + (c.email ? ` <${c.email}>` : "");
     (contactsByClient[c.clientId] ??= []).push({ id: c.id, name: label });
@@ -182,7 +185,7 @@ export async function ticketToFormValues(id: string): Promise<TicketFormValues |
     priority: t.priority,
     source: t.source,
     summary: t.summary,
-    description: t.description ?? "",
+    description: textRead(t.description) ?? "",
     assigneeId: t.assigneeId ?? "",
     agreementId: t.agreementId ?? "",
     projectId: t.projectId ?? "",

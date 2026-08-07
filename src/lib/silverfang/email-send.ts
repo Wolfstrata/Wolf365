@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { textRead, textWrite } from "@/lib/silverfang/pii";
 import {
   buildOutboundSubject,
   buildReferences,
@@ -40,13 +41,17 @@ export async function defaultReplyRecipients(ticketId: string): Promise<string[]
     where: { id: ticketId },
     select: { contact: { select: { email: true } } },
   });
-  if (ticket?.contact?.email) return parseAddressList([ticket.contact.email]);
+  // Both candidate addresses are stored encrypted; a missing decrypt here would
+  // send mail to a ciphertext string.
+  const contactEmail = textRead(ticket?.contact?.email);
+  if (contactEmail) return parseAddressList([contactEmail]);
   const lastInbound = await prisma.sfTicketMessage.findFirst({
     where: { ticketId, direction: "INBOUND" },
     orderBy: { createdAt: "desc" },
     select: { fromAddress: true },
   });
-  return lastInbound ? parseAddressList([lastInbound.fromAddress]) : [];
+  const from = textRead(lastInbound?.fromAddress ?? null);
+  return from ? parseAddressList([from]) : [];
 }
 
 /**
@@ -134,12 +139,12 @@ export async function sendTicketReply(input: SendReplyInput): Promise<SendReplyR
         ticketId: ticket.id,
         mailboxId: mailbox.id,
         direction: "OUTBOUND",
-        fromAddress,
+        fromAddress: textWrite(fromAddress) ?? fromAddress,
         toAddresses: to,
         ccAddresses: cc,
         subject,
-        bodyText: fullBody,
-        bodyHtml: textToHtml(fullBody),
+        bodyText: textWrite(fullBody),
+        bodyHtml: textWrite(textToHtml(fullBody)),
         inReplyTo: last?.messageId ?? null,
         references,
         sentAt: now,

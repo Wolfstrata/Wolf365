@@ -6,6 +6,7 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
+import { contactRead } from "@/lib/silverfang/pii";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function ContactsPage() {
   const user = await requirePermission("tickets:read");
 
-  const contacts = await prisma.sfContact.findMany({
+  const rawContacts = await prisma.sfContact.findMany({
     where: { client: { archived: false } },
     orderBy: [{ client: { name: "asc" } }, { isPrimary: "desc" }, { firstName: "asc" }],
     include: {
@@ -23,6 +24,9 @@ export default async function ContactsPage() {
     take: 2000,
   });
 
+  // Contact detail is encrypted at rest; decrypt once here so everything below
+  // reads plaintext rather than each use having to remember.
+  const contacts = rawContacts.map(contactRead);
   const withEmail = contacts.filter((c) => c.email).length;
   const canWrite = can(user.role, "tickets:write");
 

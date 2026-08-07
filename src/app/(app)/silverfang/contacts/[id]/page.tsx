@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { contactRead } from "@/lib/silverfang/pii";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
 import { PageHeader, Card, StatItem } from "@/components/ui/primitives";
@@ -24,14 +25,16 @@ export default async function ContactDetailPage({
   if (!can(user.role, "tickets:read")) notFound();
   const { id } = await params;
 
-  const contact = await prisma.sfContact.findUnique({
+  const stored = await prisma.sfContact.findUnique({
     where: { id },
     include: {
       client: { select: { id: true, name: true } },
       _count: { select: { tickets: true } },
     },
   });
-  if (!contact) notFound();
+  if (!stored) notFound();
+  // Contact detail is encrypted at rest — decrypt once, at the boundary.
+  const contact = contactRead(stored);
 
   const [clients, tickets, trail] = await Promise.all([
     prisma.client.findMany({
