@@ -31,12 +31,12 @@ export type SfLineKind =
   | "PROJECT_DEPOSIT"
   | "MANUAL";
 
-export type AgreementType =
-  | "BLOCK_TIME"
-  | "MANAGED_SERVICES"
-  | "MANAGED_NOC"
-  | "PROJECT"
-  | "TIME_AND_MATERIALS";
+/**
+ * Mirrors SfAgreementType. Time and materials is absent on purpose: it is not an
+ * agreement, it is hours logged with no agreement, and that is the generator's
+ * default path rather than a case to branch on.
+ */
+export type AgreementType = "BLOCK_TIME" | "MANAGED_SERVICES" | "MANAGED_NOC";
 
 export interface TimeEntryInput {
   id: string;

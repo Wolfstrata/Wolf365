@@ -99,6 +99,10 @@ export function AgreementForm({
               </option>
             ))}
           </select>
+          <span className="mt-1 block text-xs font-normal text-muted-foreground">
+            Project work belongs in Projects, and time and materials needs no agreement —
+            hours logged against a client without one bill as worked.
+          </span>
         </label>
         <label className="block text-sm font-medium">
           Status <span className="text-danger">*</span>

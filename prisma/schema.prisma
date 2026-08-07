@@ -1351,12 +1351,18 @@ enum SfTicketSource {
   RECURRING // generated from a schedule
 }
 
+/// What an agreement is, and therefore how work against it bills.
+///
+/// Deliberately only three. Project work is not an agreement type — a project is
+/// its own record with its own billing type (see SfProject). And time and
+/// materials is not an agreement either: it is what happens when hours are logged
+/// against a client with no agreement at all, which the billing generator already
+/// handles as its default case. Offering either as an agreement type invited
+/// records that duplicated a concept living somewhere better.
 enum SfAgreementType {
   BLOCK_TIME // prepaid hours drawn down by time entries
   MANAGED_SERVICES // recurring all-in support
   MANAGED_NOC // recurring NOC/monitoring
-  PROJECT // fixed-scope project work
-  TIME_AND_MATERIALS // billed as worked, no inclusions
 }
 
 enum SfAgreementStatus {

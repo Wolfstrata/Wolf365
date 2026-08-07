@@ -46,8 +46,6 @@ export const AGREEMENT_TYPE_LABELS: Record<SfAgreementType, string> = {
   BLOCK_TIME: "Block time",
   MANAGED_SERVICES: "Managed services",
   MANAGED_NOC: "Managed NOC",
-  PROJECT: "Project",
-  TIME_AND_MATERIALS: "Time & materials",
 };
 
 export const AGREEMENT_STATUS_LABELS: Record<SfAgreementStatus, string> = {
