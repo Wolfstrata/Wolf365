@@ -799,6 +799,50 @@ export async function importSuperOpsClientsAction(
 }
 
 /**
+ * Create contacts for inbound addresses that the domain rules can place.
+ *
+ * Gated on `silverfang:configure` rather than `tickets:write`: it writes contacts
+ * in bulk across every client, which is an administrative act, not day-to-day work.
+ */
+export async function backfillDomainContactsAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { backfillDomainContacts, describeBackfill } = await import(
+      "@/lib/silverfang/contact-backfill"
+    );
+    const outcome = await backfillDomainContacts();
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:contact-backfill",
+      metadata: {
+        addresses: outcome.addresses,
+        created: outcome.created,
+        alreadyKnown: outcome.alreadyKnown,
+        noDomainMatch: outcome.noDomainMatch,
+        publicDomain: outcome.publicDomain,
+        noName: outcome.noName,
+        failed: outcome.failed,
+        truncated: outcome.truncated,
+        // Addresses are personal data, so the trail records the count and the
+        // clients, not the list of people.
+        clients: [...new Set(outcome.contacts.map((c) => c.clientName))],
+      },
+    });
+    revalidatePath("/silverfang/contacts");
+    revalidatePath("/silverfang/clients");
+    revalidatePath("/silverfang/email");
+    return { ok: true, message: describeBackfill(outcome) };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
  * Give every SuperOps managed-services customer a placeholder managed agreement.
  *
  * Takes no input from the form on purpose: the candidate list is re-derived

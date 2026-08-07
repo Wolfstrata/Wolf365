@@ -8,6 +8,7 @@ import { PawTip } from "@/components/ui/paw-tip";
 import { DataTable, type DataColumn, type DataRow } from "@/components/ui/data-table";
 import { contactDisplayName } from "@/lib/silverfang/contacts";
 import { contactRead } from "@/lib/silverfang/pii";
+import { BackfillContactsButton } from "./backfill-button";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function ContactsPage() {
   const contacts = rawContacts.map(contactRead);
   const withEmail = contacts.filter((c) => c.email).length;
   const canWrite = can(user.role, "tickets:write");
+  const canConfigure = can(user.role, "silverfang:configure");
 
   const columns: DataColumn[] = [
     { key: "name", label: "Name" },
@@ -74,12 +76,15 @@ export default async function ContactsPage() {
         description="Client contacts used as ticket requesters."
         actions={
           canWrite ? (
-            <Link
-              href="/silverfang/contacts/new"
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              <Plus className="h-4 w-4" /> New contact
-            </Link>
+            <>
+              {canConfigure && <BackfillContactsButton />}
+              <Link
+                href="/silverfang/contacts/new"
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+              >
+                <Plus className="h-4 w-4" /> New contact
+              </Link>
+            </>
           ) : null
         }
       />
