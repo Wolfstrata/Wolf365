@@ -22,6 +22,7 @@ import { ClientProfileForm } from "./profile-form";
 import { HuduCard } from "./hudu-card";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { changeLogFor } from "@/lib/silverfang/change-log";
+import { canAccessRoute } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 
@@ -114,13 +115,17 @@ export default async function SilverFangClientPage({
           >
             <ArrowLeft className="h-4 w-4" /> Clients
           </Link>
-          <Link
-            href={`/clients/${client.id}`}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> Wolf365 client profile
-          </Link>
-          {client.superOpsMatch && (
+          {/* Links out of SilverFang are only offered to roles allowed to leave —
+              otherwise clicking one just bounces you back, which reads as a bug. */}
+          {canAccessRoute(user.role, "/clients") && (
+            <Link
+              href={`/clients/${client.id}`}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Wolf365 client profile
+            </Link>
+          )}
+          {client.superOpsMatch && canAccessRoute(user.role, "/synced") && (
             <Link
               href={`/synced/superops/${client.superOpsMatch.id}`}
               className="inline-flex items-center gap-1 text-sm text-primary hover:underline"

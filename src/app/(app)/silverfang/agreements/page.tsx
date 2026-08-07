@@ -141,7 +141,10 @@ export default async function AgreementsPage() {
                           </Link>
                         </td>
                         <td className="py-1.5 pr-4">
-                          <Link href={`/clients/${a.client.id}`} className="text-primary hover:underline">
+                          <Link
+                            href={`/silverfang/clients/${a.client.id}`}
+                            className="text-primary hover:underline"
+                          >
                             {a.client.name}
                           </Link>
                         </td>

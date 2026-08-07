@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { signOut } from "@/auth";
 import { requireUser } from "@/lib/auth/session";
 import { can, ROLE_LABELS } from "@/lib/rbac";
+import { canAccessRoute, homeRouteFor } from "@/lib/workspaces";
 import { NAV_ITEMS } from "@/components/shell/nav";
 import { AppShell } from "@/components/shell/app-shell";
 import { ConnectorStatusBadge } from "@/components/shell/connector-status";
@@ -18,7 +21,19 @@ import { TimeZoneProvider } from "@/components/ui/local-time";
  * - large main work area on the right
  *
  * Route protection is enforced here (server component, Node runtime) and nav
- * items are filtered by the user's permissions before reaching the client.
+ * items are filtered before reaching the client.
+ *
+ * Two independent gates, both applied here:
+ *
+ *   1. WORKSPACE — may this role be on this route at all? Each product (Finance,
+ *      SilverFang, CRM, …) is its own territory and only Administrators and Power
+ *      Users cross between them. Enforced here rather than per page because a
+ *      single choke point cannot be forgotten when a new page is added; the
+ *      pathname arrives as a header set by the middleware, since a layout is not
+ *      told its own route.
+ *   2. PERMISSION — may this role do this kind of thing? Still checked per page
+ *      and per server action, as before. The layout guard is a boundary, not a
+ *      replacement for those.
  */
 export default async function AppLayout({
   children,
@@ -27,8 +42,22 @@ export default async function AppLayout({
 }) {
   const user = await requireUser();
 
+  // Set by the middleware from the real URL on every request.
+  const pathname = (await headers()).get("x-pathname") ?? "/";
+
+  // Send anyone standing outside their territory to the start of their own,
+  // rather than showing a page that would leak another product's data. An
+  // unmapped route resolves to no workspace and is left alone, so this cannot
+  // trap a page that simply is not in the map yet.
+  if (!canAccessRoute(user.role, pathname)) {
+    redirect(homeRouteFor(user.role));
+  }
+
   const visibleItems = NAV_ITEMS.filter(
-    (item) => !item.permission || can(user.role, item.permission),
+    (item) =>
+      (!item.permission || can(user.role, item.permission)) &&
+      // Nav mirrors the boundary: a section the user may not enter is not offered.
+      canAccessRoute(user.role, item.href),
   );
 
   async function doSignOut() {

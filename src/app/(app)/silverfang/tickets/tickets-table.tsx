@@ -76,7 +76,7 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       sortValue: (r) => r.client.toLowerCase(),
       render: (r) => (
         <div>
-          <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline">
+          <Link href={`/silverfang/clients/${r.clientId}`} className="text-primary hover:underline">
             {r.client}
           </Link>
           {r.contact && <div className="text-xs text-muted-foreground">{r.contact}</div>}

@@ -10,7 +10,10 @@ import { NextRequest, NextResponse } from "next/server";
  * (Tailwind/Next inject <style> tags; style injection is not a script-exec risk).
  *
  * This middleware only manipulates headers — no DB/auth — so it runs safely on
- * the edge runtime.
+ * the edge runtime. It also forwards the request path, because the authenticated
+ * layout needs it to enforce workspace isolation and a Next.js layout is not told
+ * which route it is rendering. The enforcement itself stays in the layout, where
+ * the session and the role are available.
  */
 export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -33,6 +36,9 @@ export function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  // Read by the (app) layout to resolve the current workspace. Set from the URL
+  // on every request, so a client cannot spoof it to cross a border.
+  requestHeaders.set("x-pathname", request.nextUrl.pathname);
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);

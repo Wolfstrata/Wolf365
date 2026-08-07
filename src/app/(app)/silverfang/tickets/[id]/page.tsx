@@ -243,7 +243,10 @@ export default async function TicketDetailPage({
             <StatItem
               label="Client"
               value={
-                <Link href={`/clients/${ticket.client.id}`} className="text-primary hover:underline">
+                <Link
+                  href={`/silverfang/clients/${ticket.client.id}`}
+                  className="text-primary hover:underline"
+                >
                   {ticket.client.name}
                 </Link>
               }

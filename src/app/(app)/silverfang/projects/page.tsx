@@ -84,7 +84,10 @@ export default async function ProjectsPage() {
                     <tr key={p.id} className="border-t align-top">
                       <td className="py-1.5 pr-4 font-medium"><Link href={`/silverfang/projects/${p.id}`} className="text-primary hover:underline">{p.name}</Link></td>
                       <td className="py-1.5 pr-4">
-                        <Link href={`/clients/${p.client.id}`} className="text-primary hover:underline">
+                        <Link
+                          href={`/silverfang/clients/${p.client.id}`}
+                          className="text-primary hover:underline"
+                        >
                           {p.client.name}
                         </Link>
                       </td>

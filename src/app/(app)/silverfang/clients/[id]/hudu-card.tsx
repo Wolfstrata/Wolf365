@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { BookOpen, ExternalLink, Server, ShieldCheck } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { requireUser } from "@/lib/auth/session";
+import { canAccessRoute } from "@/lib/workspaces";
 import { Card } from "@/components/ui/primitives";
 import { LocalTime } from "@/components/ui/local-time";
 
@@ -32,6 +34,7 @@ function fieldsOf(value: unknown): SafeField[] {
 }
 
 export async function HuduCard({ clientId }: { clientId: string }) {
+  const user = await requireUser();
   const company = await prisma.huduCompany.findUnique({
     where: { clientId },
     include: {
@@ -75,12 +78,15 @@ export async function HuduCard({ clientId }: { clientId: string }) {
             <ExternalLink className="h-3.5 w-3.5" /> Open in Hudu
           </a>
         )}
-        <Link
-          href={`/synced/hudu/${company.id}`}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          Synced record
-        </Link>
+        {/* Connector Data is its own workspace; only offer it to roles allowed in. */}
+        {canAccessRoute(user.role, "/synced") && (
+          <Link
+            href={`/synced/hudu/${company.id}`}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Synced record
+          </Link>
+        )}
         <span className="ml-auto text-xs text-muted-foreground">
           Synced <LocalTime value={company.lastSyncedAt} />
         </span>
