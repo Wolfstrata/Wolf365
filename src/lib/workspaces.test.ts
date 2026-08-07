@@ -105,6 +105,21 @@ describe("role territories", () => {
     expect(canAccessRoute("SILVERFANG_USER", "/silverfang/clients/abc123")).toBe(true);
   });
 
+  it("shows SilverFang Billing to finance only — never to SilverFang roles", () => {
+    // Stated requirement: SilverFang Billing is finance work. It is gated twice —
+    // the FINANCE workspace here, and billing:read as a permission — so neither
+    // axis alone is load-bearing.
+    for (const role of ["SILVERFANG_ADMIN", "SILVERFANG_USER"] as const) {
+      expect(canAccessRoute(role, "/silverfang-billing"), role).toBe(false);
+      expect(canAccessRoute(role, "/silverfang-billing/settings"), role).toBe(false);
+    }
+    for (const role of ["ADMINISTRATOR", "POWER_USER", "FINANCIAL_POWER_USER"] as const) {
+      expect(canAccessRoute(role, "/silverfang-billing"), role).toBe(true);
+    }
+    // Sales is not finance either.
+    expect(canAccessRoute("SALES", "/silverfang-billing")).toBe(false);
+  });
+
   it("keeps Sales inside the CRM", () => {
     expect(allowedWorkspaces("SALES")).toEqual(["CRM"]);
     expect(canAccessRoute("SALES", "/crm/forecast")).toBe(true);
