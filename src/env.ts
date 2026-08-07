@@ -28,6 +28,28 @@ const serverSchema = z.object({
       }
     }, "WOLF365_ENCRYPTION_KEY must be a base64-encoded 32-byte key"),
 
+  // Retired keys, for DECRYPTION ONLY, comma- or whitespace-separated base64.
+  // Set during a key rotation so values written under the previous key still open
+  // while `npm run keys:rotate` rewrites them; remove once rotation reports 100%.
+  WOLF365_ENCRYPTION_KEYS_OLD: z
+    .string()
+    .optional()
+    .refine(
+      (v) =>
+        v == null ||
+        v
+          .split(/[,\s]+/)
+          .filter(Boolean)
+          .every((k) => {
+            try {
+              return Buffer.from(k, "base64").length === 32;
+            } catch {
+              return false;
+            }
+          }),
+      "WOLF365_ENCRYPTION_KEYS_OLD must be base64-encoded 32-byte keys",
+    ),
+
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be set (>=16 chars)"),
   AUTH_URL: z.string().url().optional(),
 

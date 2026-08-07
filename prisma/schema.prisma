@@ -1490,6 +1490,8 @@ model SfStatus {
 
 // A client contact — first-party, so SilverFang does not depend on the SuperOps
 // mirror it replaces.
+/// A person at a client. Contact details are encrypted at rest — see the field
+/// comments below and `src/lib/crypto.ts`.
 model SfContact {
   id       String  @id @default(cuid())
   clientId String
@@ -1497,9 +1499,22 @@ model SfContact {
 
   firstName String
   lastName  String?
+  /// PERSONAL DATA — app-encrypted at rest (AES-256-GCM, src/lib/crypto.ts).
+  /// These columns hold ciphertext, not readable values. Read them through
+  /// decryptField and write them through encryptField; never query them directly,
+  /// since AES-GCM is randomised and equality will never match.
   email     String?
   phone     String?
   mobile    String?
+
+  /// Keyed blind index of the lowercased email, so a contact can still be found
+  /// by address. Equality only — that is the trade for being able to look up an
+  /// encrypted column at all.
+  emailIndex  String?
+  /// The email's domain, in the clear on purpose: inbound routing matches an
+  /// unknown sender to a client by domain, and the domain identifies the company
+  /// (whose name we already store) rather than the person.
+  emailDomain String?
   title     String?
   isPrimary Boolean @default(false)
   active    Boolean @default(true)
@@ -1523,8 +1538,9 @@ model SfContact {
   tickets SfTicket[]
 
   @@unique([sourceSystem, externalId])
+  @@index([emailIndex])
+  @@index([emailDomain])
   @@index([clientId])
-  @@index([email])
 }
 
 // SilverFang-specific settings for a central Client. Created on demand, so a
@@ -1740,10 +1756,13 @@ model SfTicketMessage {
   mailbox   SfMailbox? @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
 
   direction  String // "INBOUND" | "OUTBOUND"
+  /// PERSONAL DATA — app-encrypted at rest. See src/lib/crypto.ts.
   fromAddress String
   toAddresses String[] @default([])
   ccAddresses String[] @default([])
   subject    String?
+  /// PERSONAL DATA — app-encrypted at rest. The message body is where the
+  /// substance of a client's problem lives, so it is not left in the clear.
   bodyText   String? @db.Text
   bodyHtml   String? @db.Text
 

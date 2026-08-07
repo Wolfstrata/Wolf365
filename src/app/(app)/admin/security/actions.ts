@@ -113,3 +113,44 @@ export async function saveSsoSettingsAction(
     return { ok: false, message: safeErrorMessage(err) };
   }
 }
+
+/**
+ * Re-encrypt stored secrets under the current WOLF365_ENCRYPTION_KEY.
+ *
+ * Lives here rather than in a local script because the keys are Vercel
+ * environment variables: rotation has to run where the app runs, not on a laptop
+ * that happens to have a copy of them.
+ *
+ * Bounded per click and resumable, so a large database is rotated by pressing it
+ * again rather than by holding a request open.
+ */
+export async function rotateEncryptionKeysAction(
+  _prev: SsoActionResult | null,
+  _formData: FormData,
+): Promise<SsoActionResult> {
+  const user = await requirePermission("sso:configure");
+  try {
+    const { rotateWithAudit } = await import("@/lib/crypto-rotate");
+    const r = await rotateWithAudit({ id: user.id, email: user.email });
+    revalidatePath("/admin/security");
+
+    const parts = [
+      `${r.rotated} re-encrypted`,
+      r.encrypted > 0 ? `${r.encrypted} newly encrypted` : null,
+      `${r.skipped} already current`,
+      r.failed > 0 ? `${r.failed} failed` : null,
+    ].filter(Boolean);
+
+    return {
+      ok: r.failed === 0,
+      message:
+        `${parts.join(", ")}. ` +
+        (r.status.complete
+          ? "Everything is under the current key — you can now remove WOLF365_ENCRYPTION_KEYS_OLD."
+          : `${r.status.outstanding} value(s) still on a retired key — run it again.`) +
+        (r.errors.length > 0 ? ` First error: ${r.errors[0]}` : ""),
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}

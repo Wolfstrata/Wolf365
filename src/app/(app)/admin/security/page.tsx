@@ -3,6 +3,8 @@ import { requirePermission } from "@/lib/auth/session";
 import { resolveSso } from "@/lib/auth/sso";
 import { PageHeader, Card } from "@/components/ui/primitives";
 import { SsoForm } from "./sso-form";
+import { RotateKeys } from "./rotate-keys";
+import { rotationStatus } from "@/lib/crypto-rotate";
 
 /** Security & SSO administration. Configure Entra ID sign-in. */
 export default async function SecurityPage() {
@@ -13,6 +15,10 @@ export default async function SecurityPage() {
     orderBy: { updatedAt: "desc" },
   });
   const resolved = await resolveSso();
+  const rotation = await rotationStatus();
+  // Reading the env directly (not through getEnv) keeps this a presence check —
+  // the key material itself never reaches the client component.
+  const hasRetiredKeys = Boolean(process.env.WOLF365_ENCRYPTION_KEYS_OLD?.trim());
 
   const initial = settings
     ? {
@@ -47,6 +53,22 @@ export default async function SecurityPage() {
         </Card>
 
         <SsoForm initial={initial} />
+
+        <Card>
+          <h2 className="mb-1 text-sm font-semibold">Encryption at rest</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Connector secrets and OAuth tokens are encrypted by the application
+            (AES-256-GCM) on top of Neon&rsquo;s storage encryption, so a raw database dump does
+            not yield credentials. This is where the key gets rotated.
+          </p>
+          <RotateKeys
+            keyId={rotation.primaryKeyId}
+            columns={rotation.columns}
+            outstanding={rotation.outstanding}
+            complete={rotation.complete}
+            hasRetiredKeys={hasRetiredKeys}
+          />
+        </Card>
       </div>
     </div>
   );
