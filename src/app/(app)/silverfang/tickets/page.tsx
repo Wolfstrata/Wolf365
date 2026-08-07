@@ -267,6 +267,20 @@ export default async function TicketsPage({
                             phases: p.phases,
                           })),
                         },
+                        // Row-level triage: change status, priority or assignee
+                        // without leaving the queue and losing your place in it.
+                        inline: {
+                          statusesByBoard: Object.fromEntries(
+                            options.boards.map((b) => [
+                              b.id,
+                              b.statuses.map((st) => ({ id: st.id, name: st.name })),
+                            ]),
+                          ),
+                          users: options.users.map((u) => ({
+                            id: u.id,
+                            name: u.name ?? u.email,
+                          })),
+                        },
                       }
                     : {})}
                 />

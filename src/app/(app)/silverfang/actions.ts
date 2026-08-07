@@ -353,18 +353,26 @@ export async function saveTicketAction(
   redirect(destination ?? `/silverfang/tickets/${ticketId}`);
 }
 
-/** Move a ticket to another status (queue-style quick action). */
-export async function setTicketStatusAction(formData: FormData): Promise<void> {
-  const user = await requirePermission("tickets:write");
-  const ticketId = z.string().min(1).parse(formData.get("ticketId"));
-  const statusId = z.string().min(1).parse(formData.get("statusId"));
-
+/**
+ * Apply a status change: transitions, close permission, SLA clock, history.
+ *
+ * Shared by the queue quick-action and inline row editing so the two cannot
+ * diverge — a status move that paused the SLA from one entry point and not the
+ * other would make every breach report unexplainable.
+ *
+ * Returns null when nothing changed, else a short description of what did.
+ */
+async function changeTicketStatus(
+  ticketId: string,
+  statusId: string,
+  user: { id: string; email: string },
+): Promise<string | null> {
   const [ticket, status] = await Promise.all([
     prisma.sfTicket.findUnique({ where: { id: ticketId }, include: { status: true } }),
     prisma.sfStatus.findUnique({ where: { id: statusId } }),
   ]);
-  if (!ticket || !status || status.boardId !== ticket.boardId) return;
-  if (ticket.statusId === status.id) return;
+  if (!ticket || !status || status.boardId !== ticket.boardId) return null;
+  if (ticket.statusId === status.id) return null;
   assertTicketTransition(ticket.status as StatusLike, status as StatusLike);
 
   // Closing a ticket requires the dedicated permission.
@@ -414,8 +422,125 @@ export async function setTicketStatusAction(formData: FormData): Promise<void> {
     target: `sfTicket:${ticketId}`,
     metadata: { status: status.name },
   });
+  return `status to ${status.name}`;
+}
+
+/** Move a ticket to another status (queue-style quick action). */
+export async function setTicketStatusAction(formData: FormData): Promise<void> {
+  const user = await requirePermission("tickets:write");
+  const ticketId = z.string().min(1).parse(formData.get("ticketId"));
+  const statusId = z.string().min(1).parse(formData.get("statusId"));
+  await changeTicketStatus(ticketId, statusId, user);
   revalidatePath(`/silverfang/tickets/${ticketId}`);
   revalidatePath("/silverfang/tickets");
+}
+
+const inlineRowSchema = z.object({
+  ticketId: z.string().min(1),
+  statusId: optionalId,
+  priority: z.enum(SfTicketPriority),
+  /** Empty string means "unassigned", which is different from "leave alone". */
+  assigneeId: z.preprocess((v) => (typeof v === "string" ? v : ""), z.string()),
+});
+
+/**
+ * Save one row's triage fields from a ticket table: status, priority, assignee.
+ *
+ * Exists because triage is a bulk activity. Opening a ticket, changing its
+ * priority, going back, and losing your place in a hundred-row queue is the
+ * slowest possible way to do the most common job.
+ *
+ * Every field goes through the same path as its dedicated action — status
+ * through `changeTicketStatus`, so transitions, the close permission and the SLA
+ * clock all still apply. Inline editing is a faster surface on the same rules,
+ * not a way around them.
+ *
+ * Reports what changed, and says "no changes" rather than claiming a save that
+ * did nothing.
+ */
+export async function updateTicketRowAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("tickets:write");
+  try {
+    const input = inlineRowSchema.parse({
+      ticketId: formValue(formData, "ticketId"),
+      statusId: formValue(formData, "statusId"),
+      priority: formValue(formData, "priority"),
+      assigneeId: formValue(formData, "assigneeId"),
+    });
+
+    const ticket = await prisma.sfTicket.findUnique({ where: { id: input.ticketId } });
+    if (!ticket) return { ok: false, message: "That ticket no longer exists." };
+
+    const changed: string[] = [];
+
+    if (input.statusId && input.statusId !== ticket.statusId) {
+      const described = await changeTicketStatus(input.ticketId, input.statusId, user);
+      if (described) changed.push(described);
+    }
+
+    if (input.priority !== ticket.priority) {
+      await prisma.$transaction([
+        prisma.sfTicket.update({
+          where: { id: input.ticketId },
+          data: { priority: input.priority },
+        }),
+        prisma.sfTicketHistory.create({
+          data: {
+            ticketId: input.ticketId,
+            field: "priority",
+            oldValue: ticket.priority,
+            newValue: input.priority,
+            changedById: user.id,
+            changedByEmail: user.email,
+          },
+        }),
+      ]);
+      changed.push(`priority to ${input.priority}`);
+    }
+
+    const nextAssignee = input.assigneeId.trim() === "" ? null : input.assigneeId.trim();
+    if (nextAssignee !== ticket.assigneeId) {
+      // Reassigning is its own permission, checked here rather than being folded
+      // into tickets:write because it is a different act.
+      await requirePermission("tickets:assign");
+      await prisma.$transaction([
+        prisma.sfTicket.update({
+          where: { id: input.ticketId },
+          data: { assigneeId: nextAssignee },
+        }),
+        prisma.sfTicketHistory.create({
+          data: {
+            ticketId: input.ticketId,
+            field: "assigneeId",
+            oldValue: ticket.assigneeId,
+            newValue: nextAssignee,
+            changedById: user.id,
+            changedByEmail: user.email,
+          },
+        }),
+      ]);
+      await audit({
+        action: "TICKET_ASSIGNED",
+        actorId: user.id,
+        actorEmail: user.email,
+        target: `sfTicket:${input.ticketId}`,
+        metadata: { assigneeId: nextAssignee },
+      });
+      changed.push(nextAssignee ? "assignee" : "unassigned");
+    }
+
+    if (changed.length === 0) return { ok: true, message: "No changes." };
+
+    revalidatePath("/silverfang/tickets");
+    revalidatePath("/silverfang/my-tickets");
+    revalidatePath(`/silverfang/tickets/${input.ticketId}`);
+    return { ok: true, message: `#${ticket.number}: ${changed.join(", ")} saved.` };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }
 
 /** Assign (or unassign) a ticket. */

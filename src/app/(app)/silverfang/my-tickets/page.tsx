@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { UserCheck } from "lucide-react";
+import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { PawTip } from "@/components/ui/paw-tip";
 import { getTicketRows } from "@/lib/silverfang/queries";
@@ -20,6 +22,27 @@ export default async function MyTicketsPage({
 
   const rows = await getTicketRows({ view, assigneeId: user.id });
   const breached = rows.filter((r) => r.slaBreached && !r.statusIsClosed).length;
+
+  // Inline triage here too: this is the queue a tech actually works from, so
+  // making them open every ticket to move it along would defeat the point.
+  const canWrite = can(user.role, "tickets:write");
+  const [boards, users] = canWrite
+    ? await Promise.all([
+        prisma.sfBoard.findMany({
+          where: { active: true },
+          orderBy: { sortOrder: "asc" },
+          select: {
+            id: true,
+            statuses: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true } },
+          },
+        }),
+        prisma.user.findMany({
+          where: { disabled: false },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, email: true },
+        }),
+      ])
+    : [[], []];
 
   return (
     <div>
@@ -54,7 +77,20 @@ export default async function MyTicketsPage({
               }
             />
           ) : (
-            <TicketsTable rows={rows} returnTo="/silverfang/my-tickets" />
+            <TicketsTable
+              rows={rows}
+              returnTo="/silverfang/my-tickets"
+              {...(canWrite
+                ? {
+                    inline: {
+                      statusesByBoard: Object.fromEntries(
+                        boards.map((b) => [b.id, b.statuses]),
+                      ),
+                      users: users.map((u) => ({ id: u.id, name: u.name ?? u.email })),
+                    },
+                  }
+                : {})}
+            />
           )}
         </Card>
       </div>

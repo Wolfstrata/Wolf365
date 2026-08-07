@@ -74,8 +74,8 @@ export async function getTicketRows(
         select: { id: true, name: true, sfClientProfile: { select: { vip: true } } },
       },
       contact: { select: { firstName: true, lastName: true, vip: true } },
-      board: { select: { name: true } },
-      status: { select: { name: true, isClosed: true } },
+      board: { select: { id: true, name: true } },
+      status: { select: { id: true, name: true, isClosed: true } },
       assignee: { select: { name: true, email: true } },
     },
   });
@@ -119,10 +119,15 @@ export async function getTicketRows(
       // list agrees on what "VIP" means.
       vip: t.contact?.vip === true || t.client.sfClientProfile?.vip === true,
       board: t.board.name,
+      boardId: t.board.id,
       status: t.status.name,
+      statusId: t.status.id,
       statusIsClosed: t.status.isClosed,
       priority: t.priority,
       assignee: t.assignee?.name ?? t.assignee?.email ?? null,
+      // Ids as well as labels: inline editing needs to preselect the current
+      // value, and a label cannot be matched back to an option reliably.
+      assigneeId: t.assigneeId,
       actualHours: Number(t.actualHours),
       openedAt: t.openedAt.toISOString(),
       slaBreached: breached,

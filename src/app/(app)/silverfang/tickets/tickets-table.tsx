@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
-import { Star } from "lucide-react";
+import { useActionState, useEffect, useState } from "react";
+import { Check, Pencil, Star, X } from "lucide-react";
 import type { SfTicketPriority } from "@prisma/client";
 import { SortableTable, type SortColumn } from "@/components/ui/sortable-table";
 import { LocalTime } from "@/components/ui/local-time";
@@ -12,6 +12,7 @@ import { queueSortKey } from "@/lib/silverfang/ticket-order";
 import {
   moveTicketsToBoardAction,
   moveTicketsToProjectAction,
+  updateTicketRowAction,
   type SfActionResult,
 } from "../actions";
 import { withReturnTo } from "@/lib/silverfang/return-to";
@@ -26,10 +27,14 @@ export interface TicketRow {
   /** The requester or their company is flagged VIP — shown, and drives the order. */
   vip: boolean;
   board: string;
+  /** Needed by inline editing: which board's statuses this row may move to. */
+  boardId: string;
   status: string;
+  statusId: string;
   statusIsClosed: boolean;
   priority: SfTicketPriority;
   assignee: string | null;
+  assigneeId: string | null;
   actualHours: number;
   openedAt: string; // ISO
   /** Creation instant, which is what the ordering tie-breaks on. */
@@ -38,6 +43,84 @@ export interface TicketRow {
   slaBreached: boolean;
   slaAtRisk: boolean;
   slaDueAt: string | null; // ISO
+}
+
+/**
+ * The id of the hidden form that carries one row's inline edit.
+ *
+ * A `<form>` cannot wrap table cells without breaking the table's structure, so
+ * the form lives in the last cell and each control points at it with `form=`.
+ * That is what makes an inline row a single atomic submit rather than three
+ * independent ones.
+ */
+function rowFormId(id: string): string {
+  return `sf-row-${id}`;
+}
+
+/** Edit / Save / Cancel for one row, and the form the row's controls submit to. */
+function InlineRowControls({
+  row,
+  editing,
+  onEdit,
+  onCancel,
+  onSaved,
+}: {
+  row: TicketRow;
+  editing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
+    updateTicketRowAction,
+    null,
+  );
+
+  // Close the row once the server confirms. Closing optimistically would hide a
+  // refusal — an illegal status transition, or a close without permission.
+  useEffect(() => {
+    if (result?.ok) onSaved();
+    // onSaved is stable enough here; re-running on every render would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={`Edit ticket ${row.number}`}
+        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition hover:bg-accent"
+      >
+        <Pencil className="h-3 w-3" /> Edit
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <form id={rowFormId(row.id)} action={action} className="flex items-center gap-1">
+        <input type="hidden" name="ticketId" value={row.id} />
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+        >
+          <Check className="h-3 w-3" /> {pending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition hover:bg-accent"
+        >
+          <X className="h-3 w-3" /> Cancel
+        </button>
+      </form>
+      {result && !result.ok && (
+        <p className="max-w-48 text-xs text-danger">{result.message}</p>
+      )}
+    </div>
+  );
 }
 
 /** Compact SLA indicator: breach and at-risk are the states worth surfacing. */
@@ -60,6 +143,12 @@ function SlaCell({ row }: { row: TicketRow }) {
   );
 }
 
+export interface InlineEditOptions {
+  /** Statuses per board id — a ticket can only move within its own board. */
+  statusesByBoard: Record<string, { id: string; name: string }[]>;
+  users: { id: string; name: string }[];
+}
+
 export interface BulkMoveOptions {
   boards: { id: string; name: string }[];
   projects: { id: string; name: string; clientName: string; phases: { id: string; name: string }[] }[];
@@ -69,6 +158,7 @@ export function TicketsTable({
   rows,
   returnTo,
   bulk,
+  inline,
 }: {
   rows: TicketRow[];
   /**
@@ -79,8 +169,17 @@ export function TicketsTable({
   returnTo?: string;
   /** Pass to enable multi-select and the move bar. Omit for a read-only table. */
   bulk?: BulkMoveOptions;
+  /**
+   * Pass to allow editing status, priority and assignee in the row. Triage is a
+   * bulk activity, and opening each ticket to change one field then losing your
+   * place in a hundred-row queue is the slowest way to do the most common job.
+   */
+  inline?: InlineEditOptions;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Only one row is editable at a time. Several half-saved rows at once invites
+  // losing an edit by clicking away, and there is no draft store to recover it.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -162,7 +261,21 @@ export function TicketsTable({
       // that means "work order", and priority alone would leave the VIP and age
       // tiebreaks to whatever order the rows arrived in.
       sortValue: (r) => queueSortKey(r),
-      render: (r) => (
+      render: (r) =>
+        editingId === r.id && inline ? (
+          <select
+            name="priority"
+            form={rowFormId(r.id)}
+            defaultValue={r.priority}
+            className="w-24 rounded-md border bg-background px-2 py-1 text-xs"
+          >
+            {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        ) : (
         <span className="inline-flex items-center gap-1.5">
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_STYLES[r.priority]}`}
@@ -179,22 +292,55 @@ export function TicketsTable({
             </span>
           )}
         </span>
-      ),
+        ),
     },
     {
       key: "status",
       label: "Status",
       sortValue: (r) => r.status.toLowerCase(),
-      render: (r) => (
-        <span className={r.statusIsClosed ? "text-muted-foreground" : ""}>{r.status}</span>
-      ),
+      render: (r) =>
+        editingId === r.id && inline ? (
+          <select
+            name="statusId"
+            form={rowFormId(r.id)}
+            defaultValue={r.statusId}
+            className="w-40 rounded-md border bg-background px-2 py-1 text-xs"
+          >
+            {/* Only this board's statuses: a ticket cannot take a status from
+                another board, and offering one would fail on save. */}
+            {(inline.statusesByBoard[r.boardId] ?? []).map((st) => (
+              <option key={st.id} value={st.id}>
+                {st.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={r.statusIsClosed ? "text-muted-foreground" : ""}>{r.status}</span>
+        ),
     },
     { key: "board", label: "Board", sortValue: (r) => r.board.toLowerCase(), render: (r) => r.board },
     {
       key: "assignee",
       label: "Assignee",
       sortValue: (r) => (r.assignee ?? "").toLowerCase(),
-      render: (r) => r.assignee ?? <span className="text-muted-foreground">Unassigned</span>,
+      render: (r) =>
+        editingId === r.id && inline ? (
+          <select
+            name="assigneeId"
+            form={rowFormId(r.id)}
+            defaultValue={r.assigneeId ?? ""}
+            className="w-40 rounded-md border bg-background px-2 py-1 text-xs"
+          >
+            <option value="">Unassigned</option>
+            {inline.users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          (r.assignee ?? <span className="text-muted-foreground">Unassigned</span>)
+        ),
     },
     {
       key: "actualHours",
@@ -215,6 +361,24 @@ export function TicketsTable({
       sortValue: (r) => r.openedAt,
       render: (r) => <LocalTime value={r.openedAt} dateOnly />,
     },
+    ...(inline
+      ? [
+          {
+            key: "edit",
+            label: "",
+            sortable: false,
+            render: (r: TicketRow) => (
+              <InlineRowControls
+                row={r}
+                editing={editingId === r.id}
+                onEdit={() => setEditingId(r.id)}
+                onCancel={() => setEditingId(null)}
+                onSaved={() => setEditingId(null)}
+              />
+            ),
+          } satisfies SortColumn<TicketRow>,
+        ]
+      : []),
   ];
 
   return (
@@ -233,7 +397,11 @@ export function TicketsTable({
       rows={rows}
       rowKey={(r) => r.id}
       initialSort={{ key: "priority", dir: "asc" }}
-      rowHref={(r) => withReturnTo(`/silverfang/tickets/${r.id}`, returnTo)}
+      // No row navigation while a row is being edited: a stray click on the cell
+      // padding would throw the edit away without saving it.
+      rowHref={(r) =>
+        editingId === r.id ? null : withReturnTo(`/silverfang/tickets/${r.id}`, returnTo)
+      }
       rowClassName={(r) =>
         r.slaBreached && !r.statusIsClosed
           ? "bg-danger/5"
