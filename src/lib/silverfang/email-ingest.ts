@@ -20,6 +20,7 @@ import {
 } from "@/lib/silverfang/email";
 import { runAutoResponses } from "@/lib/silverfang/auto-response";
 import { decisionOf } from "@/lib/silverfang/ingest-outcomes";
+import { boardNameFor } from "@/lib/silverfang/boards";
 import {
   fetchMailboxMessages,
   markMessageRead,
@@ -208,7 +209,14 @@ async function resolveSender(from: string, mailbox: SfMailbox): Promise<SenderMa
   return null;
 }
 
-/** The board a new ticket from this mailbox opens on, with its statuses. */
+/**
+ * The board a new ticket from this mailbox opens on, with its statuses.
+ *
+ * Order of preference: the mailbox's configured board, then the client's default,
+ * then the board the *kind of work* routes to, then any usable board. The explicit
+ * settings win because somebody chose them; routing is the sensible default rather
+ * than an override.
+ */
 async function resolveBoard(mailbox: SfMailbox, clientId: string) {
   const include = { statuses: { orderBy: { sortOrder: "asc" as const } } };
   if (mailbox.boardId) {
@@ -220,7 +228,7 @@ async function resolveBoard(mailbox: SfMailbox, clientId: string) {
   }
   const profile = await prisma.sfClientProfile.findUnique({
     where: { clientId },
-    select: { defaultBoardId: true },
+    select: { defaultBoardId: true, defaultAgreementId: true },
   });
   if (profile?.defaultBoardId) {
     const board = await prisma.sfBoard.findFirst({
@@ -229,6 +237,24 @@ async function resolveBoard(mailbox: SfMailbox, clientId: string) {
     });
     if (board && board.statuses.length > 0) return board;
   }
+
+  // Inbound mail never carries a project, so this routes to MSA when the client's
+  // default agreement is a managed one, and to the catch-all otherwise.
+  const agreement = profile?.defaultAgreementId
+    ? await prisma.sfAgreement.findUnique({
+        where: { id: profile.defaultAgreementId },
+        select: { type: true },
+      })
+    : null;
+  const routed = await prisma.sfBoard.findFirst({
+    where: {
+      name: boardNameFor({ hasProject: false, agreementType: agreement?.type ?? null }),
+      active: true,
+    },
+    include,
+  });
+  if (routed && routed.statuses.length > 0) return routed;
+
   const boards = await prisma.sfBoard.findMany({
     where: { active: true },
     orderBy: { sortOrder: "asc" },

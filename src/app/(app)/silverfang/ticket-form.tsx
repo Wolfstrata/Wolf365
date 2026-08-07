@@ -35,7 +35,8 @@ export interface TicketFormOptions {
   clients: { id: string; name: string }[];
   users: { id: string; name: string | null; email: string }[];
   contactsByClient: Record<string, { id: string; name: string }[]>;
-  agreementsByClient: Record<string, { id: string; name: string }[]>;
+  /** `type` drives which board a new ticket lands on. */
+  agreementsByClient: Record<string, { id: string; name: string; type: string }[]>;
   projectsByClient: Record<string, TicketFormProject[]>;
 }
 

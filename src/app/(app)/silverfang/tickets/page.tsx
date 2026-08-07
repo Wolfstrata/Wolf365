@@ -5,6 +5,7 @@ import { can } from "@/lib/rbac";
 import { PageHeader, Card, EmptyState } from "@/components/ui/primitives";
 import { getTicketRows, getTicketFormOptions } from "@/lib/silverfang/queries";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
+import { TICKET_ORDER_EXPLANATION } from "@/lib/silverfang/ticket-order";
 import { TicketsTable } from "./tickets-table";
 
 export const dynamic = "force-dynamic";
@@ -44,32 +45,47 @@ export default async function TicketsPage({
   ]);
 
   const noSetup = options.boards.length === 0;
+  // Named when you have drilled into one, so the page says where you are instead
+  // of claiming to show every board.
+  const activeBoard = sp.board ? options.boards.find((b) => b.id === sp.board) : undefined;
   const breached = rows.filter((r) => r.slaBreached && !r.statusIsClosed).length;
   const unassigned = rows.filter((r) => !r.assignee && !r.statusIsClosed).length;
 
-  // Preserve the other filters when switching view tabs.
-  const viewHref = (key: string) => {
-    const q = new URLSearchParams();
-    if (key !== "open") q.set("view", key);
-    for (const [k, v] of Object.entries({
+  /**
+   * A link that keeps the current filters, with `overrides` applied. Passing
+   * `undefined` for a key drops it — building the query rather than editing the
+   * finished URL, because a regex over a query string breaks on the first filter
+   * whose value contains an ampersand.
+   */
+  const filterHref = (overrides: Record<string, string | undefined> = {}) => {
+    const current: Record<string, string | undefined> = {
+      view: view === "open" ? undefined : view,
       board: sp.board,
       status: sp.status,
       assignee: sp.assignee,
       client: sp.client,
       priority: sp.priority,
       q: sp.q,
-    })) {
+    };
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...current, ...overrides })) {
       if (v) q.set(k, v);
     }
-    const s = q.toString();
-    return s ? `/silverfang/tickets?${s}` : "/silverfang/tickets";
+    const query = q.toString();
+    return query ? `/silverfang/tickets?${query}` : "/silverfang/tickets";
   };
+  const viewHref = (key: string) => filterHref({ view: key === "open" ? undefined : key });
 
   return (
     <div>
       <PageHeader
-        title="Tickets"
-        description="Service tickets across all boards. SLA state is measured in business hours."
+        title={activeBoard ? `${activeBoard.name} tickets` : "Tickets"}
+        description={
+          (activeBoard
+            ? `Tickets on the ${activeBoard.name} board. `
+            : "Service tickets across all boards. ") +
+          `${TICKET_ORDER_EXPLANATION} SLA state is measured in business hours.`
+        }
         actions={
           can(user.role, "tickets:write") && !noSetup ? (
             <Link
@@ -102,6 +118,14 @@ export default async function TicketsPage({
                 </Link>
               ))}
               <span className="text-sm text-muted-foreground">{rows.length} shown</span>
+              {activeBoard && (
+                <Link
+                  href={filterHref({ board: undefined })}
+                  className="text-xs text-muted-foreground underline hover:text-foreground"
+                >
+                  All boards
+                </Link>
+              )}
               {breached > 0 && (
                 <span className="rounded-full bg-danger/15 px-2 py-0.5 text-xs font-medium text-danger">
                   {breached} SLA breached

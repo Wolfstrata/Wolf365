@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { contactRead, textRead } from "@/lib/silverfang/pii";
+import { boardNameFor } from "@/lib/silverfang/boards";
 import type {
   TicketFormOptions,
   TicketFormValues,
@@ -62,12 +63,6 @@ export async function newTicketValues(
     select: { defaultBoardId: true, defaultAgreementId: true },
   });
 
-  // Only honour defaults that are still selectable — a board can be deactivated
-  // or an agreement expire after the profile was saved.
-  const boardId =
-    profile?.defaultBoardId && options.boards.some((b) => b.id === profile.defaultBoardId)
-      ? profile.defaultBoardId
-      : firstBoardId;
   const defaultAgreementId = profile?.defaultAgreementId;
   const agreementId =
     defaultAgreementId &&
@@ -80,6 +75,25 @@ export async function newTicketValues(
   const clientProjects = options.projectsByClient[clientId] ?? [];
   const project = clientProjects.find((p) => p.id === requested.projectId);
   const phase = project?.phases.find((p) => p.id === requested.projectPhaseId);
+
+  // The board follows the kind of work: a project ticket opens on Projects, work
+  // under a managed agreement on MSA, everything else on the catch-all. A client's
+  // explicitly configured default board still wins, since somebody chose it.
+  const agreementType = agreementId
+    ? (options.agreementsByClient[clientId] ?? []).find((a) => a.id === agreementId)?.type
+    : undefined;
+  const routedName = boardNameFor({
+    hasProject: Boolean(project),
+    agreementType: agreementType ?? null,
+  });
+  const routedBoardId = options.boards.find((b) => b.name === routedName)?.id;
+
+  // Only honour defaults that are still selectable — a board can be deactivated
+  // or an agreement expire after the profile was saved.
+  const boardId =
+    profile?.defaultBoardId && options.boards.some((b) => b.id === profile.defaultBoardId)
+      ? profile.defaultBoardId
+      : (routedBoardId ?? firstBoardId);
 
   return blankTicketValues({
     clientId,
@@ -146,7 +160,7 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
 
   const agreementsByClient: TicketFormOptions["agreementsByClient"] = {};
   for (const a of agreements) {
-    (agreementsByClient[a.clientId] ??= []).push({ id: a.id, name: a.name });
+    (agreementsByClient[a.clientId] ??= []).push({ id: a.id, name: a.name, type: a.type });
   }
 
   const projectsByClient: TicketFormOptions["projectsByClient"] = {};

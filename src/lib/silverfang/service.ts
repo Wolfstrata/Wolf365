@@ -1,5 +1,6 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
+import { BOARD_SPECS } from "@/lib/silverfang/boards";
 import { prisma } from "@/lib/db";
 import {
   DEFAULT_AUTO_RESPONSES,
@@ -71,27 +72,41 @@ export async function ensureSilverFangDefaults(): Promise<{
     });
   }
 
-  let board = await prisma.sfBoard.findUnique({ where: { name: DEFAULT_BOARD_NAME } });
-  if (!board) {
-    created = true;
-    board = await prisma.sfBoard.create({
-      data: {
-        name: DEFAULT_BOARD_NAME,
-        description: "Default inbound service queue.",
-        slaId: sla.id,
-        statuses: {
-          create: DEFAULT_STATUSES.map((s) => ({
-            name: s.name,
-            sortOrder: s.sortOrder,
-            isDefault: s.isDefault ?? false,
-            isOpen: s.isOpen,
-            isClosed: s.isClosed ?? false,
-            stopsSlaClock: s.stopsSlaClock ?? false,
-          })),
+  // Three boards, organised by the kind of work rather than by who does it — a
+  // per-person board turns a queue into an inbox nobody else picks up from. Each is
+  // created only if absent, so running setup again never disturbs an existing board
+  // or the tickets on it. Every board gets its own copy of the status flow, because
+  // statuses belong to a board.
+  const boardsByName = new Map<string, { id: string }>();
+  for (const spec of BOARD_SPECS) {
+    let existing = await prisma.sfBoard.findUnique({ where: { name: spec.name } });
+    if (!existing) {
+      created = true;
+      existing = await prisma.sfBoard.create({
+        data: {
+          name: spec.name,
+          description: spec.description,
+          sortOrder: spec.sortOrder,
+          slaId: sla.id,
+          statuses: {
+            create: DEFAULT_STATUSES.map((s) => ({
+              name: s.name,
+              sortOrder: s.sortOrder,
+              isDefault: s.isDefault ?? false,
+              isOpen: s.isOpen,
+              isClosed: s.isClosed ?? false,
+              stopsSlaClock: s.stopsSlaClock ?? false,
+            })),
+          },
         },
-      },
-    });
+      });
+    }
+    boardsByName.set(spec.name, existing);
   }
+
+  // The catch-all is the one returned as "the" board, for callers that need a
+  // single default — it is where work with no agreement and no project goes.
+  const board = boardsByName.get(DEFAULT_BOARD_NAME)!;
 
   for (const c of DEFAULT_CHARGE_CODES) {
     const existing = await prisma.sfChargeCode.findUnique({ where: { code: c.code } });

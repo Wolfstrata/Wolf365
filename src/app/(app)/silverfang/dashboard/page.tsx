@@ -41,6 +41,9 @@ export default async function SilverFangDashboardPage() {
     pendingSheets,
     topClients,
     oldestOpen,
+    activeBoards,
+    byBoardBreached,
+    byBoardAtRisk,
   ] = await Promise.all([
     prisma.sfTicket.count({ where: { status: { isClosed: false }, client: { archived: false } } }),
     prisma.sfTicket.count({
@@ -115,10 +118,47 @@ export default async function SilverFangDashboardPage() {
         assignee: { select: { name: true, email: true } },
       },
     }),
+    // Every active board, not just the ones with tickets — a board with nothing on
+    // it is worth seeing as empty rather than being absent, which reads as broken.
+    prisma.sfBoard.findMany({
+      where: { active: true },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, name: true, description: true },
+    }),
+    prisma.sfTicket.groupBy({
+      by: ["boardId"],
+      where: {
+        status: { isClosed: false },
+        client: { archived: false },
+        OR: [{ slaResponseBreached: true }, { slaResolutionBreached: true }],
+      },
+      _count: { _all: true },
+    }),
+    prisma.sfTicket.groupBy({
+      by: ["boardId"],
+      where: {
+        status: { isClosed: false },
+        client: { archived: false },
+        OR: [
+          { slaResponseAtRiskAt: { not: null }, slaResponseBreached: false },
+          { slaResolutionAtRiskAt: { not: null }, slaResolutionBreached: false },
+        ],
+      },
+      _count: { _all: true },
+    }),
   ]);
 
-  const boards = await prisma.sfBoard.findMany({ select: { id: true, name: true } });
-  const boardName = new Map(boards.map((b) => [b.id, b.name]));
+  const openByBoard = new Map(byBoard.map((b) => [b.boardId, b._count._all]));
+  const breachedByBoard = new Map(byBoardBreached.map((b) => [b.boardId, b._count._all]));
+  const atRiskByBoard = new Map(byBoardAtRisk.map((b) => [b.boardId, b._count._all]));
+  const boardDials = activeBoards.map((b) => ({
+    id: b.id,
+    name: b.name,
+    description: b.description,
+    open: openByBoard.get(b.id) ?? 0,
+    breached: breachedByBoard.get(b.id) ?? 0,
+    atRisk: atRiskByBoard.get(b.id) ?? 0,
+  }));
   const agreementIds = topClients.map((t) => t.agreementId).filter((v): v is string => v != null);
   const agreements = agreementIds.length
     ? await prisma.sfAgreement.findMany({
@@ -163,6 +203,45 @@ export default async function SilverFangDashboardPage() {
         description="Queue health, SLA, time and unbilled work."
       />
       <div className="space-y-6 p-4 sm:p-8">
+        {/* Boards first: this is the way into the work. Each tile is a link into
+            that board's queue, and a board with nothing on it still appears —
+            an absent board reads as broken rather than as quiet. */}
+        {boardDials.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {boardDials.map((b) => (
+              <Link
+                key={b.id}
+                href={`/silverfang/tickets?board=${b.id}`}
+                className="rounded-lg border bg-card p-4 transition hover:border-primary/60 hover:bg-accent/40"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-semibold">{b.name}</h2>
+                  <span className="text-2xl font-semibold tabular-nums">{b.open}</span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {b.open === 1 ? "1 open ticket" : `${b.open} open tickets`}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                  {b.breached > 0 && (
+                    <span className="font-medium text-danger">{b.breached} breached</span>
+                  )}
+                  {b.atRisk > 0 && (
+                    <span className="font-medium text-warning">{b.atRisk} at risk</span>
+                  )}
+                  {b.breached === 0 && b.atRisk === 0 && (
+                    <span className="text-success">On target</span>
+                  )}
+                </div>
+                {b.description && (
+                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                    {b.description}
+                  </p>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Queue</h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -242,21 +321,32 @@ export default async function SilverFangDashboardPage() {
           </Card>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold">Open by board</h2>
-            {byBoard.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing open.</p>
+            <h2 className="mb-1 text-sm font-semibold">Open by board</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Boards are organised by the kind of work, not by who does it. Click one to open
+              its queue.
+            </p>
+            {boardDials.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No boards yet — run SilverFang Setup to create MSA, Projects and Service Desk.
+              </p>
             ) : (
               <ul className="space-y-1.5 text-sm">
-                {byBoard.map((b) => (
-                  <li key={b.boardId} className="flex items-center gap-3">
-                    <span className="w-40 truncate">{boardName.get(b.boardId) ?? "Unknown"}</span>
+                {boardDials.map((b) => (
+                  <li key={b.id} className="flex items-center gap-3">
+                    <Link
+                      href={`/silverfang/tickets?board=${b.id}`}
+                      className="w-40 truncate text-primary hover:underline"
+                    >
+                      {b.name}
+                    </Link>
                     <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                       <span
                         className="block h-full bg-primary"
-                        style={{ width: `${(b._count._all / Math.max(openCount, 1)) * 100}%` }}
+                        style={{ width: `${(b.open / Math.max(openCount, 1)) * 100}%` }}
                       />
                     </span>
-                    <span className="w-8 text-right tabular-nums">{b._count._all}</span>
+                    <span className="w-8 text-right tabular-nums">{b.open}</span>
                   </li>
                 ))}
               </ul>
