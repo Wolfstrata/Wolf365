@@ -9,7 +9,7 @@ import {
   isCiphertext,
   primaryKeyId,
 } from "@/lib/crypto";
-import { contactEmailLookup } from "@/lib/silverfang/pii";
+import { ENCRYPTED_COLUMNS } from "@/lib/crypto-columns";
 
 /**
  * Re-encrypting stored values under a new key.
@@ -33,46 +33,8 @@ import { contactEmailLookup } from "@/lib/silverfang/pii";
  * skipped — so it can be run repeatedly and interrupted safely.
  */
 
-/**
- * Every column holding app-encrypted data. Adding an encrypted column means
- * adding it here, or rotation will silently leave it behind on the old key.
- *
- * `derived` returns the lookup columns computed from the plaintext. They must be
- * rebuilt in the same write as the rotation, because a blind index is an HMAC
- * under the data key — change the key and every index changes, so a rotation that
- * skipped this would leave equality lookups silently matching nothing. It
- * delegates to the same helper the write path uses; deriving the index a second
- * way here is exactly how the two drift apart.
- */
-interface EncryptedColumn {
-  /** Prisma model delegate name, for the report. */
-  model: string;
-  column: string;
-  derived?: (plain: string) => Record<string, unknown>;
-}
-
-const REGISTRY: EncryptedColumn[] = [
-  // Connector secret bags: TD SYNNEX, QBO (including OAuth tokens), Hudu,
-  // SuperOps, Salesforce.
-  { model: "connector", column: "secretsEnc" },
-  // Entra SSO client secret.
-  { model: "ssoSettings", column: "clientSecretEnc" },
-  // Personal data. The read paths decrypt these (src/lib/silverfang/pii.ts) and
-  // tolerate plaintext, so a column can be listed here before its data is
-  // converted — the first rotation pass is what converts it.
-  //
-  // The contact address carries `derived` because inbound mail finds its contact
-  // by `emailIndex`; a rotation that left the index behind would silently stop
-  // matching senders.
-  { model: "sfContact", column: "email", derived: contactEmailLookup },
-  { model: "sfContact", column: "phone" },
-  { model: "sfContact", column: "mobile" },
-  { model: "sfTicket", column: "description" },
-  { model: "sfTicketNote", column: "body" },
-  { model: "sfTicketMessage", column: "fromAddress" },
-  { model: "sfTicketMessage", column: "bodyText" },
-  { model: "sfTicketMessage", column: "bodyHtml" },
-];
+/** Which columns hold encrypted data. Declared in crypto-columns.ts. */
+const REGISTRY = ENCRYPTED_COLUMNS;
 
 export interface ColumnStatus {
   model: string;
@@ -81,8 +43,16 @@ export interface ColumnStatus {
   total: number;
   /** Already under the primary key. */
   current: number;
-  /** Under a retired key, or a legacy v1 envelope with no key id. */
+  /** Under a key that is not the primary one. */
   outstanding: number;
+  /**
+   * Legacy v1 envelopes, which carry no key fingerprint. These still decrypt —
+   * every key in the ring is tried — but which key opened them cannot be known
+   * without doing it, so they must be rewritten before a rotation can be called
+   * finished. Counted apart from `outstanding` because telling someone to remove
+   * a retired key they never configured sends them looking for the wrong thing.
+   */
+  legacy: number;
   /** Still plaintext — never encrypted, or written before the column was. */
   plaintext: number;
   /** True when the scan hit its row cap, so these counts are a lower bound. */
@@ -95,8 +65,9 @@ export interface RotationStatus {
   primaryKeyId: string;
   columns: ColumnStatus[];
   outstanding: number;
+  legacy: number;
   plaintext: number;
-  /** True when nothing is left on a retired key AND nothing is plaintext. */
+  /** True when every value is a v2 envelope under the primary key. */
   complete: boolean;
   /** Set when the status itself could not be determined at all. */
   error?: string;
@@ -138,6 +109,7 @@ export async function rotationStatus(): Promise<RotationStatus> {
       primaryKeyId: "unavailable",
       columns: [],
       outstanding: 0,
+      legacy: 0,
       plaintext: 0,
       complete: false,
       error: safeErrorMessage(err),
@@ -150,27 +122,32 @@ export async function rotationStatus(): Promise<RotationStatus> {
     // point, must not take down the page this report sits on. Naming the column
     // that failed is the difference between a fixable message and a mystery.
     try {
+      // Deliberately unfiltered: `{ [column]: { not: null } }` is invalid on a
+      // required column and fails the entire query, so nullability is handled by
+      // skipping empty values below rather than in SQL.
       const rows = await delegate(entry.model).findMany({
-        where: { [entry.column]: { not: null } },
         select: { id: true, [entry.column]: true },
         take: SCAN_LIMIT + 1,
       });
       let onCurrent = 0;
       let plaintext = 0;
       let outstanding = 0;
+      let legacy = 0;
       for (const row of rows.slice(0, SCAN_LIMIT)) {
         const value = row[entry.column];
         if (typeof value !== "string" || value === "") continue;
         if (!isCiphertext(value)) plaintext += 1;
         else if (ciphertextKeyId(value) === current) onCurrent += 1;
+        else if (ciphertextKeyId(value) === null) legacy += 1;
         else outstanding += 1;
       }
       columns.push({
         model: entry.model,
         column: entry.column,
-        total: onCurrent + plaintext + outstanding,
+        total: onCurrent + plaintext + outstanding + legacy,
         current: onCurrent,
         outstanding,
+        legacy,
         plaintext,
         ...(rows.length > SCAN_LIMIT ? { capped: true } : {}),
       });
@@ -181,6 +158,7 @@ export async function rotationStatus(): Promise<RotationStatus> {
         total: 0,
         current: 0,
         outstanding: 0,
+        legacy: 0,
         plaintext: 0,
         error: safeErrorMessage(err),
       });
@@ -188,17 +166,19 @@ export async function rotationStatus(): Promise<RotationStatus> {
   }
 
   const outstanding = columns.reduce((a, c) => a + c.outstanding, 0);
+  const legacy = columns.reduce((a, c) => a + c.legacy, 0);
   const plaintext = columns.reduce((a, c) => a + c.plaintext, 0);
   const unknown = columns.some((c) => c.error || c.capped);
   return {
     primaryKeyId: current,
     columns,
     outstanding,
+    legacy,
     plaintext,
     // A column we could not fully read might hold values on the retired key, so
     // "complete" would be a guess. Dropping the old key on a guess makes data
     // permanently unreadable, so this stays false until every column is known.
-    complete: outstanding === 0 && plaintext === 0 && !unknown,
+    complete: outstanding === 0 && legacy === 0 && plaintext === 0 && !unknown,
   };
 }
 
@@ -233,8 +213,10 @@ export async function rotateEncryptedValues(limitPerColumn = 500): Promise<Rotat
   for (const entry of REGISTRY) {
     let rows: Record<string, unknown>[];
     try {
+      // No `{ not: null }` filter. It is invalid on a required column — Prisma
+      // rejects the whole query with "Argument `not` must not be null" — and
+      // rows with no value are skipped in the loop below anyway.
       rows = await delegate(entry.model).findMany({
-        where: { [entry.column]: { not: null } },
         select: { id: true, [entry.column]: true },
         take: limitPerColumn * 4,
       });

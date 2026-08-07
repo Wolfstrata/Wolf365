@@ -10,6 +10,7 @@ export interface RotationColumn {
   total: number;
   current: number;
   outstanding: number;
+  legacy: number;
   plaintext: number;
   capped?: boolean;
   error?: string;
@@ -26,6 +27,7 @@ export function RotateKeys({
   keyId,
   columns,
   outstanding,
+  legacy,
   plaintext,
   complete,
   hasRetiredKeys,
@@ -34,6 +36,7 @@ export function RotateKeys({
   keyId: string;
   columns: RotationColumn[];
   outstanding: number;
+  legacy: number;
   plaintext: number;
   complete: boolean;
   hasRetiredKeys: boolean;
@@ -76,6 +79,7 @@ export function RotateKeys({
               <th className="py-1 pr-4 text-right font-medium">Values</th>
               <th className="py-1 pr-4 text-right font-medium">Current key</th>
               <th className="py-1 pr-4 text-right font-medium">Retired key</th>
+              <th className="py-1 pr-4 text-right font-medium">Legacy (v1)</th>
               <th className="py-1 pr-4 text-right font-medium">Not encrypted</th>
             </tr>
           </thead>
@@ -89,7 +93,7 @@ export function RotateKeys({
                   )}
                 </td>
                 {c.error ? (
-                  <td className="py-1.5 pr-4 text-danger" colSpan={4}>
+                  <td className="py-1.5 pr-4 text-danger" colSpan={5}>
                     Could not read: {c.error}
                   </td>
                 ) : (
@@ -102,6 +106,13 @@ export function RotateKeys({
                       }`}
                     >
                       {c.outstanding}
+                    </td>
+                    <td
+                      className={`py-1.5 pr-4 text-right tabular-nums ${
+                        c.legacy > 0 ? "font-medium text-warning" : "text-muted-foreground"
+                      }`}
+                    >
+                      {c.legacy}
                     </td>
                     <td
                       className={`py-1.5 pr-4 text-right tabular-nums ${
@@ -131,6 +142,15 @@ export function RotateKeys({
           {outstanding} stored value(s) are still encrypted under a retired key. Run the rotation
           until this reaches zero, then remove <code>WOLF365_ENCRYPTION_KEYS_OLD</code>. Removing it
           first would make those values permanently unreadable.
+        </p>
+      )}
+
+      {legacy > 0 && (
+        <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          {legacy} value(s) use the older v1 envelope, which carries no key fingerprint. They
+          still decrypt, so nothing is broken — but which key opened them cannot be verified
+          without trying, so a rotation cannot be called finished while any remain. The
+          re-encryption below rewrites them as v2.
         </p>
       )}
 

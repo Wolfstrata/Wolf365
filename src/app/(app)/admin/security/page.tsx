@@ -67,6 +67,7 @@ export default async function SecurityPage() {
             keyId={rotation.primaryKeyId}
             columns={rotation.columns}
             outstanding={rotation.outstanding}
+            legacy={rotation.legacy}
             plaintext={rotation.plaintext}
             complete={rotation.complete}
             hasRetiredKeys={hasRetiredKeys}
