@@ -15,6 +15,10 @@ import {
   type MailAudience,
 } from "@/lib/silverfang/mail";
 import { textRead, textWrite } from "@/lib/silverfang/pii";
+import {
+  isInternalOnlyTrigger,
+  type AutoResponseTrigger,
+} from "@/lib/silverfang/auto-response-triggers";
 
 /**
  * Auto-response rules: templated mail sent to the contact and/or the assignee
@@ -28,11 +32,7 @@ import { textRead, textWrite } from "@/lib/silverfang/pii";
  *     client just raised.
  */
 
-export type AutoResponseTrigger =
-  | "TICKET_CREATED"
-  | "STATUS_CHANGED"
-  | "NOTE_ADDED"
-  | "SLA_BREACHED";
+export type { AutoResponseTrigger } from "@/lib/silverfang/auto-response-triggers";
 
 export interface AutoResponseOutcome {
   rule: string;
@@ -111,7 +111,8 @@ export async function runAutoResponses(
       // technician notice on the same rule.
       const clientTo: string[] = [];
       const internalTo: string[] = [];
-      if (rule.audience === "CONTACT" || rule.audience === "BOTH") {
+      const internalOnly = isInternalOnlyTrigger(trigger);
+      if (!internalOnly && (rule.audience === "CONTACT" || rule.audience === "BOTH")) {
         // Stored encrypted — decrypt, or the "address" handed to the mail
         // transport would be a ciphertext string.
         const contactEmail = textRead(ticket.contact?.email);
@@ -125,7 +126,11 @@ export async function runAutoResponses(
           rule: rule.name,
           sent: false,
           to: [],
-          reason: "No recipient for this audience",
+          // Named precisely rather than redirected: silently mailing the assignee
+          // instead of the configured audience would hide a misconfigured rule.
+          reason: internalOnly
+            ? `${trigger} is never sent to the client, and this rule has no internal audience — set it to ASSIGNEE`
+            : "No recipient for this audience",
         });
         continue;
       }

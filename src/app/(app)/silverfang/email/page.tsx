@@ -9,6 +9,7 @@ import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TEMPLATE_VARIABLES, TICKET_HEADER } from "@/lib/silverfang/email";
 import { outboundEnabled } from "@/lib/silverfang/email-policy";
 import { SETTLED_DECISIONS } from "@/lib/silverfang/ingest-outcomes";
+import { INTERNAL_ONLY_RULE_TRIGGERS } from "@/lib/silverfang/auto-response-triggers";
 import { textRead } from "@/lib/silverfang/pii";
 import { POLICY_ID } from "@/lib/silverfang/mail";
 import { MailEvents, type MailEventRow } from "./mail-events";
@@ -363,7 +364,10 @@ export default async function SilverFangEmailPage({
             Templated mail sent when something happens on a ticket. Seeded switched{" "}
             <span className="font-medium">off</span> — nothing reaches a client until you enable it.
             Auto-replies and out-of-office mail never trigger a rule, so two robots cannot mail each
-            other in a loop. Placeholders:{" "}
+            other in a loop. Rules marked{" "}
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">internal only</span>{" "}
+            never mail a client whatever their audience says — those are the SLA alerts, and they
+            are safe to switch on. Placeholders:{" "}
             <span className="font-mono">
               {TEMPLATE_VARIABLES.map((v) => `{{${v}}}`).join(" ")}
             </span>
@@ -389,7 +393,18 @@ export default async function SilverFangEmailPage({
                     <tr key={r.id} className="border-t align-top">
                       <td className="py-2 pr-4 font-medium">{r.name}</td>
                       <td className="py-2 pr-4">{r.trigger}</td>
-                      <td className="py-2 pr-4">{r.audience}</td>
+                      <td className="py-2 pr-4">
+                        {r.audience}
+                        {/* An internal-only trigger cannot reach a client whatever
+                            the audience says, so "off by default" is over-cautious
+                            here — and an alert nobody enabled is an alert nobody
+                            gets. Say so on the row. */}
+                        {INTERNAL_ONLY_RULE_TRIGGERS.includes(r.trigger) && (
+                          <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            internal only
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2 pr-4 text-muted-foreground">{r.subjectTemplate}</td>
                       <td className="py-2 pr-4">
                         <form action={toggleAutoResponseAction} className="flex items-center gap-2">

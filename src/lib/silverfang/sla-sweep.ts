@@ -4,28 +4,42 @@ import { safeErrorMessage } from "@/lib/redact";
 import { evaluateTarget } from "@/lib/silverfang/sla";
 import { loadSla } from "@/lib/silverfang/service";
 import { runAutoResponses } from "@/lib/silverfang/auto-response";
+import { atRiskNote, shouldWarnAtRisk } from "@/lib/silverfang/escalation";
 
 /**
- * Mark SLA breaches on open tickets.
+ * Warn on SLA targets that are about to be missed, and mark the ones that were.
  *
  * Due dates are computed when a ticket is opened, but nothing notices when one
  * passes — so a breach was only ever visible to whoever happened to look. This
  * runs on the sub-daily cron and flips the stored flags once, then fires the
- * SLA_BREACHED auto-responses.
+ * matching auto-responses.
  *
- * Idempotent: a ticket already flagged is skipped, so the alert is sent once
- * rather than every fifteen minutes.
+ * The at-risk pass is the half that can still change the outcome: a breach alert
+ * is an obituary, and by the time it fires the thing it warns about has happened.
+ * An at-risk warning goes out while the target can still be met.
+ *
+ * Idempotent throughout: a ticket already flagged or already warned is skipped, so
+ * each alert is sent once rather than every fifteen minutes.
  */
 
 export interface SweepResult {
   scanned: number;
   responseBreaches: number;
   resolutionBreaches: number;
+  /** At-risk warnings raised this pass, per target. */
+  responseAtRisk: number;
+  resolutionAtRisk: number;
   error?: string;
 }
 
 export async function sweepSlaBreaches(limit = 500): Promise<SweepResult> {
-  const result: SweepResult = { scanned: 0, responseBreaches: 0, resolutionBreaches: 0 };
+  const result: SweepResult = {
+    scanned: 0,
+    responseBreaches: 0,
+    resolutionBreaches: 0,
+    responseAtRisk: 0,
+    resolutionAtRisk: 0,
+  };
   try {
     const tickets = await prisma.sfTicket.findMany({
       where: {
@@ -46,6 +60,8 @@ export async function sweepSlaBreaches(limit = 500): Promise<SweepResult> {
         resolvedAt: true,
         slaResponseBreached: true,
         slaResolutionBreached: true,
+        slaResponseAtRiskAt: true,
+        slaResolutionAtRiskAt: true,
       },
     });
     result.scanned = tickets.length;
@@ -75,6 +91,57 @@ export async function sweepSlaBreaches(limit = 500): Promise<SweepResult> {
 
       const responseBreached = response?.breached === true && t.firstRespondedAt == null;
       const resolutionBreached = resolution?.breached === true && t.resolvedAt == null;
+
+      // At-risk first, and only for a target that has NOT just breached — warning
+      // and breaching in the same pass would send two alerts about one target.
+      const warnResponse =
+        !responseBreached &&
+        response != null &&
+        t.firstRespondedAt == null &&
+        shouldWarnAtRisk(response, t.slaResponseAtRiskAt);
+      const warnResolution =
+        !resolutionBreached &&
+        resolution != null &&
+        t.resolvedAt == null &&
+        shouldWarnAtRisk(resolution, t.slaResolutionAtRiskAt);
+
+      if (warnResponse || warnResolution) {
+        await prisma.$transaction(async (tx) => {
+          await tx.sfTicket.update({
+            where: { id: t.id },
+            data: {
+              ...(warnResponse ? { slaResponseAtRiskAt: now } : {}),
+              ...(warnResolution ? { slaResolutionAtRiskAt: now } : {}),
+            },
+          });
+          if (warnResponse) {
+            await tx.sfSlaEvent.create({
+              data: {
+                ticketId: t.id,
+                kind: "AT_RISK",
+                targetKind: "RESPONSE",
+                note: atRiskNote("RESPONSE", response!.remainingMinutes ?? 0),
+              },
+            });
+          }
+          if (warnResolution) {
+            await tx.sfSlaEvent.create({
+              data: {
+                ticketId: t.id,
+                kind: "AT_RISK",
+                targetKind: "RESOLUTION",
+                note: atRiskNote("RESOLUTION", resolution!.remainingMinutes ?? 0),
+              },
+            });
+          }
+        });
+        if (warnResponse) result.responseAtRisk += 1;
+        if (warnResolution) result.resolutionAtRisk += 1;
+        // Internal only, enforced in runAutoResponses by trigger — a client must
+        // never be automatically told we are about to miss their SLA.
+        await runAutoResponses("SLA_AT_RISK", t.id);
+      }
+
       if (!responseBreached && !resolutionBreached) continue;
 
       await prisma.$transaction(async (tx) => {

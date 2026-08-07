@@ -30,6 +30,7 @@ export default async function SilverFangDashboardPage() {
     unassigned,
     breachedResponse,
     breachedResolution,
+    atRiskCount,
     byPriority,
     byBoard,
     closedThisMonth,
@@ -50,6 +51,19 @@ export default async function SilverFangDashboardPage() {
     }),
     prisma.sfTicket.count({
       where: { status: { isClosed: false }, slaResolutionBreached: true },
+    }),
+    // Warned but not yet breached: the ones still worth chasing. A target that
+    // has already breached is counted above, not here — it is no longer at risk,
+    // it is a miss.
+    prisma.sfTicket.count({
+      where: {
+        status: { isClosed: false },
+        client: { archived: false },
+        OR: [
+          { slaResponseAtRiskAt: { not: null }, slaResponseBreached: false },
+          { slaResolutionAtRiskAt: { not: null }, slaResolutionBreached: false },
+        ],
+      },
     }),
     prisma.sfTicket.groupBy({
       by: ["priority"],
@@ -167,6 +181,10 @@ export default async function SilverFangDashboardPage() {
               }
             />
             <StatItem
+              label="SLA at risk"
+              value={<span className={atRiskCount > 0 ? "text-warning" : ""}>{atRiskCount}</span>}
+            />
+            <StatItem
               label="SLA breached"
               value={<span className={breached > 0 ? "text-danger" : ""}>{breached}</span>}
             />
@@ -182,8 +200,15 @@ export default async function SilverFangDashboardPage() {
               }
             />
           </div>
+          {atRiskCount > 0 && (
+            <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-warning">
+              <TriangleAlert className="h-3.5 w-3.5" />
+              {atRiskCount} open ticket(s) have a target close to being missed that can still be
+              met.
+            </p>
+          )}
           {breached > 0 && (
-            <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-danger">
+            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-danger">
               <TriangleAlert className="h-3.5 w-3.5" />
               {breachedResponse} response and {breachedResolution} resolution target(s) breached on
               open tickets.

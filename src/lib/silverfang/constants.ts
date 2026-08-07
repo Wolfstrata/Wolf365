@@ -174,7 +174,7 @@ export const DEFAULT_SLA_NAME = "Standard SLA";
  */
 export const DEFAULT_AUTO_RESPONSES: {
   name: string;
-  trigger: "TICKET_CREATED" | "STATUS_CHANGED" | "NOTE_ADDED" | "SLA_BREACHED";
+  trigger: "TICKET_CREATED" | "STATUS_CHANGED" | "NOTE_ADDED" | "SLA_AT_RISK" | "SLA_BREACHED";
   audience: "CONTACT" | "ASSIGNEE" | "BOTH";
   subjectTemplate: string;
   bodyTemplate: string;
@@ -202,6 +202,25 @@ export const DEFAULT_AUTO_RESPONSES: {
     subjectTemplate: "New ticket: {{ticket.summary}}",
     bodyTemplate: [
       "A new ticket has been opened.",
+      "",
+      "Ticket: #{{ticket.number}} — {{ticket.summary}}",
+      "Client: {{client.name}}",
+      "Priority: {{ticket.priority}}",
+      "Status: {{ticket.status}}",
+      "",
+      "{{ticket.url}}",
+    ].join("\n"),
+  },
+  {
+    // The one that can still change the outcome — a breach alert only reports it.
+    // ASSIGNEE, and never anything else: SLA_AT_RISK is internal-only by
+    // construction in runAutoResponses, so a CONTACT audience would send nothing.
+    name: "SLA at-risk warning to technician",
+    trigger: "SLA_AT_RISK",
+    audience: "ASSIGNEE",
+    subjectTemplate: "SLA at risk: {{ticket.summary}}",
+    bodyTemplate: [
+      "An SLA target on this ticket is close to being missed and can still be met.",
       "",
       "Ticket: #{{ticket.number}} — {{ticket.summary}}",
       "Client: {{client.name}}",

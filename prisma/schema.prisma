@@ -262,6 +262,10 @@ enum AuditAction {
   QBO_INVOICE_PUSHED
   EXPORT
   SSO_SETTINGS_CHANGED
+  /// Re-encrypting stored values under the current key. Its own action rather
+  /// than borrowing SSO_SETTINGS_CHANGED: this touches every stored secret and
+  /// every encrypted personal-data column, and needs to be findable as itself.
+  ENCRYPTION_KEY_ROTATED
   USER_ROLE_CHANGED
   USER_CREATED
   USER_DISABLED
@@ -1633,6 +1637,11 @@ model SfTicket {
   resolvedAt         DateTime?
   slaResponseBreached Boolean  @default(false)
   slaResolutionBreached Boolean @default(false)
+  /// When the at-risk warning was raised for each target. Nullable rather than
+  /// boolean because "when" is worth knowing, and set-once is what stops the
+  /// every-fifteen-minutes sweep from re-warning until people tune it out.
+  slaResponseAtRiskAt   DateTime?
+  slaResolutionAtRiskAt DateTime?
   // Accumulated paused time (minutes) while in a stopsSlaClock status.
   slaPausedMinutes   Int       @default(0)
   slaPausedAt        DateTime?
@@ -2155,7 +2164,8 @@ model SfSlaEvent {
   ticketId String
   ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  kind      String // "STARTED" | "PAUSED" | "RESUMED" | "RESPONDED" | "RESOLVED" | "BREACHED"
+  // "STARTED" | "PAUSED" | "RESUMED" | "RESPONDED" | "RESOLVED" | "AT_RISK" | "BREACHED"
+  kind      String
   targetKind SfSlaTargetKind?
   note      String?
   occurredAt DateTime @default(now())

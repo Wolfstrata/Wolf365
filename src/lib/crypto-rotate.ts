@@ -271,7 +271,7 @@ export async function rotateWithAudit(actor: {
 }): Promise<RotationResult> {
   const result = await rotateEncryptedValues();
   await audit({
-    action: "SSO_SETTINGS_CHANGED",
+    action: "ENCRYPTION_KEY_ROTATED",
     actorId: actor.id,
     actorEmail: actor.email,
     target: "crypto:rotate",
@@ -281,6 +281,8 @@ export async function rotateWithAudit(actor: {
       encrypted: result.encrypted,
       failed: result.failed,
       outstanding: result.status.outstanding,
+      legacy: result.status.legacy,
+      plaintext: result.status.plaintext,
       complete: result.status.complete,
     },
   });
