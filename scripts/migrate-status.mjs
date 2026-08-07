@@ -8,13 +8,18 @@
  * where you are standing, migrations applied by hand in the Neon SQL editor, and
  * therefore no confidence that the schema matches the code.
  *
- * Two modes, chosen automatically:
+ * Three modes, chosen automatically. Credentials are read from the environment and
+ * then from .env / .env.local, because the Prisma CLI loads .env itself and this
+ * script previously did not — so it claimed no database was reachable on machines
+ * that had one configured all along.
  *
- *   With DATABASE_URL set   → queries `_prisma_migrations`, prints the applied /
- *                             pending split, and writes the pending SQL to a file
- *                             you can run.
- *   Without it              → prints the local migration list plus the exact SQL
- *                             to run in the Neon console to get the same answer.
+ *   URL + `pg` installed → queries `_prisma_migrations` directly, prints the
+ *                          applied / pending split, writes the pending SQL.
+ *   URL, no `pg`         → runs `prisma migrate status`, which can reach the
+ *                          database without an extra dependency. This is the
+ *                          normal path here: `pg` is not a dependency.
+ *   No URL at all        → prints the local migration list plus the exact SQL to
+ *                          run in the Neon console for the same answer.
  *
  * Note on hand-applied migrations: running a migration's SQL in the Neon editor
  * changes the schema but does NOT record it in `_prisma_migrations`, so Prisma
@@ -25,6 +30,7 @@
  *   node scripts/migrate-status.mjs
  *   node scripts/migrate-status.mjs --sql   # print pending SQL to stdout
  */
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -83,6 +89,47 @@ function pendingSql(names) {
     .join("\n");
 }
 
+/**
+ * Read DATABASE_URL/DIRECT_URL from .env when the shell does not already have it.
+ *
+ * The Prisma CLI loads .env by itself, so `prisma migrate resolve` connects fine
+ * while plain `node` sees nothing — which made this script announce "no database
+ * reachable" on a machine whose .env was sitting right there. Reporting a missing
+ * database when one is configured sends people to the Neon console for an answer
+ * they could have had locally.
+ *
+ * Deliberately minimal: KEY=VALUE, optional `export`, quotes stripped, `#`
+ * comments ignored. Not a full dotenv implementation, and it never overwrites a
+ * variable the shell already set.
+ */
+function loadEnvFiles() {
+  for (const file of [".env.local", ".env"]) {
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue; // Absent is normal.
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)$/i.exec(line);
+      if (!match) continue;
+      const key = match[1];
+      if (process.env[key]) continue; // The shell wins.
+      let value = match[2].trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      } else {
+        value = value.split(" #")[0].trim();
+      }
+      process.env[key] = value;
+    }
+  }
+}
+
+loadEnvFiles();
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
 if (!url) {
@@ -91,10 +138,13 @@ if (!url) {
   console.log(
     [
       "",
-      "No DATABASE_URL/DIRECT_URL in this environment, so the database's own",
-      "history cannot be read from here. Run this in the Neon SQL editor and",
-      "compare against the list above — anything present there but not in the",
-      "query output has not been recorded as applied:",
+      "No DATABASE_URL/DIRECT_URL in the environment or in .env / .env.local, so",
+      "the database's own history cannot be read from here.",
+      "",
+      "If you DO have a .env with credentials, `npx prisma migrate status` is the",
+      "authoritative check. Otherwise run this in the Neon SQL editor and compare",
+      "against the list above — anything in that list but absent from the query",
+      "output has not been recorded as applied:",
       "",
       STATUS_SQL,
       "",
@@ -111,9 +161,30 @@ if (!url) {
 
 const rows = await fromDatabase(url);
 if (rows === null) {
-  console.log("The 'pg' package is not installed, so the database cannot be queried.");
-  console.log("Use `npx prisma migrate status` instead, or install pg as a dev dependency.");
-  process.exit(1);
+  // `pg` is not a dependency of this project, so this is the normal path, not an
+  // error. Prisma's own CLI can reach the database — so run it rather than
+  // printing a suggestion and exiting non-zero, which left the question the
+  // script exists to answer unanswered.
+  console.log("Delegating to Prisma, which can read the database's migration history:\n");
+  const { status } = spawnSync("npx", ["prisma", "migrate", "status"], {
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
+  console.log(
+    [
+      "",
+      `${local.length} migration(s) in this checkout, newest last:`,
+      ...local.slice(-5).map((n) => `  ${n}`),
+      "",
+      "If Prisma reports migrations as pending that you applied by hand in the Neon",
+      "console, record them so its history agrees:",
+      "  npx prisma migrate resolve --applied <migration_name>",
+      "",
+      "`resolve --applied` only RECORDS a migration — it does not run the SQL. Record",
+      "one whose SQL never ran and the chain claims a column exists that does not.",
+    ].join("\n"),
+  );
+  process.exit(status ?? 0);
 }
 
 const applied = new Set(
