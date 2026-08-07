@@ -14,6 +14,7 @@ import {
   nextTicketNumber,
   resolveTimeEntryRate,
   slaDueDatesFor,
+  timeAuthorizationFor,
 } from "@/lib/silverfang/service";
 import type { SfActionResult } from "./actions";
 
@@ -155,13 +156,23 @@ export async function saveTimeBlockAction(
     const ticket = ticketId
       ? await prisma.sfTicket.findUnique({
           where: { id: ticketId },
-          select: { id: true, clientId: true, agreementId: true, number: true },
+          select: {
+            id: true,
+            clientId: true,
+            agreementId: true,
+            projectId: true,
+            number: true,
+          },
         })
       : null;
     const task = input.projectTaskId
       ? await prisma.sfProjectTask.findUnique({
           where: { id: input.projectTaskId },
-          select: { id: true, project: { select: { clientId: true, agreementId: true } } },
+          select: {
+            id: true,
+            projectId: true,
+            project: { select: { clientId: true, agreementId: true } },
+          },
         })
       : null;
     const agreement = input.agreementId
@@ -181,6 +192,20 @@ export async function saveTimeBlockAction(
     }
     const effectiveAgreementId =
       input.agreementId ?? ticket?.agreementId ?? task?.project.agreementId ?? null;
+
+    // Same authorised-tech check as logging time on a ticket. A scheduled block is
+    // a time entry with a start and an end, so a restriction that applied to one
+    // and not the other would just move the accident to the calendar.
+    const authorized = await timeAuthorizationFor(
+      {
+        agreementId: effectiveAgreementId,
+        projectId: ticket?.projectId ?? task?.projectId ?? null,
+      },
+      user.id,
+    );
+    if (!authorized.allowed) {
+      return { ok: false, message: authorized.reasons.join(" ") };
+    }
 
     const workedAt = instantFor(workDate, startMinutes, input.offsetMinutes);
     const resolved = await resolveTimeEntryRate({

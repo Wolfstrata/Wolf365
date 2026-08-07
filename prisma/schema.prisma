@@ -66,6 +66,8 @@ model User {
   sfTimesheets         SfTimesheet[]  @relation("SfTimesheetUser")
   sfManagedProjects    SfProject[]    @relation("SfProjectManager")
   sfAssignedTasks      SfProjectTask[] @relation("SfTaskAssignee")
+  sfAuthorizedAgreements SfAgreementTech[]
+  sfAuthorizedProjects   SfProjectTech[]
 
   @@index([role])
 }
@@ -2047,6 +2049,10 @@ model SfAgreement {
   projects   SfProject[]
   timeEntries SfTimeEntry[]
   rateRules  SfRateRule[]
+  /// Technicians allowed to log time against this agreement. EMPTY MEANS EVERYONE
+  /// — the restriction only exists once somebody names it, so adding this feature
+  /// could not lock every tech out of every existing agreement.
+  authorizedTechs SfAgreementTech[]
   clientProfiles SfClientProfile[]
   billingLines SfBillingLine[]
 
@@ -2234,6 +2240,9 @@ model SfProject {
 
   phases  SfProjectPhase[]
   tasks   SfProjectTask[]
+  /// Technicians allowed to log time against this project. Empty means everyone,
+  /// for the same reason as on an agreement.
+  authorizedTechs SfProjectTech[]
   tickets SfTicket[]
   billingLines SfBillingLine[]
 
@@ -2405,6 +2414,42 @@ model SfProjectTemplateTask {
 
 // Automatic email/notification rules (e.g. acknowledge on create, notify on
 // status change). Bodies are templates rendered at send time.
+/// A technician authorised to log time against one agreement.
+///
+/// A whitelist, not a blacklist, and deliberately empty-means-everyone: a
+/// restriction that switched itself on for every agreement the moment the table
+/// existed would have stopped the whole team logging time.
+model SfAgreementTech {
+  agreementId String
+  agreement   SfAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Who granted it, for the audit trail — the grant itself is what allows
+  /// somebody to draw down a client's prepaid hours.
+  grantedById    String?
+  grantedByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@id([agreementId, userId])
+  @@index([userId])
+}
+
+/// A technician authorised to log time against one project.
+model SfProjectTech {
+  projectId String
+  project   SfProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  grantedById    String?
+  grantedByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@id([projectId, userId])
+  @@index([userId])
+}
+
 model SfAutoResponseRule {
   id     String  @id @default(cuid())
   name   String  @unique

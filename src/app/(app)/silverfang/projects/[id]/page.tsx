@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, ShieldCheck } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -30,6 +30,9 @@ import { DepositCard } from "./deposit-card";
 import { PhaseBoard, type PhaseRow } from "./phase-board";
 import { TaskBoard, type TaskRow } from "./task-board";
 import { SaveAsTemplate } from "./save-as-template";
+import { AuthorizedTechsForm } from "../../authorized-techs-form";
+import { saveProjectTechsAction } from "../../project-actions";
+import { checkAuthorized, restrictionLabel } from "@/lib/silverfang/authorized-techs";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +92,7 @@ export default async function ProjectDetailPage({
           _count: { select: { timeEntries: true, tickets: true } },
         },
       },
+      authorizedTechs: { select: { userId: true } },
       _count: { select: { tickets: true } },
     },
   });
@@ -126,6 +130,16 @@ export default async function ProjectDetailPage({
   ]);
 
   const canManage = can(user.role, "projects:manage");
+  // Authorised technicians. Empty means everyone — see `authorized-techs.ts`.
+  const authorizedIds = project.authorizedTechs.map((t) => t.userId);
+  const authorization = checkAuthorized(
+    { kind: "project", name: project.name, authorizedUserIds: authorizedIds },
+    user.id,
+  );
+  // Gated by the same list the server enforces, so the form is never offered and
+  // then refused on save.
+  const canEdit = canManage && authorization.allowed;
+  const canConfigure = can(user.role, "silverfang:configure");
   // The client page is the natural parent; an explicit target wins over it.
   const backTo = safeReturnTo(sp.returnTo) ?? `/silverfang/clients/${project.client.id}`;
 
@@ -273,6 +287,26 @@ export default async function ProjectDetailPage({
           )}
         </div>
 
+        {authorization.restricted && (
+          <Card>
+            <p className="text-sm">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  authorization.allowed
+                    ? "bg-success/15 text-success"
+                    : "bg-warning/15 text-warning"
+                }`}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {restrictionLabel(authorization)}
+              </span>{" "}
+              {authorization.allowed
+                ? `Time on this project is limited to ${authorizedIds.length} named technician(s), and you are one of them.`
+                : authorization.reason}
+            </p>
+          </Card>
+        )}
+
         {/* Carried through the create redirect: something a template could not
             stamp out, said here rather than left for someone to notice. */}
         {sp.notice && (
@@ -407,9 +441,28 @@ export default async function ProjectDetailPage({
           />
         </Card>
 
+        {canConfigure && (
+          <Card>
+            <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+              Authorised technicians <PawTip topic="authorizedTechs" />
+            </h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Who may log time against this project. Editing this list is never itself
+              restricted — otherwise leaving yourself off would lock the project permanently.
+            </p>
+            <AuthorizedTechsForm
+              scope="project"
+              targetId={project.id}
+              users={users}
+              selectedIds={authorizedIds}
+              saveAction={saveProjectTechsAction}
+            />
+          </Card>
+        )}
+
         <Card>
           <h2 className="mb-4 text-sm font-semibold">Project</h2>
-          {canManage ? (
+          {canEdit ? (
             <ProjectForm
               values={{
                 id: project.id,

@@ -26,6 +26,10 @@ import {
   unknownPhaseNames,
 } from "@/lib/silverfang/project-templates";
 import {
+  checkAuthorized,
+  normalizeTechIds,
+} from "@/lib/silverfang/authorized-techs";
+import {
   captureProjectAsTemplate,
   materializeTemplate,
   writeTemplate,
@@ -189,6 +193,14 @@ export async function saveProjectAction(
     const before = input.id
       ? await prisma.sfProject.findUnique({ where: { id: input.id } })
       : null;
+
+    // An authorised-tech list restricts editing as well as logging time, and it
+    // restricts everyone. The escape hatch is the tech list itself, which anyone
+    // who can configure SilverFang can change; see `saveProjectTechsAction`.
+    if (input.id) {
+      const refusal = await projectEditRefusal(input.id, user.id);
+      if (refusal) return { ok: false, message: refusal };
+    }
 
     // The deposit amount is recomputed while it is still only a plan, and frozen
     // the moment it has been invoiced — a later change to the total must not
@@ -958,4 +970,91 @@ export async function projectTemplateFormValues(id: string): Promise<{
     billingIntervalDays: t.billingIntervalDays != null ? String(t.billingIntervalDays) : "",
     depositPercent: str(t.depositPercent),
   };
+}
+
+/** The refusal when this user may not edit a project, or null when they may. */
+async function projectEditRefusal(
+  projectId: string,
+  userId: string,
+): Promise<string | null> {
+  const project = await prisma.sfProject.findUnique({
+    where: { id: projectId },
+    select: { name: true, authorizedTechs: { select: { userId: true } } },
+  });
+  if (!project) return null;
+  const verdict = checkAuthorized(
+    {
+      kind: "project",
+      name: project.name,
+      authorizedUserIds: project.authorizedTechs.map((t) => t.userId),
+    },
+    userId,
+  );
+  return verdict.allowed ? null : verdict.reason;
+}
+
+/**
+ * Replace a project's authorised technicians.
+ *
+ * Not subject to the restriction it manages, for the same reason as on an
+ * agreement: otherwise a project could become permanently uneditable by everyone
+ * left off its own list. Empty means everyone, and saving empty says so.
+ */
+export async function saveProjectTechsAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const projectId = z.string().min(1).parse(formValue(formData, "projectId"));
+    const userIds = normalizeTechIds(formData.getAll("userIds").map(String));
+
+    const project = await prisma.sfProject.findUnique({
+      where: { id: projectId },
+      select: { id: true, name: true },
+    });
+    if (!project) return { ok: false, message: "That project no longer exists." };
+
+    const valid = await prisma.user.findMany({
+      where: { id: { in: userIds }, disabled: false },
+      select: { id: true },
+    });
+    const validIds = valid.map((v) => v.id);
+
+    await prisma.$transaction([
+      prisma.sfProjectTech.deleteMany({ where: { projectId } }),
+      ...(validIds.length > 0
+        ? [
+            prisma.sfProjectTech.createMany({
+              data: validIds.map((id) => ({
+                projectId,
+                userId: id,
+                grantedById: user.id,
+                grantedByEmail: user.email,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    await audit({
+      action: "PROJECT_UPDATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfProject:${projectId}`,
+      metadata: { authorizedTechs: validIds, dropped: userIds.length - validIds.length },
+    });
+    revalidatePath(`/silverfang/projects/${projectId}`);
+    revalidatePath("/silverfang/projects");
+    return {
+      ok: true,
+      message:
+        validIds.length === 0
+          ? "Restriction removed — every technician can log time against this project."
+          : `${validIds.length} technician(s) authorised. Nobody else can log time against ` +
+            `this project or edit it, though they can still open and read it.`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
 }

@@ -44,6 +44,7 @@ export function TimeCard({
   entries,
   chargeCodes,
   canLog,
+  restriction,
   totalHours,
   billableHours,
 }: {
@@ -51,6 +52,11 @@ export function TimeCard({
   entries: TimeEntryRow[];
   chargeCodes: { id: string; code: string; name: string; billableDefault: boolean }[];
   canLog: boolean;
+  /**
+   * Why time cannot be logged here, when an authorised-technician list on the
+   * ticket's agreement or project excludes this user. Null when there is none.
+   */
+  restriction?: string | null;
   totalHours: number;
   billableHours: number;
 }) {
@@ -88,7 +94,7 @@ export function TimeCard({
           {formatHours(totalHours)} logged · {formatHours(billableHours)} billable
           {revenue > 0 && ` · ${formatCurrency(revenue)}`}
         </span>
-        {canLog && (
+        {canLog && !restriction && (
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -98,6 +104,15 @@ export function TimeCard({
           </button>
         )}
       </div>
+
+      {/* Said here, once, rather than letting a tech fill the form in and be
+          refused on save. The server still refuses — this is the courtesy, not the
+          control. */}
+      {restriction && (
+        <p className="mb-3 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
+          {restriction}
+        </p>
+      )}
 
       {canLog && open && (
         <form ref={formRef} action={action} className="mb-4 rounded-md border bg-accent/30 p-3">

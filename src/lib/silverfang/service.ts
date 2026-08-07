@@ -19,6 +19,7 @@ import {
   pickDefaultAgreement,
   type DefaultAgreementPick,
 } from "@/lib/silverfang/default-agreement";
+import { blockingReasons, type Restriction } from "@/lib/silverfang/authorized-techs";
 
 /**
  * Server-only SilverFang services: the I/O edges around the pure logic modules.
@@ -315,6 +316,56 @@ export async function defaultAgreementFor(
     profileDefaultId: profile?.defaultAgreementId ?? null,
     now,
   });
+}
+
+/**
+ * Whether this user may log time against a ticket's agreement and project.
+ *
+ * Both are checked, and every blocker is returned together — being told about the
+ * agreement, fixing that, and then hitting the project is two round trips for one
+ * problem.
+ *
+ * Applied to everyone, administrators included: the feature exists to prevent
+ * accidents, and a role that quietly bypasses it prevents nothing. The escape
+ * hatch is editing the authorised-tech list, which `silverfang:configure` can
+ * always do.
+ */
+export async function timeAuthorizationFor(
+  target: { agreementId?: string | null; projectId?: string | null },
+  userId: string,
+): Promise<{ allowed: boolean; reasons: string[] }> {
+  const restrictions: Restriction[] = [];
+
+  if (target.agreementId) {
+    const agreement = await prisma.sfAgreement.findUnique({
+      where: { id: target.agreementId },
+      select: { name: true, authorizedTechs: { select: { userId: true } } },
+    });
+    if (agreement) {
+      restrictions.push({
+        kind: "agreement",
+        name: agreement.name,
+        authorizedUserIds: agreement.authorizedTechs.map((t) => t.userId),
+      });
+    }
+  }
+
+  if (target.projectId) {
+    const project = await prisma.sfProject.findUnique({
+      where: { id: target.projectId },
+      select: { name: true, authorizedTechs: { select: { userId: true } } },
+    });
+    if (project) {
+      restrictions.push({
+        kind: "project",
+        name: project.name,
+        authorizedUserIds: project.authorizedTechs.map((t) => t.userId),
+      });
+    }
+  }
+
+  const reasons = blockingReasons(restrictions, userId);
+  return { allowed: reasons.length === 0, reasons };
 }
 
 /** Recompute and store a ticket's actualHours from its time entries. */

@@ -14,7 +14,7 @@ import { PRIORITY_LABELS, PRIORITY_STYLES, SOURCE_LABELS } from "@/lib/silverfan
 import { formatHours } from "@/lib/silverfang/time";
 import { timeEntryEditable } from "@/lib/silverfang/status";
 import { evaluateTarget } from "@/lib/silverfang/sla";
-import { loadSla } from "@/lib/silverfang/service";
+import { loadSla, timeAuthorizationFor } from "@/lib/silverfang/service";
 import { defaultReplyRecipients } from "@/lib/silverfang/email-send";
 import { clientEmailAllowed, outboundEnabled } from "@/lib/silverfang/email-policy";
 import { POLICY_ID } from "@/lib/silverfang/mail";
@@ -167,6 +167,13 @@ export default async function TicketDetailPage({
   const canWrite = can(user.role, "tickets:write");
   const canAssign = can(user.role, "tickets:assign");
   const canLogTime = can(user.role, "time:log");
+  // An authorised-technician list on this ticket's agreement or project. Resolved
+  // here so the card can say so up front; the server enforces it regardless.
+  const timeAuth = await timeAuthorizationFor(
+    { agreementId: ticket.agreementId, projectId: ticket.projectId },
+    user.id,
+  );
+  const timeRestriction = timeAuth.allowed ? null : timeAuth.reasons.join(" ");
   const canApprove = can(user.role, "time:approve");
 
   const timeRows: TimeEntryRow[] = ticket.timeEntries.map((e) => ({
@@ -404,6 +411,7 @@ export default async function TicketDetailPage({
             billableDefault: c.billableDefault,
           }))}
           canLog={canLogTime}
+          restriction={timeRestriction}
           totalHours={totalHours}
           billableHours={billableHours}
         />

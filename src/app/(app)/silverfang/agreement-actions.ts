@@ -10,6 +10,10 @@ import { requirePermission } from "@/lib/auth/session";
 import { safeErrorMessage } from "@/lib/redact";
 import { recordChanges } from "@/lib/silverfang/change-log";
 import { describeChanges } from "@/lib/silverfang/changes";
+import {
+  checkAuthorized,
+  normalizeTechIds,
+} from "@/lib/silverfang/authorized-techs";
 import { applyAgreementRenewal } from "@/lib/silverfang/renewal-service";
 import type { SfActionResult } from "./actions";
 
@@ -157,6 +161,15 @@ export async function saveAgreementAction(
     const before = input.id
       ? await prisma.sfAgreement.findUnique({ where: { id: input.id } })
       : null;
+
+    // An authorised-tech list restricts editing as well as logging time, and it
+    // restricts everyone — a role that quietly bypasses it prevents no accidents.
+    // The escape hatch is not a bypass: the tech list itself stays editable by
+    // anyone who can configure SilverFang, and that edit is audited.
+    if (input.id) {
+      const refusal = await agreementEditRefusal(input.id, user.id);
+      if (refusal) return { ok: false, message: refusal };
+    }
     const saved = input.id
       ? await prisma.sfAgreement.update({ where: { id: input.id }, data })
       : await prisma.sfAgreement.create({
@@ -396,6 +409,105 @@ export async function applyAgreementRenewalAction(
     return {
       ok: true,
       message: `Renewed at +${outcome.percent}% through ${outcome.newEndDate?.toISOString().slice(0, 10)}.${moved}`,
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * The refusal message when this user may not edit an agreement, or null when they
+ * may.
+ *
+ * Reads the list fresh rather than taking it from the form: an authorisation check
+ * against browser-supplied state is not a check.
+ */
+async function agreementEditRefusal(
+  agreementId: string,
+  userId: string,
+): Promise<string | null> {
+  const agreement = await prisma.sfAgreement.findUnique({
+    where: { id: agreementId },
+    select: { name: true, authorizedTechs: { select: { userId: true } } },
+  });
+  if (!agreement) return null;
+  const verdict = checkAuthorized(
+    {
+      kind: "agreement",
+      name: agreement.name,
+      authorizedUserIds: agreement.authorizedTechs.map((t) => t.userId),
+    },
+    userId,
+  );
+  return verdict.allowed ? null : verdict.reason;
+}
+
+/**
+ * Replace an agreement's authorised technicians.
+ *
+ * Deliberately NOT subject to the restriction it manages — that would make a
+ * restricted agreement permanently uneditable by anyone left off the list, which
+ * is a lockout, not a safeguard. `silverfang:configure` is the gate, and every
+ * change is audited with who granted what.
+ *
+ * Empty means everyone. Saving an empty list removes the restriction, and the
+ * result message says so rather than leaving it to be inferred.
+ */
+export async function saveAgreementTechsAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const agreementId = z.string().min(1).parse(formValue(formData, "agreementId"));
+    const userIds = normalizeTechIds(formData.getAll("userIds").map(String));
+
+    const agreement = await prisma.sfAgreement.findUnique({
+      where: { id: agreementId },
+      select: { id: true, name: true },
+    });
+    if (!agreement) return { ok: false, message: "That agreement no longer exists." };
+
+    // Only real, enabled users — a stale id would silently authorise nobody while
+    // making the agreement look restricted.
+    const valid = await prisma.user.findMany({
+      where: { id: { in: userIds }, disabled: false },
+      select: { id: true },
+    });
+    const validIds = valid.map((v) => v.id);
+
+    await prisma.$transaction([
+      prisma.sfAgreementTech.deleteMany({ where: { agreementId } }),
+      ...(validIds.length > 0
+        ? [
+            prisma.sfAgreementTech.createMany({
+              data: validIds.map((id) => ({
+                agreementId,
+                userId: id,
+                grantedById: user.id,
+                grantedByEmail: user.email,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    await audit({
+      action: "AGREEMENT_UPDATED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: `sfAgreement:${agreementId}`,
+      metadata: { authorizedTechs: validIds, dropped: userIds.length - validIds.length },
+    });
+    revalidatePath(`/silverfang/agreements/${agreementId}`);
+    revalidatePath("/silverfang/agreements");
+    return {
+      ok: true,
+      message:
+        validIds.length === 0
+          ? "Restriction removed — every technician can log time against this agreement."
+          : `${validIds.length} technician(s) authorised. Nobody else can log time against ` +
+            `this agreement or edit it, though they can still open and read it.`,
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

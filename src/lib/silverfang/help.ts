@@ -70,6 +70,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "What a client has bought: managed services with included hours, a NOC agreement, or prepaid block time. Included hours are consumed oldest-work-first; hours beyond them become overage on the next invoice.",
     todo: "Ticking auto-renew is the consent — the agreement then renews itself on its end date with the uplift applied, and every renewal is audited.",
   },
+  authorizedTechs: {
+    title: "Authorised technicians",
+    body: "A per-agreement and per-project whitelist of who may log time. It exists to stop a tech drawing down the wrong client's prepaid block by accident. An empty list means everyone — the restriction only exists once you name somebody.",
+    todo: "Anyone left off still sees the agreement or project and can read every detail; the row is greyed and time is refused. Editing the list itself is never restricted, so you can never lock it permanently.",
+  },
   managedAgreements: {
     title: "Tag managed customers",
     body: "SuperOps has no managed-services flag, so this reads the client stage, status and contract names for the word \"managed\", then creates one draft 12-month agreement per match starting today. A client labelled \"unmanaged\" is excluded even if a contract says otherwise.",

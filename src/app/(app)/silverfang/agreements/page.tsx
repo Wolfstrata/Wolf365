@@ -11,6 +11,7 @@ import { formatHours } from "@/lib/silverfang/time";
 import { availableHours } from "@/lib/silverfang/block-time";
 import { AGREEMENT_STATUS_LABELS, AGREEMENT_TYPE_LABELS } from "@/lib/silverfang/constants";
 import { renewalPreview } from "@/lib/silverfang/renewal";
+import { checkAuthorized, restrictionLabel } from "@/lib/silverfang/authorized-techs";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function AgreementsPage() {
     include: {
       client: { select: { id: true, name: true } },
       blocks: { include: { draws: { select: { hours: true } } } },
+      authorizedTechs: { select: { userId: true } },
       _count: { select: { tickets: true } },
     },
   });
@@ -140,8 +142,24 @@ export default async function AgreementsPage() {
                       },
                       now,
                     );
+                    // Restricted agreements stay visible and openable — greyed,
+                    // not hidden. Someone who cannot draw down the block still needs
+                    // to be able to look up what the client bought.
+                    const authorization = checkAuthorized(
+                      {
+                        kind: "agreement",
+                        name: a.name,
+                        authorizedUserIds: a.authorizedTechs.map((t) => t.userId),
+                      },
+                      user.id,
+                    );
+                    const dimmed = authorization.restricted && !authorization.allowed;
                     return (
-                      <tr key={a.id} className="border-t align-top">
+                      <tr
+                        key={a.id}
+                        className={`border-t align-top ${dimmed ? "opacity-60" : ""}`}
+                        title={dimmed ? (authorization.reason ?? undefined) : undefined}
+                      >
                         <td className="py-1.5 pr-4 font-medium">
                           <Link
                             href={`/silverfang/agreements/${a.id}`}
@@ -149,6 +167,12 @@ export default async function AgreementsPage() {
                           >
                             {a.name}
                           </Link>
+                          {authorization.restricted && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                              <ShieldCheck className="h-3 w-3" />
+                              {restrictionLabel(authorization)}
+                            </span>
+                          )}
                         </td>
                         <td className="py-1.5 pr-4">
                           <Link

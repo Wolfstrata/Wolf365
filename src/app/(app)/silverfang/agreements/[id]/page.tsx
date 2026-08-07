@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Plus, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Plus, ShieldCheck, TriangleAlert } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -19,6 +19,9 @@ import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { TicketsTable } from "../../tickets/tickets-table";
 import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { AgreementForm } from "../agreement-form";
+import { AuthorizedTechsForm } from "../../authorized-techs-form";
+import { saveAgreementTechsAction } from "../../agreement-actions";
+import { checkAuthorized, restrictionLabel } from "@/lib/silverfang/authorized-techs";
 import { BlockForm } from "./block-form";
 import { DeleteAgreementButton } from "./delete-button";
 import { RenewalCard } from "./renewal-card";
@@ -50,6 +53,9 @@ export default async function AgreementDetailPage({
       blocks: {
         orderBy: { purchasedAt: "asc" },
         include: { draws: { select: { hours: true } } },
+      },
+      authorizedTechs: {
+        select: { userId: true, user: { select: { name: true, email: true } } },
       },
       _count: { select: { tickets: true, projects: true, timeEntries: true } },
     },
@@ -109,6 +115,24 @@ export default async function AgreementDetailPage({
   const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
   // Where the context-carrying buttons come back to.
   const here = `/silverfang/agreements/${agreement.id}`;
+
+  // Authorised technicians. Empty means everyone — see `authorized-techs.ts`.
+  const authorizedIds = agreement.authorizedTechs.map((t) => t.userId);
+  const authorization = checkAuthorized(
+    { kind: "agreement", name: agreement.name, authorizedUserIds: authorizedIds },
+    user.id,
+  );
+  // Editing is gated by the same list the server enforces, so the form is not
+  // offered and then refused.
+  const canEdit = canManage && authorization.allowed;
+  const canConfigure = can(user.role, "silverfang:configure");
+  const techUsers = canConfigure
+    ? await prisma.user.findMany({
+        where: { disabled: false },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
 
   return (
     <div>
@@ -237,9 +261,29 @@ export default async function AgreementDetailPage({
           </Card>
         )}
 
+        {authorization.restricted && (
+          <Card>
+            <p className="text-sm">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                  authorization.allowed
+                    ? "bg-success/15 text-success"
+                    : "bg-warning/15 text-warning"
+                }`}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {restrictionLabel(authorization)}
+              </span>{" "}
+              {authorization.allowed
+                ? `Time on this agreement is limited to ${authorizedIds.length} named technician(s), and you are one of them.`
+                : authorization.reason}
+            </p>
+          </Card>
+        )}
+
         <Card>
           <h2 className="mb-4 text-sm font-semibold">Agreement</h2>
-          {canManage ? (
+          {canEdit ? (
             <AgreementForm
               values={{
                 id: agreement.id,
@@ -277,6 +321,25 @@ export default async function AgreementDetailPage({
             </div>
           )}
         </Card>
+
+        {canConfigure && (
+          <Card>
+            <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+              Authorised technicians <PawTip topic="authorizedTechs" />
+            </h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Who may log time against this agreement. Editing this list is never itself
+              restricted — otherwise leaving yourself off would lock the agreement permanently.
+            </p>
+            <AuthorizedTechsForm
+              scope="agreement"
+              targetId={agreement.id}
+              users={techUsers}
+              selectedIds={authorizedIds}
+              saveAction={saveAgreementTechsAction}
+            />
+          </Card>
+        )}
 
         {isBlockTime && (
           <Card>

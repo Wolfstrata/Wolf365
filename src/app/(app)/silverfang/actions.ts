@@ -33,6 +33,7 @@ import {
   recomputeTicketHours,
   resolveTimeEntryRate,
   slaDueDatesFor,
+  timeAuthorizationFor,
 } from "@/lib/silverfang/service";
 
 export interface SfActionResult {
@@ -636,6 +637,17 @@ export async function saveTimeEntryAction(
         agreementId = pick.id;
         agreementDefaulted = { id: pick.id, reason: pick.reason };
       }
+    }
+
+    // Refused server-side, not merely greyed out in the UI. The whole point of an
+    // authorised-tech list is that prepaid hours cannot be drawn down by accident,
+    // and a check that only lives in the form is not a check.
+    const authorized = await timeAuthorizationFor(
+      { agreementId, projectId: ticket.projectId },
+      user.id,
+    );
+    if (!authorized.allowed) {
+      return { ok: false, message: authorized.reasons.join(" ") };
     }
 
     const resolved = await resolveTimeEntryRate({
