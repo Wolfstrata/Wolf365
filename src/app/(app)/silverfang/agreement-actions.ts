@@ -363,8 +363,13 @@ export async function deleteAgreementAction(
 }
 
 /**
- * Apply the auto-renew uplift: raise the agreement's prices by its configured
- * percentage and roll the end date forward by one term.
+ * Apply the auto-renew uplift: raise the agreement's recurring fee by its
+ * configured percentage and roll the end date forward by one term.
+ *
+ * Only the recurring fee moves. Hourly rates are left alone — a rate is what the
+ * work is worth and gets repriced on its own schedule, whereas the uplift is an
+ * escalator on the contracted subscription. Raising both would turn one decision
+ * into two price rises the client never agreed to.
  *
  * Deliberately manual. An agreement's renewal changes what a client pays, and a
  * price rise nobody approved reaching an invoice is how you lose the client — so
@@ -430,16 +435,9 @@ export async function applyAgreementRenewalAction(
         // what the term was stays derivable from the dates.
         startDate: agreement.endDate,
         endDate: newEndDate,
+        // The recurring fee only — overageRate and standardRate are untouched.
         monthlyAmount: increaseBy(
           agreement.monthlyAmount != null ? Number(agreement.monthlyAmount) : null,
-          percent,
-        ),
-        overageRate: increaseBy(
-          agreement.overageRate != null ? Number(agreement.overageRate) : null,
-          percent,
-        ),
-        standardRate: increaseBy(
-          agreement.standardRate != null ? Number(agreement.standardRate) : null,
           percent,
         ),
         lastRenewedAt: new Date(),
@@ -453,14 +451,7 @@ export async function applyAgreementRenewalAction(
       actor: { id: user.id, email: user.email },
       before: before as unknown as Record<string, unknown>,
       after: saved as unknown as Record<string, unknown>,
-      fields: [
-        "startDate",
-        "endDate",
-        "monthlyAmount",
-        "overageRate",
-        "standardRate",
-        "lastRenewedAt",
-      ],
+      fields: ["startDate", "endDate", "monthlyAmount", "lastRenewedAt"],
     });
     await audit({
       action: "AGREEMENT_UPDATED",
@@ -485,7 +476,10 @@ export async function applyAgreementRenewalAction(
       ok: true,
       message:
         `Renewed at +${percent}% through ${newEndDate.toISOString().slice(0, 10)}.` +
-        (moved ? ` ${moved}.` : " No prices were set, so only the term moved."),
+        (moved
+          ? ` ${moved}.`
+          : " This agreement has no recurring fee, so only the term moved — hourly rates are not"
+            + " changed by a renewal."),
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };

@@ -12,6 +12,8 @@ import { formatCurrency } from "@/lib/utils";
  * Applying is a button rather than something the app does on the renewal date.
  * A renewal raises what a client pays; doing that unattended is the same class of
  * mistake as pushing an invoice nobody approved.
+ *
+ * Only the recurring fee moves — hourly rates are repriced on their own schedule.
  */
 export function RenewalCard({
   agreementId,
@@ -67,7 +69,7 @@ export function RenewalCard({
       {changes.length > 0 ? (
         <div>
           <p className="mb-1 text-xs text-muted-foreground">
-            On renewal{newEndDate ? `, through ${newEndDate}` : ""}:
+            On renewal{newEndDate ? `, through ${newEndDate}` : ""} — the recurring fee only:
           </p>
           <ul className="divide-y rounded-md border text-sm">
             {changes.map((c) => (
@@ -91,7 +93,8 @@ export function RenewalCard({
         <p className="text-sm text-muted-foreground">
           {percent === 0
             ? "The increase is set to 0%, so renewing would only move the term."
-            : "This agreement has no amount or rates set, so there is nothing for the uplift to raise."}
+            : "This agreement has no recurring fee, so renewing only moves the term. The uplift " +
+              "applies to the recurring amount; hourly rates are not changed by a renewal."}
         </p>
       )}
 

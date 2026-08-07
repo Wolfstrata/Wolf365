@@ -18,6 +18,7 @@ export interface RenewableAgreement {
   /** "MONTHLY" | "YEARLY" — decides what the annual delta multiplies by. */
   billingFrequency: string | null;
   monthlyAmount: number | null;
+  /** Read for context only — the uplift does not move hourly rates. See FIELDS. */
   overageRate: number | null;
   standardRate: number | null;
 }
@@ -106,7 +107,7 @@ export interface RenewalPreview {
   /** Already renewed for this term — applying again would double the increase. */
   alreadyRenewed: boolean;
   changes: {
-    field: "monthlyAmount" | "overageRate" | "standardRate";
+    field: "monthlyAmount";
     label: string;
     from: number;
     to: number;
@@ -115,20 +116,24 @@ export interface RenewalPreview {
   annualDelta: number | null;
 }
 
+/**
+ * What the uplift moves: the recurring fee, and only the recurring fee.
+ *
+ * Hourly rates are deliberately left alone. A rate is what the work is worth and
+ * gets repriced on its own schedule; the renewal uplift is an escalator on the
+ * contracted subscription. Raising both at renewal would compound one decision
+ * into two price rises the client did not agree to.
+ */
 const FIELDS: {
   field: RenewalPreview["changes"][number]["field"];
   label: string;
   of: (a: RenewableAgreement) => number | null;
-}[] = [
-  { field: "monthlyAmount", label: "Recurring amount", of: (a) => a.monthlyAmount },
-  { field: "overageRate", label: "Overage rate", of: (a) => a.overageRate },
-  { field: "standardRate", label: "Standard rate", of: (a) => a.standardRate },
-];
+}[] = [{ field: "monthlyAmount", label: "Recurring amount", of: (a) => a.monthlyAmount }];
 
 /**
- * What renewing this agreement would do. Reported in full — every price that
- * moves, and by how much — because "15%" on its own does not tell anyone what
- * the client will actually see.
+ * What renewing this agreement would do: the recurring fee's before and after,
+ * and the new term. Reported rather than summarised, because "15%" on its own
+ * does not tell anyone what the client will actually see.
  */
 export function renewalPreview(
   agreement: RenewableAgreement,

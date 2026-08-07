@@ -124,15 +124,28 @@ describe("daysUntilRenewal", () => {
 describe("renewalPreview", () => {
   const asOf = new Date("2026-11-01T00:00:00Z");
 
-  it("lists every price that moves, and by how much", () => {
+  it("raises the recurring fee and nothing else", () => {
     const p = renewalPreview(agreement(), asOf);
     expect(p.applicable).toBe(true);
     expect(p.percent).toBe(15);
     expect(p.changes).toEqual([
       { field: "monthlyAmount", label: "Recurring amount", from: 2_000, to: 2_300 },
-      { field: "overageRate", label: "Overage rate", from: 175, to: 201.25 },
-      { field: "standardRate", label: "Standard rate", from: 150, to: 172.5 },
     ]);
+  });
+
+  it("leaves hourly rates alone — they are repriced on their own schedule", () => {
+    const p = renewalPreview(agreement({ overageRate: 175, standardRate: 150 }), asOf);
+    expect(p.changes.map((c) => c.field)).toEqual(["monthlyAmount"]);
+  });
+
+  it("has nothing to raise on an agreement with rates but no recurring fee", () => {
+    // A block-time agreement: renewing moves the term, not the hourly price.
+    const p = renewalPreview(
+      agreement({ monthlyAmount: null, overageRate: 175, standardRate: 150 }),
+      asOf,
+    );
+    expect(p.changes).toEqual([]);
+    expect(p.renewsOn?.toISOString()).toBe("2026-12-31T00:00:00.000Z");
   });
 
   it("rolls the end date forward by one term", () => {
@@ -198,13 +211,12 @@ describe("renewalPreview", () => {
     expect(p.due).toBe(true);
   });
 
-  it("skips prices the agreement does not carry", () => {
+  it("has no change and no delta when there is no recurring fee at all", () => {
     const p = renewalPreview(
-      agreement({ monthlyAmount: null, overageRate: null, standardRate: 200 }),
+      agreement({ monthlyAmount: null, overageRate: null, standardRate: null }),
       asOf,
     );
-    expect(p.changes).toHaveLength(1);
-    expect(p.changes[0]!.field).toBe("standardRate");
+    expect(p.changes).toEqual([]);
     expect(p.annualDelta).toBeNull();
   });
 
@@ -214,7 +226,7 @@ describe("renewalPreview", () => {
     expect(p.newEndDate).toBeNull();
     expect(p.due).toBe(false);
     // The uplift is still configured and still previewable.
-    expect(p.changes).toHaveLength(3);
+    expect(p.changes).toHaveLength(1);
   });
 });
 

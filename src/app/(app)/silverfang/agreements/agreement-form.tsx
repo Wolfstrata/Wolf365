@@ -226,9 +226,9 @@ export function AgreementForm({
                 className={`mt-1 ${inputCls}`}
               />
               <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                Applied to the recurring amount and the rates when this agreement renews.
-                Defaults to 15%. Never applied on its own — the renewal is shown for
-                confirmation on the agreement, because it changes what the client pays.
+                Applied to the recurring amount when this agreement renews — hourly rates are
+                not changed. Defaults to 15%. Never applied on its own: the renewal is shown
+                for confirmation, because it changes what the client pays.
               </span>
             </label>
           )}
