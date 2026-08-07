@@ -54,6 +54,8 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       label: "#",
       numeric: true,
       sortValue: (r) => r.number,
+      // Kept as a real link so keyboard and middle-click behave, even though the
+      // whole row now navigates here too.
       render: (r) => (
         <Link href={`/silverfang/tickets/${r.id}`} className="font-medium text-primary hover:underline">
           {r.number}
@@ -64,11 +66,7 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       key: "summary",
       label: "Summary",
       sortValue: (r) => r.summary.toLowerCase(),
-      render: (r) => (
-        <Link href={`/silverfang/tickets/${r.id}`} className="hover:underline">
-          {r.summary}
-        </Link>
-      ),
+      render: (r) => <span className="font-medium">{r.summary}</span>,
     },
     {
       key: "client",
@@ -135,6 +133,7 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
       rows={rows}
       rowKey={(r) => r.id}
       initialSort={{ key: "number", dir: "desc" }}
+      rowHref={(r) => `/silverfang/tickets/${r.id}`}
       rowClassName={(r) =>
         r.slaBreached && !r.statusIsClosed
           ? "bg-danger/5"

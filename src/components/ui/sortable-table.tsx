@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ export function SortableTable<Row>({
   rowKey,
   initialSort,
   rowClassName,
+  rowHref,
   emptyMessage = "Nothing to show.",
 }: {
   columns: SortColumn<Row>[];
@@ -51,8 +53,20 @@ export function SortableTable<Row>({
   /** Column key to sort by initially, and its direction. */
   initialSort?: { key: string; dir: "asc" | "desc" };
   rowClassName?: (row: Row) => string | undefined;
+  /**
+   * Makes the whole row navigate, not just the cell that happens to hold a link.
+   * Clicking any dead space in the row goes here. Return null for a row with no
+   * destination.
+   *
+   * Links and controls inside cells keep working: the handler ignores clicks that
+   * originated on one, so a cell linking somewhere more specific (a client, say)
+   * still wins over the row. That check is done on the event target rather than by
+   * asking every column to stop propagation, so a new column cannot forget to.
+   */
+  rowHref?: (row: Row) => string | null;
   emptyMessage?: string;
 }) {
+  const router = useRouter();
   const [sortKey, setSortKey] = useState<string | null>(initialSort?.key ?? null);
   const [dir, setDir] = useState<"asc" | "desc">(initialSort?.dir ?? "asc");
 
@@ -118,15 +132,60 @@ export function SortableTable<Row>({
               </td>
             </tr>
           ) : (
-            sorted.map((row, i) => (
-              <tr key={rowKey(row, i)} className={cn("border-t hover:bg-accent/40", rowClassName?.(row))}>
-                {columns.map((c) => (
-                  <td key={c.key} className={cn("px-3 py-2 align-top", c.numeric && "text-right tabular-nums")}>
-                    {c.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))
+            sorted.map((row, i) => {
+              const href = rowHref?.(row) ?? null;
+              const navigate = (e: { metaKey: boolean; ctrlKey: boolean }) => {
+                if (!href) return;
+                // Honour the usual "open in a new tab" modifiers.
+                if (e.metaKey || e.ctrlKey) window.open(href, "_blank", "noopener");
+                else router.push(href);
+              };
+              return (
+                <tr
+                  key={rowKey(row, i)}
+                  className={cn(
+                    "border-t hover:bg-accent/40",
+                    href && "cursor-pointer",
+                    rowClassName?.(row),
+                  )}
+                  onClick={
+                    href
+                      ? (e) => {
+                          // A click that landed on something interactive belongs to
+                          // that thing, not to the row.
+                          if (
+                            (e.target as HTMLElement).closest(
+                              "a,button,input,select,textarea,label,[role=button]",
+                            )
+                          ) {
+                            return;
+                          }
+                          navigate(e);
+                        }
+                      : undefined
+                  }
+                  // Keyboard users reach the row itself, not only the link inside
+                  // it, so the row is as usable as the pointer makes it look.
+                  tabIndex={href ? 0 : undefined}
+                  onKeyDown={
+                    href
+                      ? (e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          if (e.target !== e.currentTarget) return;
+                          e.preventDefault();
+                          navigate(e);
+                        }
+                      : undefined
+                  }
+                >
+                  {columns.map((c) => (
+                    <td key={c.key} className={cn("px-3 py-2 align-top", c.numeric && "text-right tabular-nums")}>
+                      {c.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
