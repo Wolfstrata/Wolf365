@@ -796,12 +796,20 @@ model SuperOpsTicket {
   raw              Json?
   lastSyncedAt     DateTime @default(now())
 
+  /// When this ticket's conversation was last asked for — successfully. SuperOps
+  /// caps API calls per minute and answers the overflow with a generic error, so
+  /// the note mirror has to run in chunks; without a mark of what has already
+  /// been checked, every re-run redoes the same first hundred and never reaches
+  /// the rest. A ticket updated since its last check is asked again.
+  notesCheckedAt   DateTime?
+
   worklogs SuperOpsWorklog[]
   notes    SuperOpsTicketNote[]
 
   @@index([superOpsClientId])
   @@index([updatedTime])
   @@index([status])
+  @@index([notesCheckedAt])
 }
 
 // SuperOps worklog / timesheet entry. Child of a ticket (and denormalized client).

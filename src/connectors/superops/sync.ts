@@ -1251,6 +1251,23 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
  * a hardcoded name that does not exist fails the whole query. The first one this
  * tenant actually exposes is used.
  */
+/**
+ * Milliseconds between per-ticket conversation calls.
+ *
+ * SuperOps allows 100 requests a minute; 700ms paces us to ~85, leaving headroom
+ * for the introspection and probe calls the same run makes. Even pacing rather
+ * than a burst-then-wait bucket: the same total time, but steady visible progress
+ * and no minute-long stall in the middle of a run.
+ */
+const NOTE_CALL_INTERVAL_MS = 700;
+
+/**
+ * Tickets asked about per run. At the pace above this is a little under a minute
+ * of calls, comfortably inside the function timeout, and the caller is told how
+ * many are left so it can be pressed again.
+ */
+const NOTE_TICKETS_PER_RUN = 70;
+
 const NOTE_QUERY_CANDIDATES = [
   "getTicketConversation",
   "getConversationList",
@@ -1415,6 +1432,11 @@ export interface NoteSyncResult {
   unparsedRecords: number;
   /** Tickets the query answered successfully with no conversation records. */
   emptyTickets: number;
+  /**
+   * Tickets still waiting to be asked about — the run is bounded by SuperOps'
+   * rate limit, so "press again to continue" is the honest report, not "done".
+   */
+  remaining: number;
   error?: string;
 }
 
@@ -1442,7 +1464,7 @@ export async function syncSuperOpsTicketNotes(
   ctx: SuperOpsCtx,
   opts: { maxTickets?: number } = {},
 ): Promise<NoteSyncResult> {
-  const maxTickets = opts.maxTickets ?? 500;
+  const maxTickets = opts.maxTickets ?? NOTE_TICKETS_PER_RUN;
   const result: NoteSyncResult = {
     notes: 0,
     ticketsScanned: 0,
@@ -1452,15 +1474,30 @@ export async function syncSuperOpsTicketNotes(
     failedTickets: 0,
     unparsedRecords: 0,
     emptyTickets: 0,
+    remaining: 0,
     errorSamples: [],
   };
 
   try {
-    const tickets = await prisma.superOpsTicket.findMany({
-      orderBy: { updatedTime: "desc" },
-      take: maxTickets,
-      select: { id: true, superOpsId: true, raw: true },
-    });
+    // Only tickets not yet checked, or changed since they were. Without this a
+    // re-run spends the whole minute's quota re-asking the same first hundred
+    // and never reaches the rest — which is exactly what happened.
+    const pending = {
+      OR: [
+        { notesCheckedAt: null },
+        { notesCheckedAt: { lt: prisma.superOpsTicket.fields.updatedTime } },
+      ],
+    };
+    const [tickets, totalPending] = await Promise.all([
+      prisma.superOpsTicket.findMany({
+        where: pending,
+        orderBy: { updatedTime: "desc" },
+        take: maxTickets,
+        select: { id: true, superOpsId: true, raw: true },
+      }),
+      prisma.superOpsTicket.count({ where: pending }),
+    ]);
+    result.remaining = Math.max(0, totalPending - tickets.length);
     if (tickets.length === 0) return result;
 
     // Path 1: whatever is already in the stored ticket JSON.
@@ -1477,6 +1514,8 @@ export async function syncSuperOpsTicketNotes(
         result.notes += 1;
         result.fromEmbedded += 1;
       }
+      // Cost no API call, so it is done — mark it and move on.
+      await markChecked(ticket.id);
     }
 
     if (needFetch.length === 0) return result;
@@ -1500,7 +1539,14 @@ export async function syncSuperOpsTicketNotes(
     }
     const { query, buildVars } = resolved.call;
 
-    for (const ticket of needFetch) {
+    for (const [index, ticket] of needFetch.entries()) {
+      // Paced, not fired as fast as the network allows. SuperOps caps calls per
+      // minute and answers the overflow with an HTTP 200 carrying a generic
+      // DataFetchingException — not a 429 — so connectorFetch's Retry-After
+      // handling never sees it, and 262 calls at ~60ms each looked to SuperOps
+      // like ten times its limit.
+      if (index > 0) await sleep(NOTE_CALL_INTERVAL_MS);
+
       const res = await superOpsGraphQL(
         ctx,
         "sync_ticket_notes",
@@ -1509,10 +1555,11 @@ export async function syncSuperOpsTicketNotes(
       );
       // One ticket failing must not abort the run — a migration of thousands
       // cannot be held up by a single unreadable record — but it is counted and
-      // the first message kept. Skipping quietly is how 262 failures came to read
-      // as "no conversations".
+      // the message kept, and it is *not* marked checked, so the next run retries
+      // it. Skipping quietly is how 262 failures came to read as "no conversations".
       if (!res.ok) {
         result.failedTickets += 1;
+        result.remaining += 1;
         const described = describeGraphQLErrors(res.errors) || `HTTP ${res.status}`;
         if (!result.firstError) result.firstError = described;
         if (result.errorSamples.length < 3 && !result.errorSamples.includes(described)) {
@@ -1520,6 +1567,8 @@ export async function syncSuperOpsTicketNotes(
         }
         continue;
       }
+      // Answered: this ticket is done whether or not it had anything to say.
+      await markChecked(ticket.id);
       const records = firstObjectArray(res.data) ?? [];
       if (records.length === 0) {
         result.emptyTickets += 1;
@@ -1544,6 +1593,16 @@ export async function syncSuperOpsTicketNotes(
 
   return result;
 }
+
+/** Record that this ticket's conversation has been asked for and answered. */
+async function markChecked(ticketId: string): Promise<void> {
+  await prisma.superOpsTicket.update({
+    where: { id: ticketId },
+    data: { notesCheckedAt: new Date() },
+  });
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Upsert one mirrored note, keyed on its SuperOps id. */
 async function storeNote(

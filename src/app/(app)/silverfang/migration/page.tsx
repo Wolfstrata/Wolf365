@@ -20,6 +20,10 @@ import { CutoverForm, NoteImportForm, NoteSyncForm } from "./cutover-form";
 import { Step, StageHeading } from "./runbook";
 
 export const dynamic = "force-dynamic";
+// The conversation mirror paces itself against SuperOps' per-minute cap, so a
+// run takes the better part of a minute. The default 15s would kill it midway
+// and lose the work of every ticket after the cut.
+export const maxDuration = 300;
 
 /**
  * The SuperOps → SilverFang migration: every step in the order it has to happen,
@@ -136,7 +140,7 @@ export default async function MigrationPage() {
           <Step
             n={3}
             title="Conversations"
-            detail="Reads history already embedded in the synced ticket data first, which costs no extra API call, then falls back to a per-ticket query — both its name and how to call it read off your SuperOps schema. A zero here always says which zero it is: no query exposed, calls failing (with what SuperOps said), records it could not read, or tickets that genuinely have none. Only the last is safe to cut over on."
+            detail="Reads history already embedded in the synced ticket data first, which costs no extra API call, then falls back to a per-ticket query — both its name and how to call it read off your SuperOps schema. Bounded and resumable like step 2: SuperOps allows 100 calls a minute, so each run asks about a batch and tells you how many are left. Press until it says every ticket has been checked."
           >
             <NoteSyncForm />
           </Step>

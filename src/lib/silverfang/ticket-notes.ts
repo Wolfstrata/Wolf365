@@ -258,6 +258,8 @@ export interface NoteSyncOutcome {
   errorSamples?: string[];
   unparsedRecords?: number;
   emptyTickets?: number;
+  /** Tickets not yet asked about, because the run is bounded by the rate limit. */
+  remaining?: number;
   error?: string;
 }
 
@@ -338,11 +340,24 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
   }
 
   // Something came across. Say what, and what did not.
-  const parts = [`${entries} mirrored from ${r.ticketsScanned} ticket(s)`];
+  const parts = [`${entries} mirrored from ${r.ticketsScanned} ticket(s) this run`];
   if (r.fromEmbedded > 0) {
     parts.push(`${r.fromEmbedded} already embedded in the synced ticket data`);
   }
   if (r.queryUsed) parts.push(`the rest via ${r.queryUsed}`);
+
+  // More to do is not a failure — SuperOps caps calls per minute, so the run is
+  // deliberately bounded. Saying "press again" is the honest report; calling it
+  // done would be the dangerous one.
+  const remaining = r.remaining ?? 0;
+  if (remaining > 0) {
+    const note = failed > 0 ? ` ${failed} of them were refused: ${why}.` : "";
+    return {
+      ok: false,
+      message: `${parts.join(", ")}. ${remaining} ticket(s) still to check —${note} press again to continue.`,
+    };
+  }
+
   const lost: string[] = [];
   if (failed > 0) lost.push(`${failed} ticket(s) failed: ${why}`);
   if (unparsed > 0) lost.push(`${unparsed} record(s) were unreadable`);
@@ -352,6 +367,8 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
     message:
       parts.join(", ") +
       "." +
-      (lost.length > 0 ? ` Incomplete — ${lost.join("; ")}.` : " Import them below."),
+      (lost.length > 0
+        ? ` Incomplete — ${lost.join("; ")}.`
+        : " Every ticket has been checked. Import them below."),
   };
 }

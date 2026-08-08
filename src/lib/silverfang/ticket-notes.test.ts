@@ -239,3 +239,49 @@ describe("describeNoteSync", () => {
     );
   });
 });
+
+describe("describeNoteSync — bounded runs", () => {
+  const base = {
+    notes: 60,
+    ticketsScanned: 70,
+    fromEmbedded: 0,
+    queryUsed: "getTicketNoteList",
+  };
+
+  it("asks to be pressed again rather than claiming completion", () => {
+    // The run is capped by SuperOps' rate limit, so more-to-do is the normal
+    // case, not a failure — but it must never read as done.
+    const r = describeNoteSync({ ...base, remaining: 192 });
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("192 ticket(s) still to check");
+    expect(r.message).toContain("press again to continue");
+    expect(r.message).not.toContain("Import them below");
+  });
+
+  it("names refusals alongside the remaining count", () => {
+    const r = describeNoteSync({
+      ...base,
+      remaining: 192,
+      failedTickets: 10,
+      errorSamples: ["classification=DataFetchingException"],
+    });
+    expect(r.message).toContain("10 of them were refused");
+    expect(r.message).toContain("DataFetchingException");
+  });
+
+  it("only says every ticket is checked when nothing is left", () => {
+    const r = describeNoteSync({ ...base, remaining: 0 });
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain("Every ticket has been checked");
+  });
+
+  it("shows distinct causes rather than repeating the first", () => {
+    const r = describeNoteSync({
+      ...base,
+      notes: 0,
+      failedTickets: 145,
+      errorSamples: ["classification=DataFetchingException", "path=getTicketNoteList"],
+    });
+    expect(r.message).toContain("DataFetchingException / path=getTicketNoteList");
+  });
+});

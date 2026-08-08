@@ -1148,6 +1148,7 @@ export async function syncSuperOpsNotesAction(
         // as the page reloads, and this is the line that says why nothing came.
         firstError: result.firstError,
         errorSamples: result.errorSamples,
+        remaining: result.remaining,
       },
     });
     revalidatePath("/silverfang/migration");
