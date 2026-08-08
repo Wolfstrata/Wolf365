@@ -136,7 +136,7 @@ export default async function MigrationPage() {
           <Step
             n={3}
             title="Conversations"
-            detail="Reads history already embedded in the synced ticket data first, which costs no extra API call, then falls back to a per-ticket query discovered by introspecting your SuperOps schema. If your tenant exposes neither it says so — that is different from your tickets having no history, and worth knowing before you cancel."
+            detail="Reads history already embedded in the synced ticket data first, which costs no extra API call, then falls back to a per-ticket query — both its name and how to call it read off your SuperOps schema. A zero here always says which zero it is: no query exposed, calls failing (with what SuperOps said), records it could not read, or tickets that genuinely have none. Only the last is safe to cut over on."
           >
             <NoteSyncForm />
           </Step>

@@ -6,6 +6,7 @@ import {
   describeGraphQLErrors,
   introspectTypeFields,
   introspectQueryReturnType,
+  introspectQueryArgs,
   introspectFieldType,
   introspectScalarFieldNames,
   introspectTypeFieldsDetailed,
@@ -27,6 +28,7 @@ import {
   parseContract,
   parseTicket,
   parseWorklog,
+  pickTicketIdArg,
   type Obj,
 } from "@/connectors/superops/parse";
 
@@ -1274,6 +1276,16 @@ export interface NoteSyncResult {
   fromEmbedded: number;
   /** The discovered query name, or null when this tenant exposes none. */
   queryUsed: string | null;
+  /** How the query was called, e.g. `ticketId: ID!`. Null when it took no argument. */
+  argUsed: string | null;
+  /** Tickets whose conversation query returned an error. Never silently dropped. */
+  failedTickets: number;
+  /** The first such error, verbatim from SuperOps, so the shape can be fixed. */
+  firstError?: string;
+  /** Records the query returned that `parseNote` could not make sense of. */
+  unparsedRecords: number;
+  /** Tickets the query answered successfully with no conversation records. */
+  emptyTickets: number;
   error?: string;
 }
 
@@ -1288,10 +1300,14 @@ export interface NoteSyncResult {
  *  2. **Fetched.** For tenants where it is not embedded, the conversation query is
  *     discovered by introspection and called per ticket.
  *
- * When neither yields anything the result says so — `queryUsed: null` with zero
- * notes is "this tenant exposes no conversation API", which is a different problem
- * from "these tickets have no conversation", and the caller reports the difference
- * rather than showing a silent zero.
+ * Every ticket is accounted for. A zero here is only ever one of: this tenant
+ * exposes no conversation API (`queryUsed: null`), we could not work out how to
+ * call the one it does (`argUsed: null`), the calls failed (`failedTickets` with
+ * `firstError`), the records made no sense (`unparsedRecords`), or the tickets
+ * genuinely have no history (`emptyTickets`). Those are five different problems
+ * with five different fixes, and a bare "0 mirrored" is indistinguishable from
+ * success — which, before a cutover that ends the API, is the most expensive kind
+ * of wrong.
  */
 export async function syncSuperOpsTicketNotes(
   ctx: SuperOpsCtx,
@@ -1303,6 +1319,10 @@ export async function syncSuperOpsTicketNotes(
     ticketsScanned: 0,
     fromEmbedded: 0,
     queryUsed: null,
+    argUsed: null,
+    failedTickets: 0,
+    unparsedRecords: 0,
+    emptyTickets: 0,
   };
 
   try {
@@ -1337,8 +1357,24 @@ export async function syncSuperOpsTicketNotes(
     result.queryUsed = queryName;
     if (!queryName) return result;
 
+    // How to call it. The name being present says nothing about the argument it
+    // wants, and a wrong argument fails every ticket identically.
+    const args = await introspectQueryArgs(ctx, queryName);
+    const idArg = args ? pickTicketIdArg(args) : null;
+    if (args && args.some((a) => a.required) && !idArg) {
+      result.error =
+        `Found ${queryName} but could not tell which argument takes the ticket id ` +
+        `(it accepts: ${args.map((a) => `${a.name}: ${a.signature}`).join(", ") || "nothing"}). ` +
+        `Nothing was mirrored.`;
+      return result;
+    }
+    result.argUsed = idArg ? `${idArg.name}: ${idArg.signature}` : null;
+
     const returnType = await introspectQueryReturnType(ctx, queryName);
-    if (!returnType) return result;
+    if (!returnType) {
+      result.error = `Could not introspect the return type of ${queryName}, so no selection could be built.`;
+      return result;
+    }
     // The collection field on the return type — its name varies with the query.
     const detail = (await introspectTypeFieldsDetailed(ctx, returnType)) ?? [];
     const listField = detail.find(
@@ -1346,27 +1382,49 @@ export async function syncSuperOpsTicketNotes(
     );
     const elementType = listField?.base.name ?? returnType;
     const selection = await buildTypeSelection(ctx, elementType, 1, new Set([elementType]));
-    if (!selection.trim()) return result;
+    if (!selection.trim()) {
+      result.error = `${queryName} returns ${elementType}, which exposes no readable fields.`;
+      return result;
+    }
 
-    const wrapped = listField
-      ? `${listField.name} { ${selection} }`
-      : selection;
-    const query = `query ($id: ID!) { ${queryName}(ticketId: $id) { ${wrapped} } }`;
+    const wrapped = listField ? `${listField.name} { ${selection} }` : selection;
+    const query = idArg
+      ? `query ($id: ${idArg.signature}) { ${queryName}(${idArg.name}: $id) { ${wrapped} } }`
+      : `query { ${queryName} { ${wrapped} } }`;
 
     for (const ticket of needFetch) {
-      const res = await superOpsGraphQL(ctx, "sync_ticket_notes", query, {
-        id: ticket.superOpsId,
-      });
-      // One ticket failing must not abort the run: a migration of thousands
-      // cannot be held up by a single unreadable record.
-      if (!res.ok) continue;
+      const res = await superOpsGraphQL(
+        ctx,
+        "sync_ticket_notes",
+        query,
+        idArg ? { id: ticket.superOpsId } : {},
+      );
+      // One ticket failing must not abort the run — a migration of thousands
+      // cannot be held up by a single unreadable record — but it is counted and
+      // the first message kept. Skipping quietly is how 262 failures came to read
+      // as "no conversations".
+      if (!res.ok) {
+        result.failedTickets += 1;
+        if (!result.firstError) {
+          result.firstError =
+            describeGraphQLErrors(res.errors) || `HTTP ${res.status}`;
+        }
+        continue;
+      }
       const records = firstObjectArray(res.data) ?? [];
+      if (records.length === 0) {
+        result.emptyTickets += 1;
+        continue;
+      }
       // A plain loop, not forEach: an async callback there is not awaited, so the
       // writes would race the counter and the function would return before they
       // landed.
       for (const [i, raw] of records.entries()) {
         const parsed = parseNote(raw, `${ticket.superOpsId}:${i}`);
-        if (!parsed) continue;
+        if (!parsed) {
+          result.unparsedRecords += 1;
+          continue;
+        }
         await storeNote(ticket.id, parsed, raw);
         result.notes += 1;
       }

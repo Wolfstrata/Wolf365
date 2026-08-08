@@ -143,6 +143,59 @@ export async function introspectQueryReturnType(
   return f ? unwrapType(f.type).name : null;
 }
 
+export interface IntrospectedArg {
+  name: string;
+  /** The type as it must be written in a variable declaration, e.g. `ID!`, `String`. */
+  signature: string;
+  /** The underlying named type, wrappers removed. */
+  baseName: string | null;
+  kind: string;
+  required: boolean;
+}
+
+/** Render a type reference back to GraphQL syntax, so a variable can declare it. */
+function renderType(t: TypeRef | null | undefined): string {
+  if (!t) return "";
+  if (t.kind === "NON_NULL") return `${renderType(t.ofType)}!`;
+  if (t.kind === "LIST") return `[${renderType(t.ofType)}]`;
+  return t.name ?? "";
+}
+
+/**
+ * The arguments a top-level query accepts, with their exact types.
+ *
+ * Needed because a query's *name* being present says nothing about how it wants
+ * to be called. Guessing `(ticketId: ID!)` against a tenant that expects
+ * `(id: String!)` fails every single call, and a per-record loop that skips
+ * failures turns that into a silent zero. Read the schema instead.
+ */
+export async function introspectQueryArgs(
+  ctx: SuperOpsCtx,
+  queryName: string,
+): Promise<IntrospectedArg[] | null> {
+  const q = `query { __schema { queryType { fields { name args { name type { ${TYPE_REF_FRAGMENT} } } } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_query_args", q, {});
+  const fields = (
+    res.data as {
+      __schema?: { queryType?: { fields?: { name: string; args?: IntrospectedField[] }[] } };
+    } | null
+  )?.__schema?.queryType?.fields;
+  if (!res.ok || !Array.isArray(fields)) return null;
+  const field = fields.find((f) => f.name === queryName);
+  if (!field) return null;
+  return (field.args ?? []).map((a) => {
+    const base = unwrapType(a.type);
+    const signature = renderType(a.type);
+    return {
+      name: a.name,
+      signature,
+      baseName: base.name,
+      kind: base.kind,
+      required: signature.endsWith("!"),
+    };
+  });
+}
+
 /** The element type name of a wrapper field (e.g. ClientList.clients -> Client). */
 export async function introspectFieldType(
   ctx: SuperOpsCtx,

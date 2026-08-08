@@ -287,3 +287,41 @@ export function parseWorklog(raw: Obj): ParsedWorklog | null {
     entryTime: pickDate(raw, ["billDateTime", "entryTime", "createdTime", "date", "loggedTime", "startTime"]),
   };
 }
+
+/**
+ * Which argument of a conversation query takes the ticket id.
+ *
+ * A schema-discovered query name says nothing about how it wants to be called.
+ * `getTicketConversation(ticketId: ID!)` was an assumption, and against a tenant
+ * that names the argument something else it fails on every ticket — which a loop
+ * that skips failures reports as "no conversations found". So the argument is
+ * chosen from what the schema actually declares.
+ *
+ * Preference order: a name that mentions the ticket explicitly, then a bare id,
+ * then the sole required argument whatever it is called. Anything ambiguous
+ * returns null so the caller can say it could not work out how to call the query,
+ * rather than guessing and reporting the failure as an empty history.
+ */
+export function pickTicketIdArg<T extends { name: string; required: boolean }>(
+  args: T[],
+): T | null {
+  if (args.length === 0) return null;
+  const named = (re: RegExp) => args.filter((a) => re.test(a.name));
+
+  // "ticketId", "ticket_id", "ticketDisplayId" — unambiguous when there is one.
+  const ticketish = named(/ticket/i);
+  if (ticketish.length === 1) return ticketish[0]!;
+  if (ticketish.length > 1) {
+    // Prefer the plain id over a display/reference variant: the stored SuperOps
+    // id is what we hold, and a display id we do not have would fetch nothing.
+    const plain = ticketish.filter((a) => /^ticket_?id$/i.test(a.name));
+    if (plain.length === 1) return plain[0]!;
+    return null;
+  }
+
+  const idish = named(/^id$/i);
+  if (idish.length === 1) return idish[0]!;
+
+  const required = args.filter((a) => a.required);
+  return required.length === 1 ? required[0]! : null;
+}

@@ -9,6 +9,7 @@ import {
   parseAsset,
   parseContract,
   parseTicket,
+  pickTicketIdArg,
   parseWorklog,
 } from "@/connectors/superops/parse";
 
@@ -131,5 +132,39 @@ describe("entity parsers", () => {
       entryTime: "2026-07-01T11:00:00Z",
     });
     expect(w).toMatchObject({ superOpsId: "w1", ticketId: "t1", accountId: "413704", minutes: 60, billable: true });
+  });
+});
+
+describe("pickTicketIdArg", () => {
+  const arg = (name: string, required = true) => ({ name, required });
+
+  it("picks the one argument that mentions the ticket", () => {
+    expect(pickTicketIdArg([arg("ticketId")])?.name).toBe("ticketId");
+    expect(pickTicketIdArg([arg("ticket_id"), arg("limit", false)])?.name).toBe("ticket_id");
+  });
+
+  it("prefers the plain ticket id over a display variant", () => {
+    // We hold the SuperOps id, not the display id — fetching by a value we do
+    // not have would return nothing and look like an empty history.
+    expect(
+      pickTicketIdArg([arg("ticketDisplayId"), arg("ticketId")])?.name,
+    ).toBe("ticketId");
+  });
+
+  it("falls back to a bare id, then to the sole required argument", () => {
+    expect(pickTicketIdArg([arg("id"), arg("pageSize", false)])?.name).toBe("id");
+    expect(pickTicketIdArg([arg("reference"), arg("verbose", false)])?.name).toBe("reference");
+  });
+
+  it("refuses to guess when the choice is ambiguous", () => {
+    // Two equally ticket-ish names, or two required arguments: guessing wrong
+    // fails every call, and a skipped failure reads as "no history".
+    expect(pickTicketIdArg([arg("ticketRef"), arg("ticketKey")])).toBeNull();
+    expect(pickTicketIdArg([arg("alpha"), arg("beta")])).toBeNull();
+    expect(pickTicketIdArg([])).toBeNull();
+  });
+
+  it("ignores optional arguments when looking for the sole required one", () => {
+    expect(pickTicketIdArg([arg("a", false), arg("b", false)])).toBeNull();
   });
 });

@@ -244,3 +244,106 @@ export function isInternalNote(note: ParsedNote): boolean {
   if (note.kind === "system") return true;
   return note.isPrivate ?? true;
 }
+
+/** The countable outcome of one conversation-mirror run. */
+export interface NoteSyncOutcome {
+  notes: number;
+  ticketsScanned: number;
+  fromEmbedded: number;
+  queryUsed: string | null;
+  argUsed?: string | null;
+  failedTickets?: number;
+  firstError?: string;
+  unparsedRecords?: number;
+  emptyTickets?: number;
+  error?: string;
+}
+
+/**
+ * Turn a mirror run into an honest sentence.
+ *
+ * The rule this exists to enforce: **zero notes is never reported as success.**
+ * A run that called 262 tickets and got 262 errors previously read "0 conversation
+ * entries mirrored" in success green, which is indistinguishable from 262 tickets
+ * that genuinely have no history. One of those means fix the query; the other
+ * means carry on and cancel the subscription. Getting them confused loses the
+ * history permanently, because the API is gone by the time anyone notices.
+ *
+ * So every zero says which zero it is, and every partial says what it lost.
+ */
+export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: string } {
+  const failed = r.failedTickets ?? 0;
+  const unparsed = r.unparsedRecords ?? 0;
+  const entries = `${r.notes} conversation entr${r.notes === 1 ? "y" : "ies"}`;
+
+  if (r.error) {
+    return { ok: false, message: `${entries} mirrored. ${r.error}` };
+  }
+
+  if (r.ticketsScanned === 0) {
+    return {
+      ok: false,
+      message: "No SuperOps tickets are mirrored yet — run the ticket sync first.",
+    };
+  }
+
+  // Every call failed: the query exists but we are calling it wrongly.
+  if (failed > 0 && r.notes === 0) {
+    return {
+      ok: false,
+      message:
+        `Nothing mirrored: all ${failed} conversation call(s) failed` +
+        (r.queryUsed ? ` (${r.queryUsed}` : "") +
+        (r.argUsed ? ` called with ${r.argUsed})` : r.queryUsed ? ")" : "") +
+        `. SuperOps said: ${r.firstError ?? "no message"}. ` +
+        `The ticket history is still in SuperOps — do not cut over.`,
+    };
+  }
+
+  if (r.notes === 0 && r.queryUsed === null) {
+    return {
+      ok: false,
+      message:
+        `Scanned ${r.ticketsScanned} ticket(s): no conversations are embedded in the synced ` +
+        `data, and this tenant exposes no conversation query Wolf365 recognises. The history ` +
+        `is not reachable through the API as configured — do not cut over.`,
+    };
+  }
+
+  if (r.notes === 0 && unparsed > 0) {
+    return {
+      ok: false,
+      message:
+        `Nothing mirrored: ${r.queryUsed} returned ${unparsed} record(s), none of which had a ` +
+        `readable body or author. The shape needs mapping — do not cut over.`,
+    };
+  }
+
+  if (r.notes === 0) {
+    return {
+      ok: false,
+      message:
+        `Scanned ${r.ticketsScanned} ticket(s) via ${r.queryUsed} and every one answered with ` +
+        `no conversation. That may be true, but confirm a ticket you know has replies before ` +
+        `trusting it.`,
+    };
+  }
+
+  // Something came across. Say what, and what did not.
+  const parts = [`${entries} mirrored from ${r.ticketsScanned} ticket(s)`];
+  if (r.fromEmbedded > 0) {
+    parts.push(`${r.fromEmbedded} already embedded in the synced ticket data`);
+  }
+  if (r.queryUsed) parts.push(`the rest via ${r.queryUsed}`);
+  const lost: string[] = [];
+  if (failed > 0) lost.push(`${failed} ticket(s) failed: ${r.firstError ?? "no message"}`);
+  if (unparsed > 0) lost.push(`${unparsed} record(s) were unreadable`);
+
+  return {
+    ok: lost.length === 0,
+    message:
+      parts.join(", ") +
+      "." +
+      (lost.length > 0 ? ` Incomplete — ${lost.join("; ")}.` : " Import them below."),
+  };
+}

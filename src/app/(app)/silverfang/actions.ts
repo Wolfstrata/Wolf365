@@ -26,6 +26,7 @@ import {
   type DefaultAgreementReason,
 } from "@/lib/silverfang/default-agreement";
 import { describeAssignment } from "@/lib/silverfang/assignees";
+import { describeNoteSync } from "@/lib/silverfang/ticket-notes";
 import { SUPEROPS_OFF_MESSAGE, superOpsEnabled } from "@/lib/silverfang/migration-policy";
 import {
   defaultAgreementFor,
@@ -1139,36 +1140,18 @@ export async function syncSuperOpsNotesAction(
         ticketsScanned: result.ticketsScanned,
         fromEmbedded: result.fromEmbedded,
         queryUsed: result.queryUsed,
+        argUsed: result.argUsed,
+        failedTickets: result.failedTickets,
+        unparsedRecords: result.unparsedRecords,
+        emptyTickets: result.emptyTickets,
+        // Recorded on the audit entry too: the message on screen is gone as soon
+        // as the page reloads, and this is the line that says why nothing came.
+        firstError: result.firstError,
       },
     });
     revalidatePath("/silverfang/migration");
-
-    if (result.error) {
-      return { ok: false, message: `Partial: ${result.notes} mirrored. ${result.error}` };
-    }
-    if (result.notes === 0 && result.queryUsed === null && result.ticketsScanned > 0) {
-      // The distinction that matters: nothing found because this tenant exposes no
-      // conversation API, versus nothing found because these tickets have none.
-      return {
-        ok: false,
-        message:
-          `Scanned ${result.ticketsScanned} ticket(s) and found no conversations embedded in ` +
-          `the synced data, and this SuperOps tenant exposes no conversation query that ` +
-          `Wolf365 recognises. Nothing can be mirrored — the ticket history is not reachable ` +
-          `through the API as configured.`,
-      };
-    }
-    return {
-      ok: true,
-      message:
-        `${result.notes} conversation entr${result.notes === 1 ? "y" : "ies"} mirrored from ` +
-        `${result.ticketsScanned} ticket(s)` +
-        (result.fromEmbedded > 0
-          ? `, ${result.fromEmbedded} of them already embedded in the synced ticket data`
-          : "") +
-        (result.queryUsed ? ` (via ${result.queryUsed})` : "") +
-        ". Import them below.",
-    };
+    // One describer, unit-tested, whose contract is that zero is never success.
+    return describeNoteSync(result);
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }

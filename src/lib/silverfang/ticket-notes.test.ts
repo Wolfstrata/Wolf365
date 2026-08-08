@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyNote,
+  describeNoteSync,
   extractEmbeddedNotes,
   isInternalNote,
   parseNote,
@@ -158,5 +159,83 @@ describe("extractEmbeddedNotes", () => {
 
   it("ignores a key that is not an array", () => {
     expect(extractEmbeddedNotes({ notes: "some string" }, "T1")).toEqual([]);
+  });
+});
+
+describe("describeNoteSync", () => {
+  const base = { notes: 0, ticketsScanned: 262, fromEmbedded: 0, queryUsed: "getTicketConversation" };
+
+  it("never calls a zero a success, however it arose", () => {
+    // The whole point: no combination of inputs yields ok:true with 0 notes.
+    const zeros = [
+      { ...base, failedTickets: 262, firstError: "Unknown argument 'ticketId'" },
+      { ...base, queryUsed: null },
+      { ...base, unparsedRecords: 40 },
+      { ...base, emptyTickets: 262 },
+      { ...base, error: "introspection disabled" },
+      { ...base, ticketsScanned: 0 },
+    ];
+    for (const r of zeros) expect(describeNoteSync(r).ok).toBe(false);
+  });
+
+  it("names the failure and quotes SuperOps when every call errored", () => {
+    const r = describeNoteSync({
+      ...base,
+      failedTickets: 262,
+      argUsed: "ticketId: ID!",
+      firstError: "Unknown argument 'ticketId' on field 'getTicketConversation'",
+    });
+    expect(r.message).toContain("all 262 conversation call(s) failed");
+    expect(r.message).toContain("ticketId: ID!");
+    expect(r.message).toContain("Unknown argument");
+    expect(r.message).toContain("do not cut over");
+  });
+
+  it("distinguishes no-query from no-history from unreadable records", () => {
+    expect(describeNoteSync({ ...base, queryUsed: null }).message).toContain(
+      "exposes no conversation query",
+    );
+    expect(describeNoteSync({ ...base, unparsedRecords: 40 }).message).toContain(
+      "none of which had a readable body",
+    );
+    expect(describeNoteSync({ ...base, emptyTickets: 262 }).message).toContain(
+      "confirm a ticket you know has replies",
+    );
+  });
+
+  it("says so when there are no tickets to scan yet", () => {
+    expect(describeNoteSync({ ...base, ticketsScanned: 0 }).message).toContain(
+      "run the ticket sync first",
+    );
+  });
+
+  it("reports a clean run as success", () => {
+    const r = describeNoteSync({ ...base, notes: 900, fromEmbedded: 120 });
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain("900 conversation entries mirrored from 262 ticket(s)");
+    expect(r.message).toContain("120 already embedded");
+    expect(r.message).toContain("Import them below.");
+  });
+
+  it("refuses to call a partial run a success, and says what was lost", () => {
+    // 900 notes is not "done" when 12 tickets errored — those are the ones that
+    // will be missing after the subscription ends.
+    const r = describeNoteSync({
+      ...base,
+      notes: 900,
+      failedTickets: 12,
+      unparsedRecords: 3,
+      firstError: "HTTP 500",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("Incomplete");
+    expect(r.message).toContain("12 ticket(s) failed: HTTP 500");
+    expect(r.message).toContain("3 record(s) were unreadable");
+  });
+
+  it("uses singular wording for one entry", () => {
+    expect(describeNoteSync({ ...base, notes: 1, queryUsed: null }).message).toContain(
+      "1 conversation entry",
+    );
   });
 });
