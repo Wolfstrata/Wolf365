@@ -5,7 +5,7 @@ import { PageHeader, Card, StatItem, EmptyState } from "@/components/ui/primitiv
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { PawTip } from "@/components/ui/paw-tip";
 import { previewTicketImport } from "@/lib/silverfang/ticket-import-service";
-import { TicketImportForm } from "./import-form";
+import { TicketImportForm, WorklogImportForm } from "./import-form";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +84,7 @@ export default async function TicketImportPage() {
             </Card>
 
             <Card>
+              <h2 className="mb-3 text-sm font-semibold">Step 1 — tickets</h2>
               {preview.noBoard ? (
                 <p className="text-sm text-warning">
                   No active board with statuses exists, so nothing can be created. Run SilverFang
@@ -98,10 +99,29 @@ export default async function TicketImportPage() {
               )}
             </Card>
 
+            <Card>
+              <h2 className="mb-1 text-sm font-semibold">Step 2 — worklogs</h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                SuperOps worklogs become SilverFang time entries on the tickets above. Run it
+                after the ticket import, because a worklog can only land on a ticket that is
+                already here. Keyed on the worklog id, so running it twice adds nothing —
+                duplicated hours would inflate utilisation, draw down a prepaid block twice and
+                reach an invoice.
+              </p>
+              <WorklogImportForm />
+              <p className="mt-3 text-xs text-muted-foreground">
+                Entries arrive as <span className="font-medium">drafts</span>. Approving is what
+                makes time billable, and an import does not make that decision for you. A worklog
+                whose technician matches no Wolf365 user is counted and skipped rather than logged
+                against whoever pressed the button.
+              </p>
+            </Card>
+
             <p className="text-xs text-muted-foreground">
-              What this does <span className="font-medium">not</span> bring across: the ticket
-              body, worklogs and notes. SuperOps&rsquo; description is not mirrored into Wolf365,
-              so there is nothing to copy — this imports the ticket, not its history.
+              Mapped across from SuperOps: subject, description, priority, status, requester,
+              category and sub-category, channel, technician, and the created and resolved dates.
+              Ticket <span className="font-medium">notes and conversations</span> are not imported —
+              the connector does not mirror them, so there is nothing to copy.
             </p>
           </>
         )}

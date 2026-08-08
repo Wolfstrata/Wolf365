@@ -177,7 +177,7 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
   ticketImport: {
     title: "Import tickets from SuperOps",
     body: "Turns synced SuperOps tickets into real SilverFang tickets. Matched by SuperOps ticket id, so re-running finds the same ticket rather than duplicating it. Imported tickets land on Service Desk with priority and status mapped across, and pick up a managed client's agreement so they are not unrated.",
-    todo: "Answer the overwrite question against the preview: No creates only what is missing, Yes also rewrites summary, priority and status on the ones already here. A ticket you have closed is never reopened. The body, worklogs and notes are not imported.",
+    todo: "Two steps, in order: tickets first, then worklogs — a worklog can only land on a ticket that is already here. Answer the overwrite question against the preview; No creates only what is missing. A ticket you have closed is never reopened, and imported time arrives as drafts.",
   },
   unknownSenders: {
     title: "Unrecognised senders",

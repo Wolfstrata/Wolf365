@@ -2004,6 +2004,12 @@ model SfTimeEntry {
   invoicedAt   DateTime?
   qboInvoiceId String?
 
+  /// Provenance for an entry imported from another system (a SuperOps worklog).
+  /// The unique pair is what stops a re-import duplicating hours — the one thing
+  /// on a time entry that must never happen twice.
+  sourceSystem String?
+  externalId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2011,6 +2017,7 @@ model SfTimeEntry {
   billingLines SfBillingLineTimeEntry[]
   calendarLink SfCalendarLink?
 
+  @@unique([sourceSystem, externalId])
   @@index([userId, workDate])
   @@index([ticketId])
   @@index([status, workDate])

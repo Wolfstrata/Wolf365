@@ -5,7 +5,11 @@ import {
   mapPriority,
   matchStatus,
   matchTechnician,
+  extractTicketDetail,
+  htmlToText,
+  mapSource,
   summaryFrom,
+  worklogHours,
   type ImportCounts,
   type StatusOption,
 } from "@/lib/silverfang/ticket-import";
@@ -191,5 +195,129 @@ describe("describeImport", () => {
 
   it("says when the run was truncated", () => {
     expect(describeImport({ ...base, truncated: true }, false)).toContain("run it again");
+  });
+});
+
+describe("htmlToText", () => {
+  it("turns a rich-text description into readable lines", () => {
+    // SuperOps descriptions are usually HTML; storing the markup verbatim would
+    // render as tag soup in the ticket body.
+    const html = "<p>Server is down.</p><p>Tried:<br/>reboot</p>";
+    expect(htmlToText(html)).toBe("Server is down.\n\nTried:\nreboot");
+  });
+
+  it("keeps list items readable", () => {
+    expect(htmlToText("<ul><li>One</li><li>Two</li></ul>")).toBe("• One\n• Two");
+  });
+
+  it("decodes the common entities", () => {
+    expect(htmlToText("Tom &amp; Jerry &lt;test&gt; &quot;x&quot;&nbsp;y")).toBe(
+      'Tom & Jerry <test> "x" y',
+    );
+  });
+
+  it("drops script and style content entirely", () => {
+    expect(htmlToText("<style>p{color:red}</style><p>Hi</p>")).toBe("Hi");
+    expect(htmlToText("<script>alert(1)</script>Hi")).toBe("Hi");
+  });
+
+  it("returns empty for markup with no text", () => {
+    expect(htmlToText("<p></p>")).toBe("");
+  });
+});
+
+describe("mapSource", () => {
+  it("recognises the channels that matter", () => {
+    expect(mapSource("Email")).toBe("EMAIL");
+    expect(mapSource("Inbound Call")).toBe("PHONE");
+    expect(mapSource("RMM Alert")).toBe("ALERT");
+  });
+
+  it("defaults to PORTAL", () => {
+    expect(mapSource("Web Form")).toBe("PORTAL");
+    expect(mapSource(null)).toBe("PORTAL");
+  });
+});
+
+describe("extractTicketDetail", () => {
+  it("reads a flat SuperOps shape", () => {
+    const d = extractTicketDetail({
+      description: "<p>VPN is down</p>",
+      requesterEmail: "Jane@McFaddenBenefits.com",
+      category: "Network",
+      subCategory: "VPN",
+      source: "Email",
+      site: "Head Office",
+      resolvedTime: "2026-08-05T10:00:00Z",
+    });
+    expect(d.description).toBe("VPN is down");
+    // Lower-cased, because that is how the contact blind index is keyed.
+    expect(d.requesterEmail).toBe("jane@mcfaddenbenefits.com");
+    expect(d.category).toBe("Network");
+    expect(d.subCategory).toBe("VPN");
+    expect(d.source).toBe("EMAIL");
+    expect(d.siteName).toBe("Head Office");
+    expect(d.resolvedAt?.toISOString()).toBe("2026-08-05T10:00:00.000Z");
+  });
+
+  it("reads a nested SuperOps shape", () => {
+    // The introspected query returns some fields as objects; which ones varies by
+    // tenant, so both shapes have to work.
+    const d = extractTicketDetail({
+      requester: { name: "Jane Doe", email: "jane@x.com" },
+      category: { name: "Network" },
+      source: { name: "Phone" },
+      site: { name: "Branch" },
+    });
+    expect(d.requesterEmail).toBe("jane@x.com");
+    expect(d.requesterName).toBe("Jane Doe");
+    expect(d.category).toBe("Network");
+    expect(d.source).toBe("PHONE");
+    expect(d.siteName).toBe("Branch");
+  });
+
+  it("accepts epoch timestamps in seconds or millis", () => {
+    expect(extractTicketDetail({ closedTime: 1_754_400_000 }).closedAt?.getUTCFullYear()).toBe(
+      2025,
+    );
+    expect(
+      extractTicketDetail({ closedTime: 1_754_400_000_000 }).closedAt?.getUTCFullYear(),
+    ).toBe(2025);
+  });
+
+  it("ignores a requester value that is not an address", () => {
+    // A bare name in the requester field must not become an email.
+    expect(extractTicketDetail({ requester: "Jane Doe" }).requesterEmail).toBeNull();
+    expect(extractTicketDetail({ requester: "Jane Doe" }).requesterName).toBe("Jane Doe");
+  });
+
+  it("returns all-null for junk rather than throwing", () => {
+    for (const junk of [null, undefined, "string", 42, []]) {
+      const d = extractTicketDetail(junk);
+      expect(d.description).toBeNull();
+      expect(d.requesterEmail).toBeNull();
+      // Source still has a usable default.
+      expect(d.source).toBe("PORTAL");
+    }
+  });
+
+  it("treats a description of only markup as absent", () => {
+    expect(extractTicketDetail({ description: "<p>  </p>" }).description).toBeNull();
+  });
+});
+
+describe("worklogHours", () => {
+  it("converts minutes to hours", () => {
+    expect(worklogHours(90)).toBe(1.5);
+    expect(worklogHours(30)).toBe(0.5);
+    expect(worklogHours(100)).toBe(1.67);
+  });
+
+  it("returns null for nothing worth importing", () => {
+    // A zero-minute worklog is not an hour of work; importing it would add a
+    // meaningless row to somebody's timesheet.
+    expect(worklogHours(0)).toBeNull();
+    expect(worklogHours(null)).toBeNull();
+    expect(worklogHours(-5)).toBeNull();
   });
 });

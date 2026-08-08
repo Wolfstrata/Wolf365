@@ -138,6 +138,170 @@ export function summaryFrom(subject: string | null | undefined, displayId: strin
   return displayId ? `Imported ticket ${displayId}` : "Imported ticket (no subject)";
 }
 
+// ---------------------------------------------------------------------------
+// Reading the synced ticket JSON
+// ---------------------------------------------------------------------------
+
+/**
+ * The connector builds its ticket query by introspecting SuperOps' schema, so the
+ * stored `raw` object holds every scalar SuperOps exposes — description,
+ * requester, category, source, resolution times — under whatever key names that
+ * tenant's schema uses.
+ *
+ * That is why this reads defensively from a list of candidate keys rather than a
+ * fixed shape: the alternative is a mapping that silently returns nothing the day
+ * SuperOps renames a field, and a ticket imported with an empty body looks like a
+ * ticket that never had one.
+ */
+type Raw = Record<string, unknown>;
+
+function isObj(v: unknown): v is Raw {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** First non-empty string at any of these keys. */
+function rawString(obj: Raw, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+/**
+ * A name out of either a string or a nested object — SuperOps returns some fields
+ * flat and some as `{ name }`, and which is which varies by tenant.
+ */
+function rawName(obj: Raw, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (isObj(v)) {
+      const n = rawString(v, ["name", "displayName", "fullName", "label", "title"]);
+      if (n) return n;
+    }
+  }
+  return null;
+}
+
+/** An email out of either a string or a nested requester object. */
+function rawEmail(obj: Raw, keys: string[]): string | null {
+  const looksLikeEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && looksLikeEmail(v.trim())) return v.trim().toLowerCase();
+    if (isObj(v)) {
+      const e = rawString(v, ["email", "emailId", "emailAddress", "primaryEmail"]);
+      if (e && looksLikeEmail(e)) return e.toLowerCase();
+    }
+  }
+  return null;
+}
+
+function rawDate(obj: Raw, keys: string[]): Date | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) {
+      const d = new Date(v);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    if (typeof v === "number" && v > 0) {
+      const d = new Date(v < 1e12 ? v * 1000 : v);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+  return null;
+}
+
+/** Strip HTML to readable text — SuperOps descriptions are often rich text. */
+export function htmlToText(value: string): string {
+  return value
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    // Paragraphs and headings get a blank line, list rows a single break —
+    // otherwise a multi-paragraph description arrives as one wall of text.
+    .replace(/<\/(p|div|h[1-6])>/gi, "\n\n")
+    .replace(/<\/(li|tr)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export type TicketSource = "PORTAL" | "EMAIL" | "PHONE" | "ALERT" | "PROJECT" | "RECURRING";
+
+/** SuperOps channel/source text → SilverFang source. */
+export function mapSource(value: string | null | undefined): TicketSource {
+  const text = (value ?? "").toLowerCase();
+  if (/\b(email|mail)\b/.test(text)) return "EMAIL";
+  if (/\b(phone|call|voice|telephone)\b/.test(text)) return "PHONE";
+  if (/\b(alert|monitor|monitoring|rmm|automation)\b/.test(text)) return "ALERT";
+  // PORTAL is the honest default: it is what "raised in the tool" means, and a
+  // wrong channel is a reporting detail rather than a routing one.
+  return "PORTAL";
+}
+
+export interface TicketDetail {
+  description: string | null;
+  requesterEmail: string | null;
+  requesterName: string | null;
+  category: string | null;
+  subCategory: string | null;
+  source: TicketSource;
+  siteName: string | null;
+  resolvedAt: Date | null;
+  closedAt: Date | null;
+}
+
+/** Everything worth carrying across, read out of the synced JSON. */
+export function extractTicketDetail(raw: unknown): TicketDetail {
+  const obj = isObj(raw) ? raw : {};
+
+  const body = rawString(obj, [
+    "description",
+    "ticketDescription",
+    "content",
+    "body",
+    "requestDescription",
+    "problemDescription",
+    "notes",
+  ]);
+
+  return {
+    description: body ? (htmlToText(body) || null) : null,
+    requesterEmail: rawEmail(obj, [
+      "requester",
+      "requesterEmail",
+      "contact",
+      "contactEmail",
+      "reportedBy",
+      "createdBy",
+      "email",
+    ]),
+    requesterName: rawName(obj, ["requester", "contact", "reportedBy", "requesterName"]),
+    category: rawName(obj, ["category", "ticketCategory", "issueType", "classification"]),
+    subCategory: rawName(obj, ["subCategory", "subcategory", "ticketSubCategory", "issueSubType"]),
+    source: mapSource(rawName(obj, ["source", "channel", "ticketSource", "createdVia", "medium"])),
+    siteName: rawName(obj, ["site", "location", "siteName"]),
+    resolvedAt: rawDate(obj, ["resolvedTime", "resolvedAt", "resolutionTime"]),
+    closedAt: rawDate(obj, ["closedTime", "closedAt", "completedTime"]),
+  };
+}
+
+/** Worklog minutes → hours, rounded to the quarter SilverFang bills in. */
+export function worklogHours(minutes: number | null | undefined): number | null {
+  if (minutes == null || !Number.isFinite(minutes) || minutes <= 0) return null;
+  return Math.round((minutes / 60) * 100) / 100;
+}
+
 export interface ImportCounts {
   /** Source tickets considered. */
   available: number;

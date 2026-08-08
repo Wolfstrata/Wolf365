@@ -271,7 +271,7 @@ export const DOC_SECTIONS: DocSection[] = [
           "Run SilverFang Setup. It creates the three boards with their statuses, the default SLA with business hours, the standard charge codes, and the auto-response templates (switched off).",
           "Import clients and contacts from SuperOps on the Clients page. Safe to re-run: contacts key off their source id, so a second run updates rather than duplicating.",
           "Tag your managed customers from Agreements, which creates a draft managed agreement for each. Drafts cannot bill — fill in the amounts and set them Active.",
-          "Import tickets from SuperOps, from the Tickets page, if you are moving an existing service desk across. It asks whether to overwrite tickets it has imported before; No is the safe answer and creates only what is missing.",
+          "Import tickets from SuperOps, from the Tickets page, if you are moving an existing service desk across. It asks whether to overwrite tickets it has imported before; No is the safe answer and creates only what is missing. Import the worklogs as a second step — they become time entries, as drafts.",
           "Add a mailbox on the Email page if you want tickets to arrive by email, and set its fallback client and start-from date.",
           "Set rate rules so logged time resolves to a price.",
           "Turn on the auto-response rules you want, then the master email switch, then Allow email to client for the clients who should hear from you.",

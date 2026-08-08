@@ -1,8 +1,12 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Download, TriangleAlert } from "lucide-react";
-import { importSuperOpsTicketsAction, type SfActionResult } from "../../actions";
+import { Clock, Download, TriangleAlert } from "lucide-react";
+import {
+  importSuperOpsTicketsAction,
+  importSuperOpsWorklogsAction,
+  type SfActionResult,
+} from "../../actions";
 
 /**
  * The import, and the overwrite question.
@@ -117,6 +121,38 @@ export function TicketImportForm({
           </p>
         )}
       </div>
+    </form>
+  );
+}
+
+/**
+ * Worklogs, as a second and separate step.
+ *
+ * Deliberately not folded into the ticket import: a worklog can only land on a
+ * ticket that is already here, so running them together would silently drop the
+ * hours belonging to whatever the first pass created. Two buttons in the order
+ * they have to happen is clearer than one that half-works.
+ */
+export function WorklogImportForm() {
+  const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
+    importSuperOpsWorklogsAction,
+    null,
+  );
+  return (
+    <form action={action} className="space-y-2">
+      <button
+        type="submit"
+        disabled={pending}
+        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent disabled:opacity-60"
+      >
+        <Clock className={`h-4 w-4 ${pending ? "animate-pulse" : ""}`} />
+        {pending ? "Importing…" : "Import worklogs as time entries"}
+      </button>
+      {result && (
+        <p className={`max-w-xl text-xs ${result.ok ? "text-success" : "text-danger"}`}>
+          {result.message}
+        </p>
+      )}
     </form>
   );
 }

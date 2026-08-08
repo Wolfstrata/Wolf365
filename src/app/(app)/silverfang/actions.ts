@@ -1106,6 +1106,46 @@ export async function importSuperOpsTicketsAction(
 }
 
 /**
+ * Import SuperOps worklogs as time entries against already-imported tickets.
+ *
+ * Separate from the ticket import, and run after it, because a worklog can only
+ * land on a ticket that is already here. Keyed on the worklog's source id, so a
+ * second run adds nothing — duplicated hours are the one outcome an import of
+ * time must never produce.
+ */
+export async function importSuperOpsWorklogsAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const { importSuperOpsWorklogs } = await import(
+      "@/lib/silverfang/ticket-import-service"
+    );
+    const result = await importSuperOpsWorklogs();
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:worklogs-import",
+      metadata: {
+        imported: result.imported,
+        alreadyImported: result.alreadyImported,
+        noTicket: result.noTicket,
+        noTechnician: result.noTechnician,
+        noHours: result.noHours,
+      },
+    });
+    revalidatePath("/silverfang/tickets/import");
+    revalidatePath("/silverfang/time");
+    revalidatePath("/silverfang/timesheets");
+    return { ok: true, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
  * Create contacts for inbound addresses that the domain rules can place.
  *
  * Gated on `silverfang:configure` rather than `tickets:write`: it writes contacts
