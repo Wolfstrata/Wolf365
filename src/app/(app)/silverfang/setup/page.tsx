@@ -190,7 +190,7 @@ export default async function SilverFangSetupPage() {
           <>
             {/* Boards + statuses */}
             <Card>
-              <h2 className="mb-3 text-sm font-semibold">Boards ({boards.length})</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Boards ({boards.length}) <PawTip topic="boardSetup" /></h2>
               {boards.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No boards yet.</p>
               ) : (
@@ -241,7 +241,7 @@ export default async function SilverFangSetupPage() {
 
             {/* SLAs */}
             <Card>
-              <h2 className="mb-3 text-sm font-semibold">SLAs ({slas.length})</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">SLAs ({slas.length}) <PawTip topic="slaSetup" /></h2>
               {slas.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No SLAs yet.</p>
               ) : (
@@ -311,7 +311,7 @@ export default async function SilverFangSetupPage() {
 
             {/* Charge codes */}
             <Card>
-              <h2 className="mb-3 text-sm font-semibold">Charge codes ({chargeCodes.length})</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Charge codes ({chargeCodes.length}) <PawTip topic="chargeCodes" /></h2>
               {chargeCodes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No charge codes yet.</p>
               ) : (
@@ -346,7 +346,7 @@ export default async function SilverFangSetupPage() {
 
             {/* Rate rules */}
             <Card>
-              <h2 className="mb-1 text-sm font-semibold">Rate rules ({rateRules.length})</h2>
+              <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">Rate rules ({rateRules.length}) <PawTip topic="rateRules" /></h2>
               <p className="mb-3 text-xs text-muted-foreground">
                 The most specific active rule wins (agreement+code → agreement → client+code →
                 client → code → global). A fixed rate beats a multiplier; a band-specific rule beats

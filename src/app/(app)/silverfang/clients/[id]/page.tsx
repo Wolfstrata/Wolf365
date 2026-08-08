@@ -144,7 +144,7 @@ export default async function SilverFangClientPage({
 
         {/* Rollup */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Service summary</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Service summary <PawTip topic="serviceSummary" /></h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatItem label="Open tickets" value={openCount} />
             <StatItem label="Total tickets" value={client._count.sfTickets} />
@@ -160,7 +160,7 @@ export default async function SilverFangClientPage({
 
         {/* Profile */}
         <Card>
-          <h2 className="mb-1 text-sm font-semibold">SilverFang profile</h2>
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">SilverFang profile <PawTip topic="clientProfile" /></h2>
           <p className="mb-4 text-xs text-muted-foreground">
             Service-delivery settings for this client. Defaults apply to new tickets.
           </p>
@@ -212,7 +212,7 @@ export default async function SilverFangClientPage({
         {/* Contacts */}
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold">Contacts ({client.sfContacts.length})</h2>
+            <h2 className="flex items-center gap-2 text-sm font-semibold">Contacts ({client.sfContacts.length}) <PawTip topic="clientContacts" /></h2>
             {canWrite && (
               <Link
                 href={withReturnTo(`/silverfang/contacts/new?client=${client.id}`, backHere)}
@@ -370,7 +370,7 @@ export default async function SilverFangClientPage({
         {/* Projects */}
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold">Projects ({client.sfProjects.length})</h2>
+            <h2 className="flex items-center gap-2 text-sm font-semibold">Projects ({client.sfProjects.length}) <PawTip topic="clientProjects" /></h2>
             {canConfigure && (
               <Link
                 href={withReturnTo(`/silverfang/projects/new?client=${client.id}`, backHere)}

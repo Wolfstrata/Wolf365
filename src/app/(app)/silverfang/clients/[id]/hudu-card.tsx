@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PawTip } from "@/components/ui/paw-tip";
 import { BookOpen, ExternalLink, Server, ShieldCheck } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
 import { canAccessRoute } from "@/lib/workspaces";
@@ -31,7 +32,7 @@ export async function HuduCard({ clientId }: { clientId: string }) {
   return (
     <Card>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold">Hudu</h2>
+        <h2 className="text-sm font-semibold">Hudu <PawTip topic="hudu" /></h2>
         {company.huduUrl && (
           <a
             href={company.huduUrl}

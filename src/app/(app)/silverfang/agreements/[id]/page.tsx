@@ -282,7 +282,7 @@ export default async function AgreementDetailPage({
         )}
 
         <Card>
-          <h2 className="mb-4 text-sm font-semibold">Agreement</h2>
+          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold">Agreement <PawTip topic="agreements" /></h2>
           {canEdit ? (
             <AgreementForm
               values={{

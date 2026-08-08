@@ -40,6 +40,9 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Service Reporting", href: "/silverfang/reports", icon: "BarChart3", section: "SilverFang", permission: "time:approve" },
   { label: "Email", href: "/silverfang/email", icon: "Inbox", section: "SilverFang", permission: "silverfang:configure" },
   { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
+  // Last in the section, and readable by anyone who can see a ticket —
+  // documentation only the administrator can open is not documentation.
+  { label: "SilverFang Docs", href: "/silverfang/docs", icon: "BookText", section: "SilverFang", permission: "tickets:read" },
   { label: "TD SYNNEX Clients", href: "/synced/td-synnex", icon: "Boxes", section: "Connector Data", permission: "clients:read" },
   { label: "QBO Clients", href: "/synced/qbo", icon: "BookText", section: "Connector Data", permission: "clients:read" },
   { label: "SuperOps Clients", href: "/synced/superops", icon: "Headset", section: "Connector Data", permission: "clients:read" },

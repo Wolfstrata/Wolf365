@@ -1,4 +1,5 @@
 import { History } from "lucide-react";
+import { PawTip } from "@/components/ui/paw-tip";
 import { LocalTime } from "@/components/ui/local-time";
 import type { ChangeLogRow } from "@/lib/silverfang/change-log";
 
@@ -83,7 +84,7 @@ export function ChangeTrail({
 export function ChangeTrailHeading({ count }: { count: number }) {
   return (
     <h2 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-      <History className="h-4 w-4" /> Change history ({count})
+      <History className="h-4 w-4" /> Change history ({count}) <PawTip topic="changeTrail" />
     </h2>
   );
 }

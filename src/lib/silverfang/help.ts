@@ -37,13 +37,112 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
   },
   myTickets: {
     title: "My Tickets",
-    body: "Only what is assigned to you, in the same priority order as the main queue.",
+    body: "Every ticket you are on, in the same priority order as the main queue. A ticket with several assignees appears here for all of them, not only the primary.",
     todo: "If this is empty and the main queue is not, nothing has been assigned to you yet — assign from the ticket, or ask whoever triages.",
   },
   ticketDetail: {
     title: "Working a ticket",
     body: "The activity feed merges notes, email and field history in one thread, newest first. Time logged here rolls up to the client, the agreement and any project the ticket belongs to.",
     todo: "Replying by email needs two things on: the master outbound switch, and “Allow email to client” on that specific client. Internal notes are never emailed.",
+  },
+  // ---------------------------------------------------------------------------
+  // Card-level topics. The page header answers "what is this screen"; these
+  // answer "what is this box, and what am I meant to put in it" — which is the
+  // question people actually get stuck on.
+  // ---------------------------------------------------------------------------
+  clientProfile: {
+    title: "SilverFang profile",
+    body: "Per-client settings that steer everything else: the account manager, the board this client's ad-hoc work lands on, their default agreement, VIP status, and whether they may be emailed at all.",
+    todo: "“Allow email to client” is off for every client until you turn it on here. Nothing is ever sent to a client while it is off, whatever the auto-response rules say.",
+  },
+  serviceSummary: {
+    title: "Service summary",
+    body: "This client's SilverFang position in one row: open and total tickets, hours logged, and what they have bought. Figures are live, not cached.",
+  },
+  clientContacts: {
+    title: "Contacts on this client",
+    body: "Who can raise a ticket for this company. The email address is what lets inbound mail be matched automatically; a contact without one can only be placed by their domain.",
+    todo: "The primary contact is the default requester on a new ticket for this client.",
+  },
+  clientTickets: {
+    title: "Tickets for this client",
+    body: "Every ticket for this company, in the standard queue order. Editing a row here works the same as in the main queue.",
+  },
+  clientProjects: {
+    title: "Projects for this client",
+    body: "Scoped work for this company. Adding one from here carries the client through, so you never re-pick it.",
+  },
+  hudu: {
+    title: "Hudu documentation",
+    body: "Read-only links into this client's Hudu documentation, so a tech can reach the runbook without leaving the ticket. Password records, asset secrets and article bodies are never synced — Hudu is a credential vault and stays one.",
+  },
+  deposit: {
+    title: "Deposit",
+    body: "An up-front percentage of the project total. The amount is recomputed while it is only a plan, and frozen the moment it has been invoiced — a later change to the total must never rewrite an invoice that already went to the client.",
+    todo: "Mark it invoiced once the deposit invoice has actually gone out; that is what freezes the figure.",
+  },
+  phases: {
+    title: "Phases",
+    body: "The stages of the project and the hours sold against each. Phase hours sum to the project's contracted total; a mismatch is shown rather than blocked, because a project is reshaped a field at a time.",
+    todo: "Raise a project ticket against a phase so its hours land in the right stage rather than on the project as a whole.",
+  },
+  tasks: {
+    title: "Tasks",
+    body: "The checklist inside the project — the unit techs log time against. A task created from a template arrives with a due date worked out from the project start plus its day offset.",
+  },
+  renewal: {
+    title: "Renewal",
+    body: "What happens when this term ends. Auto-renew applies the uplift to the recurring fee — never to hourly rates — and rolls the term forward. A term renews once however many times the sweep runs.",
+    todo: "A renewal shown as due has passed its end date and not been applied; the sweep picks it up within 15 minutes, or you can apply it here now.",
+  },
+  blockTime: {
+    title: "Prepaid hour blocks",
+    body: "Hours the client has bought in advance. Balances are computed from the drawdown ledger every time they are shown, so they always reconcile with logged time rather than drifting from a stored counter. Blocks are consumed oldest-first, and an expired block stops counting.",
+  },
+  mailboxes: {
+    title: "Mailboxes",
+    body: "The addresses SilverFang polls and sends from. The start-from date matters: without it, adding a mailbox would work through years of old mail and open a ticket for each. A fallback client catches senders who match nothing.",
+    todo: "Leaving the fallback client empty means unmatched mail is refused and reported instead of being filed against a guess. That is usually what you want.",
+  },
+  autoResponses: {
+    title: "Auto-responses",
+    body: "Templated mail sent when something happens to a ticket. Every rule is seeded switched OFF, so running setup never starts mailing clients on its own. SLA at-risk rules only ever notify a technician, never the client.",
+    todo: "A rule aimed at the client still sends nothing unless the master switch is on and that client has “Allow email to client” ticked.",
+  },
+  mailConfig: {
+    title: "Email configuration",
+    body: "Whether the plumbing is in place: mailboxes, Microsoft Graph, the master outbound switch, and how many clients are actually emailable. All four have to line up before a client hears from you.",
+  },
+  boardSetup: {
+    title: "Boards and statuses",
+    body: "Each board carries its own copy of the status flow, because statuses belong to a board. A status can be marked as closing, or as stopping the SLA clock — that is what makes “waiting on client” pause the timer.",
+  },
+  slaSetup: {
+    title: "SLAs",
+    body: "Response and resolution targets per priority, and the business calendar they are measured against. Weekends and holidays do not count, so a Friday-evening ticket is not judged against the weekend.",
+  },
+  chargeCodes: {
+    title: "Charge codes",
+    body: "What kind of work a time entry is, and whether it bills by default. A code can also carry a multiplier — the mechanism behind after-hours and weekend rates.",
+  },
+  rateRules: {
+    title: "Rate rules",
+    body: "What an hour is worth. The narrowest match wins: agreement and charge code beat client, which beats the global default, with the agreement's standard rate and the tech's own rate as fallbacks.",
+    todo: "If billable hours are showing with no rate, nothing here matched them — that is the gap to close, and it is different from a rate somebody chose to zero.",
+  },
+  changeTrail: {
+    title: "Change trail",
+    body: "Who changed what, and what it was before. Recorded for edits, creation and deletion, so the record's whole lifecycle is visible rather than just the middle of it.",
+  },
+  timeCalendar: {
+    title: "Week calendar",
+    body: "Your week as blocks with start and end times. A block is a time entry, so anything here counts towards utilisation exactly like an entry logged from a ticket.",
+    todo: "Turn on calendar sync in your technician profile and these blocks appear in Outlook too.",
+  },
+  mailActivity: {
+    title: "Inbound mail activity",
+    body: "Every message the ingest decided on, including the ones it correctly ignored — because “why did nothing happen?” is the question this answers. A deliberate skip and a configuration gap look different on purpose.",
+    todo: "This is the record, so a sender you have since filed still appears. The Unrecognised senders panel above is what tracks outstanding work.",
   },
   clients: {
     title: "Clients",
@@ -69,6 +168,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     title: "Agreements",
     body: "What a client has bought: managed services with included hours, a NOC agreement, or prepaid block time. Included hours are consumed oldest-work-first; hours beyond them become overage on the next invoice.",
     todo: "Ticking auto-renew is the consent — the agreement then renews itself on its end date with the uplift applied, and every renewal is audited.",
+  },
+  docs: {
+    title: "SilverFang Docs",
+    body: "The manual: how boards, ticket ordering, time, agreements, projects, templates and email actually behave — including the deliberate surprises, like email to clients being off by default and block time never being auto-selected.",
+    todo: "Start at Getting set up if this is a fresh install; it lists the order to do things in. Every section links from the contents at the top.",
   },
   unknownSenders: {
     title: "Unrecognised senders",

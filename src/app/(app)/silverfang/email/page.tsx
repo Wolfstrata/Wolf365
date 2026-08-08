@@ -169,7 +169,7 @@ export default async function SilverFangEmailPage({
 
         {/* What is wired up */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Configuration</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Configuration <PawTip topic="mailConfig" /></h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             <StatItem label="Mailboxes" value={mailboxes.filter((m) => m.active).length} />
             <StatItem label="Emails received" value={inboundCount} />
@@ -274,7 +274,7 @@ export default async function SilverFangEmailPage({
 
         {/* What happened to inbound mail */}
         <Card>
-          <h2 className="mb-1 text-sm font-semibold">Inbound mail activity</h2>
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">Inbound mail activity <PawTip topic="mailActivity" /></h2>
           <p className="mb-3 text-xs text-muted-foreground">
             Every message the ingest decided on. Nothing is dropped silently — a message
             that did not become a ticket says which of the reasons applied, and whether
@@ -287,7 +287,7 @@ export default async function SilverFangEmailPage({
 
         {/* Mailboxes */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Mailboxes ({mailboxes.length})</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Mailboxes ({mailboxes.length}) <PawTip topic="mailboxes" /></h2>
           {mailboxes.length === 0 ? (
             <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
               <Inbox className="h-4 w-4" />
@@ -395,7 +395,7 @@ export default async function SilverFangEmailPage({
 
         {/* Auto-responses */}
         <Card>
-          <h2 className="mb-1 text-sm font-semibold">Auto-responses ({rules.length})</h2>
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">Auto-responses ({rules.length}) <PawTip topic="autoResponses" /></h2>
           <p className="mb-4 text-xs text-muted-foreground">
             Templated mail sent when something happens on a ticket. Seeded switched{" "}
             <span className="font-medium">off</span> — nothing reaches a client until you enable it.

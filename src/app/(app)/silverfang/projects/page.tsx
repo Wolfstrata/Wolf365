@@ -145,7 +145,7 @@ export default async function ProjectsPage() {
         )}
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Project templates ({templates.length})</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Project templates ({templates.length}) <PawTip topic="projectTemplates" /></h2>
           {templates.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No templates yet. A template holds a reusable task list (with estimates and relative due

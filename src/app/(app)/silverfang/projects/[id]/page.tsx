@@ -419,7 +419,7 @@ export default async function ProjectDetailPage({
         )}
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Phases</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Phases <PawTip topic="phases" /></h2>
           <PhaseBoard
             projectId={project.id}
             clientId={project.clientId}
@@ -431,7 +431,7 @@ export default async function ProjectDetailPage({
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Tasks</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Tasks <PawTip topic="tasks" /></h2>
           <TaskBoard
             projectId={project.id}
             tasks={taskRows}
@@ -501,7 +501,7 @@ export default async function ProjectDetailPage({
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Client tickets ({tickets.length})</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Client tickets ({tickets.length}) <PawTip topic="clientTickets" /></h2>
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">No tickets for this client yet.</p>
           ) : (

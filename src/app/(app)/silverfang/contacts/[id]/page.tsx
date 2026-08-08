@@ -128,7 +128,7 @@ export default async function ContactDetailPage({
         </Card>
 
         <Card>
-          <h2 className="mb-4 text-sm font-semibold">Details</h2>
+          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold">Details <PawTip topic="contacts" /></h2>
           {canWrite ? (
             <ContactForm
               values={{
@@ -172,7 +172,7 @@ export default async function ContactDetailPage({
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Tickets ({contact._count.tickets})</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Tickets ({contact._count.tickets}) <PawTip topic="clientTickets" /></h2>
           {tickets.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No tickets have been raised by this contact.
