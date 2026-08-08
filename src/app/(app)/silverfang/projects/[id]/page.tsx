@@ -28,7 +28,6 @@ import { ChangeTrail, ChangeTrailHeading } from "../../change-trail";
 import { ProjectForm } from "../project-form";
 import { DepositCard } from "./deposit-card";
 import { PhaseBoard, type PhaseRow } from "./phase-board";
-import { TaskBoard, type TaskRow } from "./task-board";
 import { SaveAsTemplate } from "./save-as-template";
 import { AuthorizedTechsForm } from "../../authorized-techs-form";
 import { saveProjectTechsAction } from "../../project-actions";
@@ -81,15 +80,6 @@ export default async function ProjectDetailPage({
               client: { select: { sfClientProfile: { select: { vip: true } } } },
             },
           },
-          _count: { select: { tasks: true } },
-        },
-      },
-      tasks: {
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: {
-          assignee: { select: { name: true, email: true } },
-          projectPhase: { select: { id: true, name: true } },
-          _count: { select: { timeEntries: true, tickets: true } },
         },
       },
       authorizedTechs: { select: { userId: true } },
@@ -144,22 +134,15 @@ export default async function ProjectDetailPage({
   const backTo = safeReturnTo(sp.returnTo) ?? `/silverfang/clients/${project.client.id}`;
 
   // Time logged per phase: entries carrying the phase directly, plus those that
-  // reach it through a phase ticket or a phase task.
+  // reach it through a phase ticket.
   const phaseIds = project.phases.map((p) => p.id);
-  const [byPhaseTicket, byPhaseTask] = await Promise.all([
+  const byPhaseTicket =
     phaseIds.length > 0
-      ? prisma.sfTimeEntry.findMany({
+      ? await prisma.sfTimeEntry.findMany({
           where: { ticket: { projectPhaseId: { in: phaseIds } } },
           select: { hours: true, ticket: { select: { projectPhaseId: true } } },
         })
-      : Promise.resolve([]),
-    phaseIds.length > 0
-      ? prisma.sfTimeEntry.findMany({
-          where: { projectTask: { projectPhaseId: { in: phaseIds } } },
-          select: { hours: true, projectTask: { select: { projectPhaseId: true } } },
-        })
-      : Promise.resolve([]),
-  ]);
+      : [];
 
   const loggedByPhase = new Map<string, number>();
   const addPhaseHours = (phaseId: string | null | undefined, hours: unknown) => {
@@ -168,7 +151,6 @@ export default async function ProjectDetailPage({
   };
   for (const row of phaseTime) addPhaseHours(row.projectPhaseId, row._sum.hours);
   for (const row of byPhaseTicket) addPhaseHours(row.ticket?.projectPhaseId, row.hours);
-  for (const row of byPhaseTask) addPhaseHours(row.projectTask?.projectPhaseId, row.hours);
 
   const phaseRows: PhaseRow[] = project.phases.map((p) => ({
     id: p.id,
@@ -178,7 +160,6 @@ export default async function ProjectDetailPage({
     notes: p.notes,
     sortOrder: p.sortOrder,
     loggedHours: loggedByPhase.get(p.id) ?? 0,
-    taskCount: p._count.tasks,
     tickets: sortTickets(
       p.tickets.map((t) => ({
         id: t.id,
@@ -193,29 +174,9 @@ export default async function ProjectDetailPage({
     ),
   }));
 
-  const taskRows: TaskRow[] = project.tasks.map((t) => ({
-    id: t.id,
-    projectPhaseId: t.projectPhaseId,
-    phaseName: t.projectPhase?.name ?? null,
-    phase: t.phase,
-    name: t.name,
-    status: t.status,
-    assigneeId: t.assigneeId,
-    assignee: t.assignee?.name ?? t.assignee?.email ?? null,
-    estimatedHours: num(t.estimatedHours),
-    actualHours: Number(t.actualHours),
-    dueDate: dateInput(t.dueDate),
-    sortOrder: t.sortOrder,
-    hasTime: t._count.timeEntries > 0 || t._count.tickets > 0,
-  }));
-
   const loggedAgg = await prisma.sfTimeEntry.aggregate({
     where: {
-      OR: [
-        { projectTask: { projectId: id } },
-        { ticket: { projectId: id } },
-        { projectPhase: { projectId: id } },
-      ],
+      OR: [{ ticket: { projectId: id } }, { projectPhase: { projectId: id } }],
     },
     _sum: { hours: true, amount: true },
   });
@@ -318,10 +279,8 @@ export default async function ProjectDetailPage({
         <Card>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatItem label="Phases" value={phaseRows.length} />
-            <StatItem
-              label="Tasks"
-              value={`${project.tasks.filter((t) => t.status === "COMPLETED").length} / ${project.tasks.length}`}
-            />
+            {/* The ticket is the unit of work, so this is the whole of it. */}
+            <StatItem label="Tickets" value={project._count.tickets} />
             <StatItem label="Manager" value={project.manager?.name ?? project.manager?.email ?? "—"} />
             <StatItem
               label="Time logged"
@@ -426,17 +385,6 @@ export default async function ProjectDetailPage({
             phases={phaseRows}
             contractedHours={contracted}
             showHours={showHours || canManage}
-            canManage={canManage}
-          />
-        </Card>
-
-        <Card>
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Tasks <PawTip topic="tasks" /></h2>
-          <TaskBoard
-            projectId={project.id}
-            tasks={taskRows}
-            users={users}
-            phases={phaseRows.map((p) => ({ id: p.id, name: p.name }))}
             canManage={canManage}
           />
         </Card>

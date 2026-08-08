@@ -18,10 +18,8 @@ import {
 } from "@/lib/silverfang/project-billing";
 import {
   formatTemplatePhases,
-  formatTemplateTasks,
   formatTemplateTickets,
   parseTemplatePhases,
-  parseTemplateTasks,
   parseTemplateTickets,
   unknownPhaseNames,
 } from "@/lib/silverfang/project-templates";
@@ -36,7 +34,12 @@ import {
 } from "@/lib/silverfang/project-template-service";
 import type { SfActionResult } from "./actions";
 
-/** Projects, their task lists, and templates that stamp out standard task sets. */
+/**
+ * Projects, their phases, and the templates that stamp them out.
+ *
+ * There is no task: the project ticket IS the unit of work. One thing to create,
+ * one place to look for it, and one set of hours rolling up.
+ */
 
 const emptyToUndefined = (v: unknown) =>
   typeof v === "string" && v.trim() === "" ? undefined : v;
@@ -102,9 +105,8 @@ const PROJECT_FIELDS = [
 ];
 
 /**
- * Create or update a project. On creation, a chosen template stamps out its task
- * list — with due dates derived from the project start plus each task's offset,
- * which is the point of a template being relative rather than dated.
+ * Create or update a project. On creation, a chosen template stamps out its phases
+ * and its tickets.
  */
 export async function saveProjectAction(
   _prev: SfActionResult | null,
@@ -209,7 +211,6 @@ export async function saveProjectAction(
     const depositFrozen = before?.depositInvoicedAt != null;
 
     let saved;
-    let tasksCreated = 0;
     let phasesCreated = 0;
     let ticketsCreated = 0;
     let ticketsSkipped: string | null = null;
@@ -261,7 +262,6 @@ export async function saveProjectAction(
           { id: user.id, email: user.email },
         );
         phasesCreated += stamped.phases;
-        tasksCreated = stamped.tasks;
         ticketsCreated = stamped.tickets;
         ticketsSkipped = stamped.ticketsSkipped;
       }
@@ -286,7 +286,6 @@ export async function saveProjectAction(
         clientId: input.clientId,
         status: input.status,
         billingType: input.billingType,
-        tasksCreated,
         phasesCreated,
         ticketsCreated,
         ...(ticketsSkipped ? { ticketsSkipped } : {}),
@@ -445,7 +444,7 @@ export async function addNextProjectPhaseAction(formData: FormData): Promise<voi
 }
 
 /**
- * Delete a phase. Refused once tickets, tasks or time reference it: removing it
+ * Delete a phase. Refused once tickets or time reference it: removing it
  * would orphan the work from the stage it was done in, and the hours it holds
  * are part of what was sold.
  */
@@ -462,19 +461,19 @@ export async function deleteProjectPhaseAction(
         id: true,
         name: true,
         projectId: true,
-        _count: { select: { tickets: true, tasks: true, timeEntries: true } },
+        _count: { select: { tickets: true, timeEntries: true } },
       },
     });
     if (!phase) return { ok: false, message: "That phase no longer exists." };
 
-    const { tickets, tasks, timeEntries } = phase._count;
-    if (tickets + tasks + timeEntries > 0) {
+    const { tickets, timeEntries } = phase._count;
+    if (tickets + timeEntries > 0) {
       return {
         ok: false,
         message:
-          `${phase.name} has ${tickets} ticket(s), ${tasks} task(s) and ${timeEntries} time ` +
-          `entr(ies) against it. Move them to another phase first — deleting it would cut that ` +
-          `work loose from the stage it belongs to.`,
+          `${phase.name} has ${tickets} ticket(s) and ${timeEntries} time entr(ies) against it. ` +
+          `Move them to another phase first — deleting it would cut that work loose from the ` +
+          `stage it belongs to.`,
       };
     }
 
@@ -575,145 +574,6 @@ export async function markDepositInvoicedAction(
   }
 }
 
-const taskSchema = z.object({
-  id: optionalId,
-  projectId: z.string().min(1),
-  projectPhaseId: optionalId,
-  phase: z.preprocess(emptyToUndefined, z.string().max(120).optional()),
-  name: z.string().trim().min(1, "Task name is required").max(200),
-  status: z.enum(SfTaskStatus),
-  assigneeId: optionalId,
-  estimatedHours: optionalNumber,
-  dueDate: optionalDate,
-  sortOrder: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(9_999).optional()),
-});
-
-/** Create or update one project task. */
-export async function saveProjectTaskAction(
-  _prev: SfActionResult | null,
-  formData: FormData,
-): Promise<SfActionResult> {
-  const user = await requirePermission("projects:manage");
-  try {
-    const input = taskSchema.parse({
-      id: formValue(formData, "id"),
-      projectId: formValue(formData, "projectId"),
-      projectPhaseId: formValue(formData, "projectPhaseId"),
-      phase: formValue(formData, "phase"),
-      name: formValue(formData, "name"),
-      status: formValue(formData, "status"),
-      assigneeId: formValue(formData, "assigneeId"),
-      estimatedHours: formValue(formData, "estimatedHours"),
-      dueDate: formValue(formData, "dueDate"),
-      sortOrder: formValue(formData, "sortOrder"),
-    });
-
-    const project = await prisma.sfProject.findUnique({
-      where: { id: input.projectId },
-      select: { id: true, name: true },
-    });
-    if (!project) return { ok: false, message: "That project no longer exists." };
-
-    if (input.projectPhaseId) {
-      const phase = await prisma.sfProjectPhase.findUnique({
-        where: { id: input.projectPhaseId },
-        select: { projectId: true },
-      });
-      if (!phase || phase.projectId !== input.projectId) {
-        return { ok: false, message: "That phase does not belong to this project." };
-      }
-    }
-
-    const completing = input.status === "COMPLETED";
-    const data = {
-      projectId: input.projectId,
-      projectPhaseId: input.projectPhaseId ?? null,
-      phase: input.phase ?? null,
-      name: input.name,
-      status: input.status,
-      assigneeId: input.assigneeId ?? null,
-      estimatedHours: input.estimatedHours ?? null,
-      dueDate: input.dueDate ?? null,
-      sortOrder: input.sortOrder ?? 0,
-      // Stamped on completion and cleared when reopened, so the date always
-      // reflects the current state rather than the first time it was ticked.
-      completedAt: completing ? new Date() : null,
-    };
-
-    const before = input.id
-      ? await prisma.sfProjectTask.findUnique({ where: { id: input.id } })
-      : null;
-    const saved = input.id
-      ? await prisma.sfProjectTask.update({
-          where: { id: input.id },
-          data: {
-            ...data,
-            completedAt: completing ? (before?.completedAt ?? new Date()) : null,
-          },
-        })
-      : await prisma.sfProjectTask.create({ data });
-
-    await recordChanges({
-      entity: "SfProjectTask",
-      entityId: saved.id,
-      entityLabel: `${project.name} — ${saved.name}`,
-      actor: { id: user.id, email: user.email },
-      before,
-      after: saved as unknown as Record<string, unknown>,
-      fields: [
-        "projectPhaseId",
-        "phase",
-        "name",
-        "status",
-        "assigneeId",
-        "estimatedHours",
-        "dueDate",
-        "sortOrder",
-      ],
-    });
-    await audit({
-      action: "PROJECT_UPDATED",
-      actorId: user.id,
-      actorEmail: user.email,
-      target: `sfProject:${input.projectId}`,
-      metadata: { taskId: saved.id, status: input.status },
-    });
-    revalidatePath(`/silverfang/projects/${input.projectId}`);
-    return { ok: true, message: input.id ? "Task saved." : "Task added." };
-  } catch (err) {
-    return { ok: false, message: safeErrorMessage(err) };
-  }
-}
-
-/** Delete a task. Refused once time is logged against it. */
-export async function deleteProjectTaskAction(formData: FormData): Promise<void> {
-  const user = await requirePermission("projects:manage");
-  const id = z.string().min(1).parse(formData.get("id"));
-  const task = await prisma.sfProjectTask.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      name: true,
-      projectId: true,
-      _count: { select: { timeEntries: true, tickets: true } },
-    },
-  });
-  if (!task) return;
-  if (task._count.timeEntries > 0 || task._count.tickets > 0) return;
-
-  await prisma.sfProjectTask.delete({ where: { id } });
-  await recordChanges({
-    entity: "SfProjectTask",
-    entityId: id,
-    entityLabel: task.name,
-    actor: { id: user.id, email: user.email },
-    before: task as unknown as Record<string, unknown>,
-    after: null,
-    fields: [],
-  });
-  revalidatePath(`/silverfang/projects/${task.projectId}`);
-}
-
 const templateSchema = z.object({
   id: optionalId,
   name: z.string().trim().min(1, "Name is required").max(200),
@@ -721,8 +581,6 @@ const templateSchema = z.object({
   active: z.coerce.boolean(),
   /** One phase per line: "Name | hours" */
   phases: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
-  /** One task per line: "Phase | Name | estimatedHours | dueOffsetDays" */
-  tasks: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
   /** One ticket per line: "Phase | Summary | priority | estimatedHours" */
   tickets: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
   billingType: z.enum(SfProjectBillingType),
@@ -737,10 +595,10 @@ const templateSchema = z.object({
 });
 
 /**
- * Create or update a project template: its phases, tasks, tickets and the project
+ * Create or update a project template: its phases, tickets and the project
  * shape it carries.
  *
- * All three lists are entered one row per line, because a template is a checklist
+ * Both lists are entered one row per line, because a template is a checklist
  * and a per-row form for a 30-step build is worse than a textarea.
  *
  * A template deliberately carries no client, agreement, manager or dates. Those
@@ -760,7 +618,6 @@ export async function saveProjectTemplateAction(
       description: formValue(formData, "description"),
       active: formData.get("active") === "on",
       phases: formValue(formData, "phases"),
-      tasks: formValue(formData, "tasks"),
       tickets: formValue(formData, "tickets"),
       billingType: formValue(formData, "billingType") ?? "TIME_AND_MATERIALS",
       contractedHours: formValue(formData, "contractedHours"),
@@ -771,12 +628,11 @@ export async function saveProjectTemplateAction(
     });
 
     const phases = parseTemplatePhases(input.phases ?? "");
-    const tasks = parseTemplateTasks(input.tasks ?? "");
     const tickets = parseTemplateTickets(input.tickets ?? "");
     // All three reported at once: fixing one typo, re-saving and finding the next
     // is a worse experience than being told everything that is wrong.
-    const errors = [...phases.errors, ...tasks.errors, ...tickets.errors];
-    const orphans = unknownPhaseNames(phases.phases, [...tasks.tasks, ...tickets.tickets]);
+    const errors = [...phases.errors, ...tickets.errors];
+    const orphans = unknownPhaseNames(phases.phases, tickets.tickets);
     if (orphans.length > 0) {
       errors.push(
         `No phase called ${orphans.map((n) => `"${n}"`).join(", ")} — add it above, or ` +
@@ -792,7 +648,6 @@ export async function saveProjectTemplateAction(
       active: input.active,
       draft: {
         phases: phases.phases,
-        tasks: tasks.tasks,
         tickets: tickets.tickets,
         shape: {
           billingType: input.billingType,
@@ -813,7 +668,6 @@ export async function saveProjectTemplateAction(
       metadata: {
         name: input.name,
         phases: phases.phases.length,
-        tasks: tasks.tasks.length,
         tickets: tickets.tickets.length,
         active: input.active,
       },
@@ -823,8 +677,7 @@ export async function saveProjectTemplateAction(
     return {
       ok: true,
       message:
-        `Template saved: ${phases.phases.length} phase(s), ${tasks.tasks.length} task(s), ` +
-        `${tickets.tickets.length} ticket(s).`,
+        `Template saved: ${phases.phases.length} phase(s), ${tickets.tickets.length} ticket(s).`,
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
@@ -842,8 +695,8 @@ const captureSchema = z.object({
  * Save an existing project as a reusable template.
  *
  * The client, agreement, manager, dates and logged hours are left behind — what
- * carries over is the structure: phases with their hours, the task list as offsets
- * from the start, and optionally the open tickets. Descriptions are not copied,
+ * carries over is the structure: phases with their hours, and optionally the open
+ * tickets. Descriptions are not copied,
  * because a real ticket body is one client's problem in their words.
  */
 export async function saveProjectAsTemplateAction(
@@ -871,7 +724,6 @@ export async function saveProjectAsTemplateAction(
         name: result.templateName,
         capturedFrom: input.projectId,
         phases: result.phases,
-        tasks: result.tasks,
         tickets: result.tickets,
       },
     });
@@ -880,15 +732,15 @@ export async function saveProjectAsTemplateAction(
     return {
       ok: true,
       message:
-        `Saved “${result.templateName}” with ${result.phases} phase(s), ${result.tasks} ` +
-        `task(s) and ${result.tickets} ticket(s). Client, dates and logged hours were not copied.`,
+        `Saved “${result.templateName}” with ${result.phases} phase(s) and ${result.tickets} ` +
+        `ticket(s). Client, dates and logged hours were not copied.`,
     };
   } catch (err) {
     return { ok: false, message: safeErrorMessage(err) };
   }
 }
 
-/** Delete a template. Projects made from it keep their phases, tasks and tickets. */
+/** Delete a template. Projects made from it keep their phases and tickets. */
 export async function deleteProjectTemplateAction(formData: FormData): Promise<void> {
   const user = await requirePermission("projects:manage");
   const id = z.string().min(1).parse(formData.get("id"));
@@ -897,7 +749,7 @@ export async function deleteProjectTemplateAction(formData: FormData): Promise<v
     select: { name: true },
   });
   if (!template) return;
-  // The project's own phases/tasks/tickets are real records of real work, so the
+  // The project's own phases and tickets are real records of real work, so the
   // FK is SetNull rather than Cascade: deleting the template must never take a
   // live project's structure with it.
   await prisma.sfProjectTemplate.delete({ where: { id } });
@@ -911,14 +763,13 @@ export async function deleteProjectTemplateAction(formData: FormData): Promise<v
   revalidatePath("/silverfang/projects/templates");
 }
 
-/** Template values for the edit form, phases/tasks/tickets rendered as text. */
+/** Template values for the edit form, phases and tickets rendered as text. */
 export async function projectTemplateFormValues(id: string): Promise<{
   id: string;
   name: string;
   description: string;
   active: boolean;
   phases: string;
-  tasks: string;
   tickets: string;
   billingType: string;
   contractedHours: string;
@@ -931,7 +782,6 @@ export async function projectTemplateFormValues(id: string): Promise<{
     where: { id },
     include: {
       phases: { orderBy: { sortOrder: "asc" } },
-      tasks: { orderBy: { sortOrder: "asc" } },
       tickets: { orderBy: { sortOrder: "asc" }, include: { templatePhase: true } },
     },
   });
@@ -946,14 +796,6 @@ export async function projectTemplateFormValues(id: string): Promise<{
     active: t.active,
     phases: formatTemplatePhases(
       t.phases.map((p) => ({ name: p.name, hours: p.hours != null ? Number(p.hours) : null })),
-    ),
-    tasks: formatTemplateTasks(
-      t.tasks.map((x) => ({
-        phase: phaseName(x.templatePhaseId) ?? x.phase,
-        name: x.name,
-        estimatedHours: x.estimatedHours != null ? Number(x.estimatedHours) : null,
-        dueOffsetDays: x.dueOffsetDays,
-      })),
     ),
     tickets: formatTemplateTickets(
       t.tickets.map((x) => ({

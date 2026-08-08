@@ -37,7 +37,6 @@ export interface PhaseRow {
   notes: string | null;
   sortOrder: number;
   loggedHours: number;
-  taskCount: number;
   tickets: PhaseTicketRow[];
 }
 
@@ -153,10 +152,10 @@ export function PhaseBoard({
                   {/* Offered whatever the phase holds, so the button is where you
                       expect it; the action refuses and says why when work would
                       be cut loose. */}
-                  {(p.tickets.length > 0 || p.taskCount > 0 || p.loggedHours > 0) && (
+                  {(p.tickets.length > 0 || p.loggedHours > 0) && (
                     <span className="text-xs text-muted-foreground">
-                      Holds {p.tickets.length} ticket(s), {p.taskCount} task(s) and{" "}
-                      {formatHours(p.loggedHours)} — move them to another phase first.
+                      Holds {p.tickets.length} ticket(s) and {formatHours(p.loggedHours)} — move
+                      them to another phase first.
                     </span>
                   )}
                 </form>

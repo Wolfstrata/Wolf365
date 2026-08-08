@@ -47,13 +47,12 @@ export default async function TimeEntriesPage({
       chargeCode: { select: { code: true, name: true } },
       user: { select: { name: true, email: true } },
       ticket: { select: { id: true, number: true, summary: true } },
-      projectTask: { select: { id: true, name: true, project: { select: { name: true } } } },
       agreement: { select: { id: true, name: true } },
     },
   });
 
   // Calendar options and this week's sheet state.
-  const [chargeCodes, openTickets, openTasks, activeAgreements, clients, sheet] =
+  const [chargeCodes, openTickets, activeAgreements, clients, sheet] =
     await Promise.all([
       prisma.sfChargeCode.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
       prisma.sfTicket.findMany({
@@ -61,12 +60,6 @@ export default async function TimeEntriesPage({
         orderBy: { number: "desc" },
         take: 300,
         select: { id: true, number: true, summary: true, client: { select: { name: true } } },
-      }),
-      prisma.sfProjectTask.findMany({
-        where: { status: { not: "COMPLETED" }, project: { status: { in: ["PLANNED", "ACTIVE"] } } },
-        orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }],
-        take: 300,
-        select: { id: true, name: true, project: { select: { name: true } } },
       }),
       prisma.sfAgreement.findMany({
         where: { status: "ACTIVE" },
@@ -119,16 +112,13 @@ export default async function TimeEntriesPage({
       hours: Number(e.hours),
       label: e.ticket
         ? `#${e.ticket.number} ${e.ticket.summary}`
-        : e.projectTask
-          ? `${e.projectTask.project.name}: ${e.projectTask.name}`
-          : (e.agreement?.name ?? e.chargeCode.code),
+        : (e.agreement?.name ?? e.chargeCode.code),
       sublabel: scope === "all" ? (e.user.name ?? e.user.email) : e.chargeCode.code,
       billable: e.billable,
       editable: e.userId === user.id && timeEntryEditable(e.status),
       status: e.status,
       chargeCodeId: e.chargeCodeId,
       ticketId: e.ticketId,
-      projectTaskId: e.projectTaskId,
       agreementId: e.agreementId,
       notes: e.notes,
       internalOnly: e.internalOnly,
@@ -220,7 +210,7 @@ export default async function TimeEntriesPage({
             List
           </Link>
           <span className="text-xs text-muted-foreground">
-            Click any empty slot to log a block — attach it to a ticket, a project task, an
+            Click any empty slot to log a block — attach it to a ticket, a project phase, an
             agreement, or open a new ticket on the spot.
           </span>
           <SubmitWeekButton
@@ -247,10 +237,6 @@ export default async function TimeEntriesPage({
                 tickets: openTickets.map((t) => ({
                   id: t.id,
                   label: `#${t.number} ${t.client.name} — ${t.summary}`,
-                })),
-                tasks: openTasks.map((t) => ({
-                  id: t.id,
-                  label: `${t.project.name}: ${t.name}`,
                 })),
                 agreements: activeAgreements.map((a) => ({
                   id: a.id,

@@ -22,7 +22,7 @@ import type { SfActionResult } from "./actions";
  * Time blocks drawn on the calendar.
  *
  * Different from the list-based entry form in two ways that matter: it carries
- * start/end wall-clock times, and it can attach to a ticket, a project task, or
+ * start/end wall-clock times, and it can attach to a ticket, a project phase, or
  * an agreement alone — or open a ticket on the spot, which is the common case
  * when someone drops a block on the calendar for work that has no ticket yet.
  */
@@ -46,7 +46,6 @@ const blockSchema = z.object({
   offsetMinutes: z.coerce.number().int().min(-840).max(840),
   chargeCodeId: z.string().min(1, "Pick a charge code"),
   ticketId: optionalId,
-  projectTaskId: optionalId,
   agreementId: optionalId,
   /** When set with no ticketId, a ticket is created for this client. */
   newTicketClientId: optionalId,
@@ -71,7 +70,6 @@ export async function saveTimeBlockAction(
       offsetMinutes: formValue(formData, "offsetMinutes"),
       chargeCodeId: formValue(formData, "chargeCodeId"),
       ticketId: formValue(formData, "ticketId"),
-      projectTaskId: formValue(formData, "projectTaskId"),
       agreementId: formValue(formData, "agreementId"),
       newTicketClientId: formValue(formData, "newTicketClientId"),
       newTicketSummary: formValue(formData, "newTicketSummary"),
@@ -129,7 +127,6 @@ export async function saveTimeBlockAction(
             source: "PHONE",
             summary,
             agreementId: input.agreementId ?? null,
-            projectTaskId: input.projectTaskId ?? null,
             slaId: board.slaId,
             responseDueAt: sla.responseDueAt,
             resolutionDueAt: sla.resolutionDueAt,
@@ -151,7 +148,7 @@ export async function saveTimeBlockAction(
       });
     }
 
-    // Work out the client for rate resolution: the ticket's, else the task's
+    // Work out the client for rate resolution: the ticket's, else the phase's
     // project, else the agreement's.
     const ticket = ticketId
       ? await prisma.sfTicket.findUnique({
@@ -165,16 +162,6 @@ export async function saveTimeBlockAction(
           },
         })
       : null;
-    const task = input.projectTaskId
-      ? await prisma.sfProjectTask.findUnique({
-          where: { id: input.projectTaskId },
-          select: {
-            id: true,
-            projectId: true,
-            project: { select: { clientId: true, agreementId: true } },
-          },
-        })
-      : null;
     const agreement = input.agreementId
       ? await prisma.sfAgreement.findUnique({
           where: { id: input.agreementId },
@@ -182,16 +169,15 @@ export async function saveTimeBlockAction(
         })
       : null;
 
-    const clientId = ticket?.clientId ?? task?.project.clientId ?? agreement?.clientId ?? null;
+    const clientId = ticket?.clientId ?? agreement?.clientId ?? null;
     if (!clientId) {
       return {
         ok: false,
         message:
-          "Attach the block to a ticket, a project task, or an agreement — time has to belong to a client to be rated or billed.",
+          "Attach the block to a ticket or an agreement — time has to belong to a client to be rated or billed.",
       };
     }
-    const effectiveAgreementId =
-      input.agreementId ?? ticket?.agreementId ?? task?.project.agreementId ?? null;
+    const effectiveAgreementId = input.agreementId ?? ticket?.agreementId ?? null;
 
     // Same authorised-tech check as logging time on a ticket. A scheduled block is
     // a time entry with a start and an end, so a restriction that applied to one
@@ -199,7 +185,7 @@ export async function saveTimeBlockAction(
     const authorized = await timeAuthorizationFor(
       {
         agreementId: effectiveAgreementId,
-        projectId: ticket?.projectId ?? task?.projectId ?? null,
+        projectId: ticket?.projectId ?? null,
       },
       user.id,
     );
@@ -221,7 +207,6 @@ export async function saveTimeBlockAction(
     const data = {
       userId: user.id,
       ticketId,
-      projectTaskId: input.projectTaskId ?? null,
       agreementId: effectiveAgreementId,
       chargeCodeId: input.chargeCodeId,
       workDate,

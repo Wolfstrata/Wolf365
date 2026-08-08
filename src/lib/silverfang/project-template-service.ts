@@ -3,11 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { boardNameFor } from "@/lib/silverfang/boards";
 import { nextTicketNumber, slaDueDatesFor } from "@/lib/silverfang/service";
-import {
-  dueDateFromOffset,
-  projectToTemplateDraft,
-  type TemplateDraft,
-} from "@/lib/silverfang/project-templates";
+import { projectToTemplateDraft, type TemplateDraft } from "@/lib/silverfang/project-templates";
 
 /**
  * Capturing a project as a template, and stamping a template onto a project.
@@ -25,14 +21,13 @@ export interface CaptureResult {
   templateId: string;
   templateName: string;
   phases: number;
-  tasks: number;
   tickets: number;
 }
 
 /**
  * Save an existing project's shape as a reusable template.
  *
- * Ticket and task **descriptions are deliberately not copied**. A real project's
+ * Ticket **descriptions are deliberately not copied**. A real project's
  * ticket body is a specific client's problem, in their words; carrying it into a
  * template would put one client's detail onto every project generated from it
  * afterwards. Summaries, hours and structure are the reusable part.
@@ -59,16 +54,6 @@ export async function captureProjectAsTemplate(input: {
       billingIntervalDays: true,
       depositPercent: true,
       phases: { select: { name: true, hours: true, sortOrder: true } },
-      tasks: {
-        select: {
-          name: true,
-          phase: true,
-          estimatedHours: true,
-          dueDate: true,
-          sortOrder: true,
-          projectPhase: { select: { name: true } },
-        },
-      },
       // Selected unconditionally and filtered below: a conditional `select`
       // defeats Prisma's type inference and widens the row to the whole model.
       tickets: {
@@ -108,14 +93,6 @@ export async function captureProjectAsTemplate(input: {
       hours: num(p.hours),
       sortOrder: p.sortOrder,
     })),
-    tasks: project.tasks.map((t) => ({
-      name: t.name,
-      phase: t.phase,
-      phaseName: t.projectPhase?.name ?? null,
-      estimatedHours: num(t.estimatedHours),
-      dueDate: t.dueDate,
-      sortOrder: t.sortOrder,
-    })),
     tickets: (input.includeTickets ? project.tickets : []).map((t) => ({
       summary: t.summary,
       phaseName: t.projectPhase?.name ?? null,
@@ -136,17 +113,16 @@ export async function captureProjectAsTemplate(input: {
     templateId: template.id,
     templateName: input.name,
     phases: draft.phases.length,
-    tasks: draft.tasks.length,
     tickets: draft.tickets.length,
   };
 }
 
 /**
- * Write a template's phases, tasks and tickets, replacing whatever was there.
+ * Write a template's phases and tickets, replacing whatever was there.
  *
  * Wholesale replacement, not a merge: a template is a definition, and a partial
- * merge leaves rows nobody asked for. Phases are created first so tasks and
- * tickets can be attached to them by name — the id is what makes the attachment
+ * merge leaves rows nobody asked for. Phases are created first so tickets can
+ * be attached to them by name — the id is what makes the attachment
  * survive a later rename, which the free-text `phase` column never did.
  */
 export async function writeTemplate(input: {
@@ -186,7 +162,6 @@ export async function writeTemplate(input: {
     // Children first, phases last: deleting a phase would null the templatePhaseId
     // on rows we are about to delete anyway, and doing it in this order keeps the
     // intermediate state consistent if the transaction is inspected mid-flight.
-    await tx.sfProjectTemplateTask.deleteMany({ where: { templateId: template.id } });
     await tx.sfProjectTemplateTicket.deleteMany({ where: { templateId: template.id } });
     await tx.sfProjectTemplatePhase.deleteMany({ where: { templateId: template.id } });
 
@@ -202,22 +177,6 @@ export async function writeTemplate(input: {
         select: { id: true },
       });
       phaseIds.set(phase.name.toLowerCase(), row.id);
-    }
-
-    if (draft.tasks.length > 0) {
-      await tx.sfProjectTemplateTask.createMany({
-        data: draft.tasks.map((t, i) => ({
-          templateId: template.id,
-          templatePhaseId: t.phase ? (phaseIds.get(t.phase.toLowerCase()) ?? null) : null,
-          // The free-text column is still written, so a task naming a phase that
-          // does not exist keeps the name it was given rather than losing it.
-          phase: t.phase,
-          name: t.name,
-          estimatedHours: t.estimatedHours,
-          dueOffsetDays: t.dueOffsetDays,
-          sortOrder: i * 10,
-        })),
-      });
     }
 
     if (draft.tickets.length > 0) {
@@ -243,18 +202,17 @@ export async function writeTemplate(input: {
 
 export interface MaterializeResult {
   phases: number;
-  tasks: number;
   tickets: number;
   /** Said out loud rather than silently skipped. */
   ticketsSkipped: string | null;
 }
 
 /**
- * Stamp a template's phases, tasks and tickets onto a freshly created project.
+ * Stamp a template's phases and tickets onto a freshly created project.
  *
  * Tickets need a board, a status and an SLA, none of which a template can carry —
  * they are configuration, not shape. When SilverFang has no usable board the
- * phases and tasks are still created and the ticket skip is reported, because a
+ * phases are still created and the ticket skip is reported, because a
  * project with its structure is worth more than an all-or-nothing failure.
  */
 export async function materializeTemplate(
@@ -271,13 +229,12 @@ export async function materializeTemplate(
     where: { id: input.templateId },
     include: {
       phases: { orderBy: { sortOrder: "asc" } },
-      tasks: { orderBy: { sortOrder: "asc" } },
       tickets: { orderBy: { sortOrder: "asc" } },
     },
   });
-  if (!template) return { phases: 0, tasks: 0, tickets: 0, ticketsSkipped: null };
+  if (!template) return { phases: 0, tickets: 0, ticketsSkipped: null };
 
-  // Phase name → new project-phase id, so tasks and tickets land in the right one.
+  // Phase name → new project-phase id, so tickets land in the right one.
   const phaseIds = new Map<string, string>();
   for (const [i, phase] of template.phases.entries()) {
     const row = await prisma.sfProjectPhase.create({
@@ -291,21 +248,6 @@ export async function materializeTemplate(
       select: { id: true },
     });
     phaseIds.set(phase.name.toLowerCase(), row.id);
-  }
-
-  if (template.tasks.length > 0) {
-    await prisma.sfProjectTask.createMany({
-      data: template.tasks.map((t) => ({
-        projectId: input.projectId,
-        projectPhaseId: phaseIdFor(phaseIds, t.phase, t.templatePhaseId, template.phases),
-        phase: t.phase,
-        name: t.name,
-        description: t.description,
-        sortOrder: t.sortOrder,
-        estimatedHours: t.estimatedHours,
-        dueDate: dueDateFromOffset(input.baseDate, t.dueOffsetDays),
-      })),
-    });
   }
 
   let ticketsCreated = 0;
@@ -334,12 +276,7 @@ export async function materializeTemplate(
               source: "PROJECT",
               summary: t.summary,
               projectId: input.projectId,
-              projectPhaseId: phaseIdFor(
-                phaseIds,
-                null,
-                t.templatePhaseId,
-                template.phases,
-              ),
+              projectPhaseId: phaseIdFor(phaseIds, t.templatePhaseId, template.phases),
               estimatedHours: t.estimatedHours,
               slaId: board.slaId,
               responseDueAt: sla.responseDueAt,
@@ -360,7 +297,6 @@ export async function materializeTemplate(
   // two silently overwriting the other.
   return {
     phases: template.phases.length,
-    tasks: template.tasks.length,
     tickets: ticketsCreated,
     ticketsSkipped,
   };
@@ -383,23 +319,19 @@ async function projectBoard() {
 }
 
 /**
- * The project phase a template row belongs in.
+ * The project phase a template ticket belongs in.
  *
- * Prefers the structured link, falling back to the free-text name so templates
- * written before phases became real records still land correctly.
+ * Matched by name rather than by id, because the project's phases are fresh rows
+ * created moments earlier — the template's phase id means nothing to them.
  */
 function phaseIdFor(
   phaseIds: Map<string, string>,
-  freeText: string | null,
   templatePhaseId: string | null,
   templatePhases: { id: string; name: string }[],
 ): string | null {
-  if (templatePhaseId) {
-    const name = templatePhases.find((p) => p.id === templatePhaseId)?.name;
-    if (name) return phaseIds.get(name.toLowerCase()) ?? null;
-  }
-  if (freeText) return phaseIds.get(freeText.toLowerCase()) ?? null;
-  return null;
+  if (!templatePhaseId) return null;
+  const name = templatePhases.find((p) => p.id === templatePhaseId)?.name;
+  return name ? (phaseIds.get(name.toLowerCase()) ?? null) : null;
 }
 
 function num(value: { toString(): string } | null | undefined): number | null {

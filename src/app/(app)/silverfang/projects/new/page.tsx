@@ -40,7 +40,7 @@ export default async function NewProjectPage({
       select: {
         id: true,
         name: true,
-        _count: { select: { phases: true, tasks: true, tickets: true } },
+        _count: { select: { phases: true, tickets: true } },
       },
     }),
   ]);
@@ -58,7 +58,7 @@ export default async function NewProjectPage({
 
   return (
     <div>
-      <PageHeader title="New project" description="Scoped work with a task list." />
+      <PageHeader title="New project" description="Scoped work, broken into phases and tickets." />
       <div className="space-y-4 p-4 sm:p-8">
         {/* Back to whoever opened this — usually a client page — rather than
             always to the module list. */}
@@ -97,7 +97,6 @@ export default async function NewProjectPage({
               id: t.id,
               name: t.name,
               phaseCount: t._count.phases,
-              taskCount: t._count.tasks,
               ticketCount: t._count.tickets,
             }))}
             submitLabel="Create project"

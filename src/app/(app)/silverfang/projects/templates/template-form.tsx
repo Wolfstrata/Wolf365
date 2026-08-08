@@ -14,7 +14,6 @@ export interface TemplateFormValues {
   description: string;
   active: boolean;
   phases: string;
-  tasks: string;
   tickets: string;
   billingType: string;
   contractedHours: string;
@@ -29,7 +28,6 @@ export const BLANK_TEMPLATE: TemplateFormValues = {
   description: "",
   active: true,
   phases: "",
-  tasks: "",
   tickets: "",
   billingType: "TIME_AND_MATERIALS",
   contractedHours: "",
@@ -45,12 +43,14 @@ const BILLING_TYPES: { value: string; label: string }[] = [
 ];
 
 /**
- * Edit one template: what shape of project it makes, and the phases, tasks and
+ * Edit one template: what shape of project it makes, and the phases and
  * tickets it stamps out.
  *
- * Three textareas rather than three repeaters. A template is a checklist of
- * twenty or thirty rows, and a per-row form for that is slower to fill in and
- * harder to paste into than one line per row.
+ * Two textareas rather than repeaters. A template is a list of twenty or thirty
+ * rows, and a per-row form for that is slower to fill in and harder to paste into
+ * than one line per row.
+ *
+ * There is no task list: the project ticket IS the unit of work.
  *
  * No client, agreement, manager or date fields, deliberately — a template is a
  * shape, not a piece of work.
@@ -191,25 +191,8 @@ export function TemplateForm({
           placeholder={"Discovery | 8\nBuild | 40\nHandover | 4"}
         />
         <span className="mt-1 block text-xs font-normal text-muted-foreground">
-          Format: <span className="font-mono">Name | hours</span>. Tasks and tickets below attach
-          to a phase by this name.
-        </span>
-      </label>
-
-      <label className="block text-sm font-medium">
-        Tasks — one per line
-        <textarea
-          name="tasks"
-          defaultValue={values.tasks}
-          rows={8}
-          spellCheck={false}
-          className={`mt-1 font-mono text-xs ${inputCls}`}
-          placeholder={"Discovery | Site audit | 2 | 0\nBuild | Rack and cable | 8 | 5\nHandover"}
-        />
-        <span className="mt-1 block text-xs font-normal text-muted-foreground">
-          Format: <span className="font-mono">Phase | Task | hours | days after start</span>.
-          Everything after the task name is optional, and a line with just a name is a task with
-          no phase. Saving replaces the whole list.
+          Format: <span className="font-mono">Name | hours</span>. Tickets below attach to a
+          phase by this name.
         </span>
       </label>
 

@@ -51,10 +51,10 @@ export function SaveAsTemplate({
         <input name="description" maxLength={500} className={`mt-1 ${inputCls}`} />
       </label>
       <p className="text-xs text-muted-foreground">
-        Copies the phases with their hours, the task list as day-offsets from the start, the
-        billing shape, and optionally the open ticket summaries. Does{" "}
+        Copies the phases with their hours, the billing shape, and optionally the open ticket
+        summaries. Does{" "}
         <span className="font-medium">not</span> copy the client, agreement, manager, dates,
-        logged hours, or any ticket or task description — a description is one client&rsquo;s
+        logged hours, or any ticket description — a description is one client&rsquo;s
         problem in their words, and it would follow the template onto every project made from it.
       </p>
       <div className="flex flex-wrap items-center gap-3">

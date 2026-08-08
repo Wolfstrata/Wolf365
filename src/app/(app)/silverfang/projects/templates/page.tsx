@@ -14,7 +14,7 @@ import { TemplateForm, BLANK_TEMPLATE } from "./template-form";
 export const dynamic = "force-dynamic";
 
 /**
- * Project templates: a reusable project shape — phases, tasks and ticket stubs —
+ * Project templates: a reusable project shape — phases and ticket stubs —
  * with no client attached.
  *
  * Every template is editable in place rather than behind a detail route, because
@@ -31,7 +31,7 @@ export default async function ProjectTemplatesPage() {
       name: true,
       sourceProjectId: true,
       active: true,
-      _count: { select: { phases: true, tasks: true, tickets: true, projects: true } },
+      _count: { select: { phases: true, tickets: true, projects: true } },
     },
   });
 
@@ -44,7 +44,7 @@ export default async function ProjectTemplatesPage() {
       <PageHeader
         help={<PawTip topic="projectTemplates" />}
         title="Project templates"
-        description="A reusable project shape — phases, tasks and tickets — with no client attached."
+        description="A reusable project shape — phases and tickets — with no client attached."
       />
       <div className="space-y-6 p-4 sm:p-8">
         <Breadcrumbs
@@ -73,7 +73,6 @@ export default async function ProjectTemplatesPage() {
                   {t.name}{" "}
                   <span className="font-normal text-muted-foreground">
                     · {t._count.phases} phase{t._count.phases === 1 ? "" : "s"} ·{" "}
-                    {t._count.tasks} task{t._count.tasks === 1 ? "" : "s"} ·{" "}
                     {t._count.tickets} ticket{t._count.tickets === 1 ? "" : "s"} · used by{" "}
                     {t._count.projects} project{t._count.projects === 1 ? "" : "s"}
                     {t.sourceProjectId ? " · captured from a project" : ""}
@@ -85,7 +84,7 @@ export default async function ProjectTemplatesPage() {
                   <div className="flex items-center justify-between gap-3 border-t pt-3">
                     <p className="text-xs text-muted-foreground">
                       Deleting a template leaves every project made from it untouched — their
-                      phases, tasks and tickets are records of real work.
+                      phases and tickets are records of real work.
                     </p>
                     <form action={deleteProjectTemplateAction}>
                       <input type="hidden" name="id" value={t.id} />
@@ -113,9 +112,8 @@ export default async function ProjectTemplatesPage() {
         </Card>
 
         <p className="text-xs text-muted-foreground">
-          To use one, create a project and pick the template — its phases, tasks and tickets are
-          stamped out, with task due dates worked out from the project start date plus each
-          task&rsquo;s day offset. See{" "}
+          To use one, create a project and pick the template — its phases and tickets are stamped
+          out. See{" "}
           <Link href="/silverfang/projects/new" className="text-primary hover:underline">
             new project
           </Link>

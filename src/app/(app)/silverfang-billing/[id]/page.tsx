@@ -117,7 +117,6 @@ export default async function SfBillingRunPage({
       OR: [
         { ticket: { clientId: run.clientId } },
         { agreement: { clientId: run.clientId } },
-        { projectTask: { project: { clientId: run.clientId } } },
         { projectPhase: { project: { clientId: run.clientId } } },
       ],
       billingLines: { none: {} },

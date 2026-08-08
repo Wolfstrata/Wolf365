@@ -86,10 +86,6 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "The stages of the project and the hours sold against each. Phase hours sum to the project's contracted total; a mismatch is shown rather than blocked, because a project is reshaped a field at a time.",
     todo: "Raise a project ticket against a phase so its hours land in the right stage rather than on the project as a whole.",
   },
-  tasks: {
-    title: "Tasks",
-    body: "The checklist inside the project — the unit techs log time against. A task created from a template arrives with a due date worked out from the project start plus its day offset.",
-  },
   renewal: {
     title: "Renewal",
     body: "What happens when this term ends. Auto-renew applies the uplift to the recurring fee — never to hourly rates — and rolls the term forward. A term renews once however many times the sweep runs.",
@@ -206,8 +202,8 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
   },
   projectTemplates: {
     title: "Project templates",
-    body: "A reusable project shape — phases, tasks and ticket stubs — with no client attached. Build one from scratch, or save an existing project as a template to reuse how it was structured.",
-    todo: "Generating a project from a template creates its phases, tasks and tickets in one step; you fill in the client and the dates.",
+    body: "A reusable project shape — phases and ticket stubs — with no client attached. Build one from scratch, or save an existing project as a template to reuse how it was structured.",
+    todo: "Generating a project from a template creates its phases and tickets in one step; you fill in the client and the dates.",
   },
   reports: {
     title: "Service reporting",

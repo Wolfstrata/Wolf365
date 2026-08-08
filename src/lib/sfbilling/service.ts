@@ -53,7 +53,6 @@ async function loadTimeEntries(
       OR: [
         { ticket: { clientId } },
         { agreement: { clientId } },
-        { projectTask: { project: { clientId } } },
         { projectPhase: { project: { clientId } } },
       ],
     },
@@ -63,7 +62,6 @@ async function loadTimeEntries(
       ticket: {
         select: { number: true, summary: true, projectId: true, clientId: true },
       },
-      projectTask: { select: { projectId: true } },
       projectPhase: { select: { projectId: true } },
     },
   });
@@ -83,7 +81,7 @@ async function loadTimeEntries(
     // A project can be reached three ways; the ticket's own project wins because
     // that is the most specific statement of what the work was for.
     projectId:
-      r.ticket?.projectId ?? r.projectPhase?.projectId ?? r.projectTask?.projectId ?? null,
+      r.ticket?.projectId ?? r.projectPhase?.projectId ?? null,
     ticketNumber: r.ticket?.number ?? null,
     ticketSummary: r.ticket?.summary ?? null,
   }));

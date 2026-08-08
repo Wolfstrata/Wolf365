@@ -28,7 +28,6 @@ export interface CalendarBlock {
   status: string;
   chargeCodeId: string;
   ticketId: string | null;
-  projectTaskId: string | null;
   agreementId: string | null;
   notes: string | null;
   internalOnly: boolean;
@@ -37,7 +36,6 @@ export interface CalendarBlock {
 export interface CalendarOptions {
   chargeCodes: { id: string; code: string; name: string; billableDefault: boolean }[];
   tickets: { id: string; label: string }[];
-  tasks: { id: string; label: string }[];
   agreements: { id: string; label: string }[];
   clients: { id: string; name: string }[];
 }
@@ -77,7 +75,7 @@ export function WeekCalendar({
     null,
   );
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [target, setTarget] = useState<"ticket" | "task" | "agreement" | "new">("ticket");
+  const [target, setTarget] = useState<"ticket" | "agreement" | "new">("ticket");
   const formRef = useRef<HTMLFormElement>(null);
   const [offsetMinutes, setOffsetMinutes] = useState(0);
 
@@ -119,7 +117,7 @@ export function WeekCalendar({
   const openBlock = (b: CalendarBlock) => {
     if (!b.editable || weekLocked) return;
     setTarget(
-      b.ticketId ? "ticket" : b.projectTaskId ? "task" : b.agreementId ? "agreement" : "ticket",
+      b.ticketId ? "ticket" : b.agreementId ? "agreement" : "ticket",
     );
     setDraft({
       id: b.id,
@@ -318,7 +316,6 @@ export function WeekCalendar({
               >
                 <option value="ticket">Existing ticket</option>
                 <option value="new">New ticket</option>
-                <option value="task">Project task</option>
                 <option value="agreement">Agreement only</option>
               </select>
             </label>
@@ -367,24 +364,6 @@ export function WeekCalendar({
                   />
                 </label>
               </>
-            )}
-
-            {target === "task" && (
-              <label className="block text-xs font-medium sm:col-span-2">
-                Project task
-                <select
-                  name="projectTaskId"
-                  defaultValue={editing?.projectTaskId ?? ""}
-                  className={`mt-1 ${inputCls}`}
-                >
-                  <option value="">Select a task…</option>
-                  {options.tasks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
             )}
 
             <label className="block text-xs font-medium sm:col-span-2">

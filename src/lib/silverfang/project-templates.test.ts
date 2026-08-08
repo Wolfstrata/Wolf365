@@ -1,98 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  dueDateFromOffset,
   formatTemplatePhases,
-  formatTemplateTasks,
   formatTemplateTickets,
   parseTemplatePhases,
-  parseTemplateTasks,
   parseTemplateTickets,
   projectToTemplateDraft,
   unknownPhaseNames,
 } from "./project-templates";
-
-describe("parseTemplateTasks", () => {
-  it("parses a bare task name", () => {
-    expect(parseTemplateTasks("Kickoff call")).toEqual({
-      tasks: [{ phase: null, name: "Kickoff call", estimatedHours: null, dueOffsetDays: null }],
-      errors: [],
-    });
-  });
-
-  it("parses phase, name, hours and offset", () => {
-    expect(parseTemplateTasks("Discovery | Kickoff call | 1.5 | 2").tasks).toEqual([
-      { phase: "Discovery", name: "Kickoff call", estimatedHours: 1.5, dueOffsetDays: 2 },
-    ]);
-  });
-
-  it("treats two columns as phase + name", () => {
-    expect(parseTemplateTasks("Build | Rack the switch").tasks).toEqual([
-      { phase: "Build", name: "Rack the switch", estimatedHours: null, dueOffsetDays: null },
-    ]);
-  });
-
-  it("ignores blank lines and surrounding whitespace", () => {
-    const r = parseTemplateTasks("\n  Discovery | Audit  \n\n   \nBuild | Install\n");
-    expect(r.tasks.map((t) => t.name)).toEqual(["Audit", "Install"]);
-    expect(r.errors).toEqual([]);
-  });
-
-  it("accepts a zero-day offset as meaning due on the start date", () => {
-    expect(parseTemplateTasks("Kickoff | 1 | 0").tasks[0]).toEqual({
-      phase: "Kickoff",
-      name: "1",
-      estimatedHours: 0,
-      dueOffsetDays: null,
-    });
-    expect(parseTemplateTasks("Discovery | Audit | 2 | 0").tasks[0]!.dueOffsetDays).toBe(0);
-  });
-
-  it("reports a bad hours value with its line number, and drops the row", () => {
-    const r = parseTemplateTasks("Discovery | Audit | soon");
-    expect(r.tasks).toEqual([]);
-    expect(r.errors[0]).toContain("Line 1");
-    expect(r.errors[0]).toContain("soon");
-  });
-
-  it("rejects negative hours and fractional or out-of-range offsets", () => {
-    expect(parseTemplateTasks("A | B | -1").errors).toHaveLength(1);
-    expect(parseTemplateTasks("A | B | 1 | 1.5").errors).toHaveLength(1);
-    expect(parseTemplateTasks("A | B | 1 | 99999").errors).toHaveLength(1);
-  });
-
-  it("reports a line whose name is missing", () => {
-    // A leading separator leaves no name in either column.
-    expect(parseTemplateTasks("|").errors).toHaveLength(1);
-  });
-
-  it("keeps good lines when another is bad, so one typo doesn't discard the lot", () => {
-    const r = parseTemplateTasks("Discovery | Audit | 2\nBuild | Install | nope\nTest | Verify");
-    expect(r.tasks.map((t) => t.name)).toEqual(["Audit", "Verify"]);
-    expect(r.errors).toHaveLength(1);
-  });
-
-  it("handles empty input", () => {
-    expect(parseTemplateTasks("")).toEqual({ tasks: [], errors: [] });
-    expect(parseTemplateTasks(null)).toEqual({ tasks: [], errors: [] });
-  });
-});
-
-describe("formatTemplateTasks", () => {
-  it("round-trips a full task", () => {
-    const line = "Discovery | Audit | 2 | 3";
-    expect(formatTemplateTasks(parseTemplateTasks(line).tasks)).toBe(line);
-  });
-
-  it("drops trailing empty columns", () => {
-    expect(formatTemplateTasks([{ name: "Kickoff call" }])).toBe("Kickoff call");
-    expect(formatTemplateTasks([{ phase: "Build", name: "Install" }])).toBe("Build | Install");
-  });
-
-  it("round-trips a multi-line template", () => {
-    const text = "Discovery | Audit | 2 | 1\nBuild | Install | 8 | 5\nHandover";
-    expect(formatTemplateTasks(parseTemplateTasks(text).tasks)).toBe(text);
-  });
-});
 
 describe("parseTemplatePhases", () => {
   it("parses a name and hours", () => {
@@ -107,8 +21,8 @@ describe("parseTemplatePhases", () => {
   });
 
   it("refuses duplicate names rather than deduping", () => {
-    // Phase name is how tasks and tickets attach; two "Build" phases would put
-    // half the work in the wrong place with no error.
+    // Phase name is how tickets attach; two "Build" phases would put half the
+    // work in the wrong place with no error.
     const result = parseTemplatePhases("Build | 8\nbuild | 4");
     expect(result.phases).toHaveLength(1);
     expect(result.errors[0]).toContain("already a phase called");
@@ -214,14 +128,11 @@ describe("projectToTemplateDraft", () => {
         { name: "Build", hours: 30, sortOrder: 20 },
         { name: "Discovery", hours: 10, sortOrder: 10 },
       ],
-      tasks: [{ name: "Audit", phaseName: "Discovery", dueDate: new Date("2026-03-06T00:00:00Z") }],
       tickets: [{ summary: "Rack the switch", phaseName: "Build", priority: "P2" }],
     });
 
     // Sorted by sortOrder, not by the order they came out of the database.
     expect(draft.phases.map((p) => p.name)).toEqual(["Discovery", "Build"]);
-    // Dates became offsets — that is what makes the template reusable.
-    expect(draft.tasks[0]!.dueOffsetDays).toBe(5);
     expect(draft.tickets[0]).toEqual({
       phase: "Build",
       summary: "Rack the switch",
@@ -240,42 +151,11 @@ describe("projectToTemplateDraft", () => {
     expect(JSON.stringify(draft)).not.toContain("clientId");
   });
 
-  it("leaves offsets null when the project has no start date", () => {
-    const draft = projectToTemplateDraft({
-      startDate: null,
-      billingType: "TIME_AND_MATERIALS",
-      phases: [],
-      tasks: [{ name: "Audit", dueDate: new Date("2026-03-06T00:00:00Z") }],
-    });
-    expect(draft.tasks[0]!.dueOffsetDays).toBeNull();
-  });
-
-  it("floors a task dated before the project start at day 0", () => {
-    const draft = projectToTemplateDraft({
-      startDate: start,
-      billingType: "TIME_AND_MATERIALS",
-      phases: [],
-      tasks: [{ name: "Pre-work", dueDate: new Date("2026-02-01T00:00:00Z") }],
-    });
-    expect(draft.tasks[0]!.dueOffsetDays).toBe(0);
-  });
-
-  it("falls back to the legacy free-text phase on a task", () => {
-    const draft = projectToTemplateDraft({
-      startDate: start,
-      billingType: "TIME_AND_MATERIALS",
-      phases: [{ name: "Build" }],
-      tasks: [{ name: "Install", phase: "Build" }],
-    });
-    expect(draft.tasks[0]!.phase).toBe("Build");
-  });
-
   it("normalises an unrecognised ticket priority to P3", () => {
     const draft = projectToTemplateDraft({
       startDate: start,
       billingType: "TIME_AND_MATERIALS",
       phases: [],
-      tasks: [],
       tickets: [{ summary: "Thing", priority: "WHATEVER" }],
     });
     expect(draft.tickets[0]!.priority).toBe("P3");
@@ -285,20 +165,7 @@ describe("projectToTemplateDraft", () => {
     const draft = projectToTemplateDraft({
       billingType: "TIME_AND_MATERIALS",
       phases: [],
-      tasks: [],
     });
-    expect(draft).toMatchObject({ phases: [], tasks: [], tickets: [] });
-  });
-});
-
-describe("dueDateFromOffset", () => {
-  it("resolves an offset against a start date", () => {
-    expect(dueDateFromOffset(new Date("2026-03-01T00:00:00Z"), 5)?.toISOString()).toBe(
-      "2026-03-06T00:00:00.000Z",
-    );
-  });
-
-  it("returns null for no offset", () => {
-    expect(dueDateFromOffset(new Date("2026-03-01T00:00:00Z"), null)).toBeNull();
+    expect(draft).toMatchObject({ phases: [], tickets: [] });
   });
 });

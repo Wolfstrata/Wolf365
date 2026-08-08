@@ -179,20 +179,20 @@ export const DOC_SECTIONS: DocSection[] = [
     summary: "Scoped work with phases, and reusable shapes to stamp them out.",
     blocks: [
       {
-        p: "A project holds phases; phases hold tasks and tickets. Phase hours sum to the project's contracted total, and a mismatch is surfaced on the project rather than refused, because a project is reshaped a field at a time.",
+        p: "A project holds phases; phases hold tickets. The ticket is the unit of work — there is no separate task list, so there is one thing to create, one place to look and one set of hours. Phase hours sum to the project's contracted total, and a mismatch is surfaced on the project rather than refused, because a project is reshaped a field at a time.",
       },
       {
         p: "Billing is time and materials or fixed fee. On a fixed fee, hours are tracked identically but never shown to the client. A deposit is a percentage of the total; once it has been invoiced the amount is frozen, so a later change to the total cannot rewrite an invoice that already went out.",
       },
       { h: "Templates" },
       {
-        p: "A template is a reusable project shape — phases with hours, tasks as day-offsets from the start, and ticket stubs — with no client attached. Build one from scratch, or open a project you have already run and use Save as template.",
+        p: "A template is a reusable project shape — phases with hours, and ticket stubs attached to them by phase name — with no client attached. Build one from scratch, or open a project you have already run and use Save as template.",
       },
       {
-        p: "Capturing a project deliberately leaves behind the client, agreement, manager, dates and logged hours, and does not copy ticket or task descriptions: a ticket body is one client's problem in their words, and it would follow the template onto every project made from it.",
+        p: "Capturing a project deliberately leaves behind the client, agreement, manager, dates and logged hours, and does not copy ticket descriptions: a ticket body is one client's problem in their words, and it would follow the template onto every project made from it.",
       },
       {
-        p: "Generating a project from a template creates its phases, its tasks with due dates worked out from the start date plus each offset, and its tickets on the Projects board.",
+        p: "Generating a project from a template creates its phases and raises its tickets on the Projects board.",
       },
     ],
   },

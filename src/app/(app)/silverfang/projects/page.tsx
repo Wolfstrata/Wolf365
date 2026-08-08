@@ -12,7 +12,7 @@ import { checkAuthorized, restrictionLabel } from "@/lib/silverfang/authorized-t
 
 export const dynamic = "force-dynamic";
 
-/** Projects and their tasks ("ticklets"), optionally created from a template. */
+/** Projects and their tickets, optionally created from a template. */
 export default async function ProjectsPage() {
   const user = await requirePermission("projects:read");
   const canManage = can(user.role, "projects:manage");
@@ -25,20 +25,20 @@ export default async function ProjectsPage() {
         client: { select: { id: true, name: true } },
         manager: { select: { name: true, email: true } },
         authorizedTechs: { select: { userId: true } },
-        _count: { select: { tasks: true, tickets: true } },
+        _count: { select: { tickets: true } },
       },
     }),
     prisma.sfProjectTemplate.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
-      include: { _count: { select: { phases: true, tasks: true, tickets: true } } },
+      include: { _count: { select: { phases: true, tickets: true } } },
     }),
   ]);
 
   return (
     <div>
       <PageHeader
-        help={<PawTip topic="projects" />} title="Projects" description="Project work, tasks and templates."
+        help={<PawTip topic="projects" />} title="Projects" description="Project work, tickets and templates."
         actions={
           canManage ? (
             <div className="flex items-center gap-2">
@@ -64,7 +64,7 @@ export default async function ProjectsPage() {
             <EmptyState
               icon={<FolderKanban className="h-8 w-8" />}
               title="No projects yet"
-              description="Projects group tasks that techs log time against, and can be created from a template. The data model is in place; project and template management arrives in the next SilverFang phase."
+              description="Projects group the tickets techs log time against, and can be created from a template."
             />
           </Card>
         ) : (
@@ -78,7 +78,6 @@ export default async function ProjectsPage() {
                     <th className="py-1 pr-4 font-medium">Status</th>
                     <th className="py-1 pr-4 font-medium">Manager</th>
                     <th className="py-1 pr-4 font-medium">Due</th>
-                    <th className="py-1 pr-4 text-right font-medium">Tasks</th>
                     <th className="py-1 pr-4 text-right font-medium">Tickets</th>
                     <th className="py-1 pr-4 text-right font-medium">Estimate</th>
                   </tr>
@@ -130,7 +129,6 @@ export default async function ProjectsPage() {
                       <td className="py-1.5 pr-4 whitespace-nowrap">
                         {p.dueDate ? <LocalTime value={p.dueDate.toISOString()} dateOnly /> : "—"}
                       </td>
-                      <td className="py-1.5 pr-4 text-right tabular-nums">{p._count.tasks}</td>
                       <td className="py-1.5 pr-4 text-right tabular-nums">{p._count.tickets}</td>
                       <td className="py-1.5 pr-4 text-right tabular-nums">
                         {p.estimatedHours != null ? formatHours(Number(p.estimatedHours)) : "—"}
@@ -148,8 +146,8 @@ export default async function ProjectsPage() {
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">Project templates ({templates.length}) <PawTip topic="projectTemplates" /></h2>
           {templates.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No templates yet. A template holds a reusable task list (with estimates and relative due
-              dates) that can be instantiated into a new project.
+              No templates yet. A template holds a reusable set of phases and ticket stubs (with
+              estimated hours) that can be stamped out into a new project.
             </p>
           ) : (
             <ul className="space-y-1.5 text-sm">
@@ -158,7 +156,6 @@ export default async function ProjectsPage() {
                   <span className="font-medium">{t.name}</span>
                   <span className="text-xs text-muted-foreground">
                     {t._count.phases} phase{t._count.phases === 1 ? "" : "s"} ·{" "}
-                    {t._count.tasks} task{t._count.tasks === 1 ? "" : "s"} ·{" "}
                     {t._count.tickets} ticket{t._count.tickets === 1 ? "" : "s"}
                   </span>
                 </li>

@@ -54,7 +54,6 @@ export function ProjectForm({
     id: string;
     name: string;
     phaseCount: number;
-    taskCount: number;
     ticketCount: number;
   }[];
   submitLabel: string;
@@ -157,7 +156,7 @@ export function ProjectForm({
             ))}
           </select>
           <span className="mt-1 block text-xs font-normal text-muted-foreground">
-            Determines the rates for time logged on this project&rsquo;s tasks.
+            Determines the rates for time logged on this project&rsquo;s tickets.
           </span>
         </label>
         {isNew && (
@@ -173,15 +172,14 @@ export function ProjectForm({
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name} ({t.phaseCount} phase{t.phaseCount === 1 ? "" : "s"},{" "}
-                  {t.taskCount} task{t.taskCount === 1 ? "" : "s"}, {t.ticketCount} ticket
-                  {t.ticketCount === 1 ? "" : "s"})
+                  {t.ticketCount} ticket{t.ticketCount === 1 ? "" : "s"})
                 </option>
               ))}
             </select>
             <span className="mt-1 block text-xs font-normal text-muted-foreground">
               {template
-                ? `Creates ${template.phaseCount} phase(s), ${template.taskCount} task(s) and ${template.ticketCount} ticket(s) now. Task due dates are offset from the start date.`
-                : "Phases, tasks and tickets are created now, with task due dates offset from the start date."}
+                ? `Creates ${template.phaseCount} phase(s) and ${template.ticketCount} ticket(s) now.`
+                : "The template's phases and tickets are created now."}
             </span>
           </label>
         )}
