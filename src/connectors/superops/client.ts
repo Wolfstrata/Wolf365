@@ -1,5 +1,6 @@
 import { connectorFetch } from "@/connectors/http";
 import { writeDebugLog } from "@/lib/debug-log";
+import { describeGraphQLErrors } from "@/connectors/superops/parse";
 import type { ConnectorContext } from "@/connectors/types";
 
 /**
@@ -278,10 +279,7 @@ export async function introspectTypeFieldsDetailed(
 }
 
 /** Compact human-readable summary of GraphQL errors for logs/messages. */
-export function describeGraphQLErrors(errors: unknown): string {
-  if (!Array.isArray(errors)) return "";
-  const msgs = errors
-    .map((e) => (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : ""))
-    .filter(Boolean);
-  return msgs.slice(0, 3).join("; ");
-}
+// Re-exported from the pure module so it can be unit-tested: the "null" it
+// used to print for a null message cost a round trip to diagnose.
+export { describeGraphQLErrors };
+

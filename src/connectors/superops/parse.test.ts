@@ -12,6 +12,7 @@ import {
   pickTicketIdArg,
   ticketIdCandidates,
   conversationQueryCandidates,
+  describeGraphQLErrors,
   parseWorklog,
 } from "@/connectors/superops/parse";
 
@@ -241,5 +242,57 @@ describe("conversationQueryCandidates", () => {
     expect(
       conversationQueryCandidates(["createConversation", "getClientList", "getAssetList"], preferred),
     ).toEqual([]);
+  });
+});
+
+describe("describeGraphQLErrors", () => {
+  it("uses a real message when there is one", () => {
+    expect(describeGraphQLErrors([{ message: "Unknown argument 'ticketId'" }])).toBe(
+      "Unknown argument 'ticketId'",
+    );
+  });
+
+  it("never prints the word null for a null message", () => {
+    // This is the regression: String(null) is "null", which survived a truthiness
+    // filter and reported 145 failed tickets as "failed: null".
+    for (const bad of [null, undefined, "", "   "]) {
+      const out = describeGraphQLErrors([{ message: bad, errorType: "DataFetchingException" }]);
+      expect(out).not.toBe("null");
+      expect(out).toContain("DataFetchingException");
+    }
+  });
+
+  it("falls back to conventional detail fields, top level or under extensions", () => {
+    expect(describeGraphQLErrors([{ message: null, extensions: { code: "FORBIDDEN" } }])).toContain(
+      "code=FORBIDDEN",
+    );
+    expect(describeGraphQLErrors([{ message: null, classification: "ValidationError" }])).toContain(
+      "classification=ValidationError",
+    );
+  });
+
+  it("names the failing path, which is often the whole diagnosis", () => {
+    expect(
+      describeGraphQLErrors([{ message: null, path: ["getTicketNoteList", "notes", 0] }]),
+    ).toContain("path=getTicketNoteList.notes.0");
+  });
+
+  it("shows the shape rather than claiming a message it does not have", () => {
+    const out = describeGraphQLErrors([{ weird: true }]);
+    expect(out).toContain("unlabelled error");
+    expect(out).toContain("weird");
+  });
+
+  it("says so for an empty error object", () => {
+    expect(describeGraphQLErrors([{}])).toBe("empty error object");
+  });
+
+  it("accepts bare strings, caps at three, and ignores non-arrays", () => {
+    expect(describeGraphQLErrors(["boom"])).toBe("boom");
+    expect(
+      describeGraphQLErrors([1, 2, 3, 4].map((n) => ({ message: `e${n}` }))).split("; "),
+    ).toHaveLength(3);
+    expect(describeGraphQLErrors(null)).toBe("");
+    expect(describeGraphQLErrors({ message: "not an array" })).toBe("");
   });
 });

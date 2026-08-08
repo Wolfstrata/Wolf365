@@ -1147,6 +1147,7 @@ export async function syncSuperOpsNotesAction(
         // Recorded on the audit entry too: the message on screen is gone as soon
         // as the page reloads, and this is the line that says why nothing came.
         firstError: result.firstError,
+        errorSamples: result.errorSamples,
       },
     });
     revalidatePath("/silverfang/migration");

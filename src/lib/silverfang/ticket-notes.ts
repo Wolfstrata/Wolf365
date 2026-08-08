@@ -254,6 +254,8 @@ export interface NoteSyncOutcome {
   argUsed?: string | null;
   failedTickets?: number;
   firstError?: string;
+  /** Distinct error samples, so a second cause is not hidden behind the first. */
+  errorSamples?: string[];
   unparsedRecords?: number;
   emptyTickets?: number;
   error?: string;
@@ -275,6 +277,12 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
   const failed = r.failedTickets ?? 0;
   const unparsed = r.unparsedRecords ?? 0;
   const entries = `${r.notes} conversation entr${r.notes === 1 ? "y" : "ies"}`;
+  // Prefer the distinct samples: one message repeated 145 times and two different
+  // causes look identical otherwise.
+  const why =
+    r.errorSamples && r.errorSamples.length > 0
+      ? r.errorSamples.join(" / ")
+      : (r.firstError ?? "no message");
 
   if (r.error) {
     return { ok: false, message: `${entries} mirrored. ${r.error}` };
@@ -295,7 +303,7 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
         `Nothing mirrored: all ${failed} conversation call(s) failed` +
         (r.queryUsed ? ` (${r.queryUsed}` : "") +
         (r.argUsed ? ` called with ${r.argUsed})` : r.queryUsed ? ")" : "") +
-        `. SuperOps said: ${r.firstError ?? "no message"}. ` +
+        `. SuperOps said: ${why}. ` +
         `The ticket history is still in SuperOps — do not cut over.`,
     };
   }
@@ -336,7 +344,7 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
   }
   if (r.queryUsed) parts.push(`the rest via ${r.queryUsed}`);
   const lost: string[] = [];
-  if (failed > 0) lost.push(`${failed} ticket(s) failed: ${r.firstError ?? "no message"}`);
+  if (failed > 0) lost.push(`${failed} ticket(s) failed: ${why}`);
   if (unparsed > 0) lost.push(`${unparsed} record(s) were unreadable`);
 
   return {

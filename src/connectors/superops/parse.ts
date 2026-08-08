@@ -391,3 +391,63 @@ export function conversationQueryCandidates(
     .sort((a, b) => Number(/list$/i.test(b)) - Number(/list$/i.test(a)) || a.localeCompare(b));
   return [...out, ...discovered];
 }
+
+/**
+ * Turn a GraphQL `errors` array into something a human can act on.
+ *
+ * Written the naive way, this said "null": SuperOps returns error objects whose
+ * `message` is null, `String(null)` is the four characters n-u-l-l, and a filter
+ * on truthiness keeps them. An error report that invents a message is worse than
+ * one that admits it has none — 145 failed tickets reading "failed: null" tells
+ * you nothing about why.
+ *
+ * So a message is used only when it is a non-empty string. Failing that, the
+ * fields GraphQL implementations conventionally carry the reason in are tried in
+ * turn, and failing those the error object itself is summarised. Output is
+ * capped: this lands in a debug log, not a crash report.
+ */
+export function describeGraphQLErrors(errors: unknown): string {
+  if (!Array.isArray(errors)) return "";
+  const described = errors.map(describeOneError).filter(Boolean);
+  return described.slice(0, 3).join("; ");
+}
+
+const ERROR_DETAIL_KEYS = ["errorType", "code", "classification", "reason", "detail", "description"];
+
+function describeOneError(e: unknown): string {
+  if (typeof e === "string") return e.trim();
+  if (!e || typeof e !== "object") return "";
+  const obj = e as Record<string, unknown>;
+
+  const message = obj.message;
+  if (typeof message === "string" && message.trim()) return message.trim();
+
+  // No message: fall back to the conventional detail fields, at the top level
+  // and under `extensions`, which is where spec-compliant servers put them.
+  const extensions =
+    obj.extensions && typeof obj.extensions === "object"
+      ? (obj.extensions as Record<string, unknown>)
+      : {};
+  const parts: string[] = [];
+  for (const key of ERROR_DETAIL_KEYS) {
+    for (const source of [obj, extensions]) {
+      const v = source[key];
+      if (typeof v === "string" && v.trim()) parts.push(`${key}=${v.trim()}`);
+      else if (typeof v === "number" || typeof v === "boolean") parts.push(`${key}=${v}`);
+    }
+  }
+  // `path` names the field that failed, which is often the whole diagnosis.
+  if (Array.isArray(obj.path) && obj.path.length > 0) {
+    parts.push(`path=${obj.path.map(String).join(".")}`);
+  }
+  if (parts.length > 0) return parts.slice(0, 4).join(" ");
+
+  // Nothing recognisable: show the shape rather than claim there was a message.
+  try {
+    const json = JSON.stringify(obj);
+    if (!json || json === "{}") return "empty error object";
+    return `unlabelled error ${json.slice(0, 200)}`;
+  } catch {
+    return "unserialisable error object";
+  }
+}

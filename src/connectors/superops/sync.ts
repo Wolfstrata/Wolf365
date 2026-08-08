@@ -1406,6 +1406,11 @@ export interface NoteSyncResult {
   failedTickets: number;
   /** The first such error, verbatim from SuperOps, so the shape can be fixed. */
   firstError?: string;
+  /**
+   * Up to three *distinct* errors. One sample hides a second cause: 145 failures
+   * with two reasons look identical to 145 with one.
+   */
+  errorSamples: string[];
   /** Records the query returned that `parseNote` could not make sense of. */
   unparsedRecords: number;
   /** Tickets the query answered successfully with no conversation records. */
@@ -1447,6 +1452,7 @@ export async function syncSuperOpsTicketNotes(
     failedTickets: 0,
     unparsedRecords: 0,
     emptyTickets: 0,
+    errorSamples: [],
   };
 
   try {
@@ -1507,9 +1513,10 @@ export async function syncSuperOpsTicketNotes(
       // as "no conversations".
       if (!res.ok) {
         result.failedTickets += 1;
-        if (!result.firstError) {
-          result.firstError =
-            describeGraphQLErrors(res.errors) || `HTTP ${res.status}`;
+        const described = describeGraphQLErrors(res.errors) || `HTTP ${res.status}`;
+        if (!result.firstError) result.firstError = described;
+        if (result.errorSamples.length < 3 && !result.errorSamples.includes(described)) {
+          result.errorSamples.push(described);
         }
         continue;
       }
