@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { Menu, X, PanelLeft, PanelLeftClose } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NavItem } from "@/components/shell/nav";
-import { workspaceOf } from "@/lib/workspaces";
+import Link from "next/link";
+import { WORKSPACE_HOME, workspaceOf } from "@/lib/workspaces";
 import { Sidebar } from "@/components/shell/sidebar";
 
 /**
@@ -19,10 +20,13 @@ import { Sidebar } from "@/components/shell/sidebar";
 export function AppShell({
   items,
   footer,
+  fallbackHome,
   children,
 }: {
   items: NavItem[];
   footer: ReactNode;
+  /** Where the logo goes on a route that belongs to no workspace. */
+  fallbackHome: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -69,14 +73,32 @@ export function AppShell({
   // awkward case right for free: /silverfang-billing is deliberately in the FINANCE
   // workspace, so it keeps the Wolf365 mark. A `startsWith("/silverfang")` check
   // would badge it as SilverFang and undo the separation the workspaces exist for.
+  const workspace = workspaceOf(pathname);
   const brand =
-    workspaceOf(pathname) === "SILVERFANG"
+    workspace === "SILVERFANG"
       ? { src: "/silverfang-logo.png", alt: "SilverFang" }
       : { src: "/Wolf365 Logo.png", alt: "Wolf365" };
 
+  // The mark is the Home button, and it goes to the home of the workspace it is
+  // showing — the SilverFang mark to the SilverFang dashboard, the Wolf365 mark to
+  // the Wolf365 one. A single fixed destination would send a tech working in
+  // SilverFang to a finance dashboard they may not even be allowed to see.
+  //
+  // On a universal route (/settings) there is no workspace, so the role's own
+  // landing route is used instead — it is the only answer that is guaranteed to be
+  // somewhere this user may actually go.
+  const home = workspace ? WORKSPACE_HOME[workspace] : fallbackHome;
+
   const logo = (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={brand.src} alt={`${brand.alt} logo`} className="h-auto w-3/4 object-contain" />
+    <Link
+      href={home}
+      title={`${brand.alt} home`}
+      aria-label={`${brand.alt} home`}
+      className="flex w-3/4 justify-center rounded-md transition hover:opacity-80"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={brand.src} alt={`${brand.alt} logo`} className="h-auto w-full object-contain" />
+    </Link>
   );
 
   return (
@@ -142,8 +164,10 @@ export function AppShell({
           >
             <Menu className="h-5 w-5" />
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={brand.src} alt={brand.alt} className="h-6 w-auto object-contain" />
+          <Link href={home} title={`${brand.alt} home`} className="transition hover:opacity-80">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={brand.src} alt={`${brand.alt} home`} className="h-6 w-auto object-contain" />
+          </Link>
         </div>
 
         {/* Desktop expand button — shown only while the sidebar is collapsed */}

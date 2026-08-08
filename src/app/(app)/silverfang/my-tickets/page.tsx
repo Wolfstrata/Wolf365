@@ -25,14 +25,17 @@ export default async function MyTicketsPage({
 
   // Inline triage here too: this is the queue a tech actually works from, so
   // making them open every ticket to move it along would defeat the point.
+  // The same options the main queue passes, so this list is the *same* table with
+  // the same controls rather than a stripped-down cousin of it.
   const canWrite = can(user.role, "tickets:write");
-  const [boards, users] = canWrite
+  const [boards, users, moveProjects] = canWrite
     ? await Promise.all([
         prisma.sfBoard.findMany({
           where: { active: true },
           orderBy: { sortOrder: "asc" },
           select: {
             id: true,
+            name: true,
             statuses: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true } },
           },
         }),
@@ -41,8 +44,23 @@ export default async function MyTicketsPage({
           orderBy: { name: "asc" },
           select: { id: true, name: true, email: true },
         }),
+        // Live projects only: moving a ticket onto a finished project would put new
+        // work somewhere nobody is looking.
+        prisma.sfProject.findMany({
+          where: { status: { in: ["PLANNED", "ACTIVE", "ON_HOLD"] } },
+          orderBy: { name: "asc" },
+          select: {
+            id: true,
+            name: true,
+            client: { select: { name: true } },
+            phases: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+              select: { id: true, name: true },
+            },
+          },
+        }),
       ])
-    : [[], []];
+    : [[], [], []];
 
   return (
     <div>
@@ -79,9 +97,18 @@ export default async function MyTicketsPage({
           ) : (
             <TicketsTable
               rows={rows}
-              returnTo="/silverfang/my-tickets"
+              returnTo={`/silverfang/my-tickets${view === "all" ? "?view=all" : ""}`}
               {...(canWrite
                 ? {
+                    bulk: {
+                      boards: boards.map((b) => ({ id: b.id, name: b.name })),
+                      projects: moveProjects.map((p) => ({
+                        id: p.id,
+                        name: p.name,
+                        clientName: p.client.name,
+                        phases: p.phases,
+                      })),
+                    },
                     inline: {
                       statusesByBoard: Object.fromEntries(
                         boards.map((b) => [b.id, b.statuses]),

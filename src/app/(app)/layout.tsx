@@ -112,7 +112,7 @@ export default async function AppLayout({
 
   return (
     <TimeZoneProvider timeZone={user.timezone}>
-      <AppShell items={visibleItems} footer={footer}>
+      <AppShell items={visibleItems} footer={footer} fallbackHome={homeRouteFor(user.role)}>
         {user.viewingAs && <ViewAsBanner role={user.viewingAs} />}
         {children}
       </AppShell>
