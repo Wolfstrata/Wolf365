@@ -29,6 +29,7 @@ import {
   parseTicket,
   parseWorklog,
   pickTicketIdArg,
+  ticketIdCandidates,
   type Obj,
 } from "@/connectors/superops/parse";
 
@@ -1392,12 +1393,72 @@ export async function syncSuperOpsTicketNotes(
       ? `query ($id: ${idArg.signature}) { ${queryName}(${idArg.name}: $id) { ${wrapped} } }`
       : `query { ${queryName} { ${wrapped} } }`;
 
+    // The argument may be an input object rather than a scalar — SuperOps wants
+    // `input: TicketConversationIdentifierInput!`, not a bare id. Which of its
+    // fields carries the ticket id cannot be reasoned out (a wrong shape comes
+    // back as a bare "Internal Server Error"), so the plausible ones are probed
+    // against one real ticket and the first that answers is used.
+    let buildVars: (id: string) => Record<string, unknown> = (id) => ({ id });
+    if (idArg && idArg.kind === "INPUT_OBJECT" && idArg.baseName) {
+      const inputFields = await introspectInputFields(ctx, idArg.baseName);
+      const candidates = ticketIdCandidates(inputFields ?? []).slice(0, 4);
+      if (candidates.length === 0) {
+        result.error =
+          `${queryName} takes ${idArg.name}: ${idArg.signature}, and none of its fields ` +
+          `(${(inputFields ?? []).map((f) => f.name).join(", ") || "none"}) looks like a ticket id. ` +
+          `Nothing was mirrored.`;
+        return result;
+      }
+      // SuperOps' list inputs carry pagination under `listInfo`; if this input
+      // declares one, the id alone may not satisfy it. Both shapes are tried,
+      // but only when the field actually exists — inventing one would turn a
+      // field-name problem into an unknown-field problem.
+      const hasListInfo = (inputFields ?? []).some((f) => /listinfo/i.test(f.name));
+      const shapes: { label: string; build: (id: string) => Record<string, unknown> }[] = [];
+      for (const c of candidates) {
+        shapes.push({ label: c.name, build: (id) => ({ [c.name]: id }) });
+        if (hasListInfo) {
+          shapes.push({
+            label: `${c.name} + listInfo`,
+            build: (id) => ({ [c.name]: id, listInfo: { page: 1, pageSize: PAGE_SIZE } }),
+          });
+        }
+      }
+
+      const probeId = needFetch[0]!.superOpsId;
+      let chosen: ((id: string) => Record<string, unknown>) | null = null;
+      let chosenLabel = "";
+      const attempts: string[] = [];
+      for (const shape of shapes) {
+        const probe = await superOpsGraphQL(ctx, "sync_ticket_notes_probe", query, {
+          id: shape.build(probeId),
+        });
+        if (probe.ok) {
+          chosen = shape.build;
+          chosenLabel = shape.label;
+          break;
+        }
+        attempts.push(
+          `${shape.label} (${describeGraphQLErrors(probe.errors) || `HTTP ${probe.status}`})`,
+        );
+      }
+      if (!chosen) {
+        result.error =
+          `${queryName} refused every shape tried for ${idArg.name}: ${idArg.signature} — ` +
+          `${attempts.join("; ")}. Nothing was mirrored.`;
+        return result;
+      }
+      const build = chosen;
+      result.argUsed = `${idArg.name}: ${idArg.signature} { ${chosenLabel} }`;
+      buildVars = (id) => ({ id: build(id) });
+    }
+
     for (const ticket of needFetch) {
       const res = await superOpsGraphQL(
         ctx,
         "sync_ticket_notes",
         query,
-        idArg ? { id: ticket.superOpsId } : {},
+        idArg ? buildVars(ticket.superOpsId) : {},
       );
       // One ticket failing must not abort the run — a migration of thousands
       // cannot be held up by a single unreadable record — but it is counted and

@@ -325,3 +325,38 @@ export function pickTicketIdArg<T extends { name: string; required: boolean }>(
   const required = args.filter((a) => a.required);
   return required.length === 1 ? required[0]! : null;
 }
+
+/**
+ * Plausible ticket-id fields inside an input object, best first.
+ *
+ * Separate from `pickTicketIdArg` because the situations differ. An argument
+ * list can be reasoned about — one required argument is the one you must fill.
+ * An input object's fields carry no such signal, and a tenant that answers a
+ * wrong shape with a bare "Internal Server Error" tells you nothing about which
+ * field it wanted. So this returns an ordered shortlist for the caller to probe
+ * against one real ticket, rather than a single answer to commit to blindly.
+ *
+ * Ordered: names mentioning the ticket, then bare ids, then anything else
+ * id-shaped. A single-field input object is unambiguous whatever it is called.
+ */
+export function ticketIdCandidates<T extends { name: string }>(fields: T[]): T[] {
+  if (fields.length === 1) return [fields[0]!];
+  const seen = new Set<string>();
+  const out: T[] = [];
+  const take = (matches: T[]) => {
+    for (const f of matches) {
+      if (seen.has(f.name)) continue;
+      seen.add(f.name);
+      out.push(f);
+    }
+  };
+  // A display/reference id is tried last within its group: we hold the SuperOps
+  // id, so a display id would fetch nothing and read as an empty history.
+  const rank = (f: T) => (/display|reference|number/i.test(f.name) ? 1 : 0);
+  const byRank = (a: T, b: T) => rank(a) - rank(b);
+
+  take(fields.filter((f) => /ticket/i.test(f.name)).sort(byRank));
+  take(fields.filter((f) => /^id$/i.test(f.name)));
+  take(fields.filter((f) => /id$/i.test(f.name)).sort(byRank));
+  return out;
+}

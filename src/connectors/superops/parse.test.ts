@@ -10,6 +10,7 @@ import {
   parseContract,
   parseTicket,
   pickTicketIdArg,
+  ticketIdCandidates,
   parseWorklog,
 } from "@/connectors/superops/parse";
 
@@ -166,5 +167,38 @@ describe("pickTicketIdArg", () => {
 
   it("ignores optional arguments when looking for the sole required one", () => {
     expect(pickTicketIdArg([arg("a", false), arg("b", false)])).toBeNull();
+  });
+});
+
+describe("ticketIdCandidates", () => {
+  const f = (name: string) => ({ name });
+
+  it("takes a single-field input object whatever it is called", () => {
+    expect(ticketIdCandidates([f("whatever")]).map((x) => x.name)).toEqual(["whatever"]);
+  });
+
+  it("orders ticket-ish names first, then bare id, then other ids", () => {
+    expect(
+      ticketIdCandidates([f("pageSize"), f("someId"), f("id"), f("ticketId")]).map((x) => x.name),
+    ).toEqual(["ticketId", "id", "someId"]);
+  });
+
+  it("tries a display or reference id after the plain one", () => {
+    // We hold the SuperOps id; a display id would fetch nothing and look like
+    // an empty history rather than a wrong field.
+    expect(
+      ticketIdCandidates([f("ticketDisplayId"), f("ticketId")]).map((x) => x.name),
+    ).toEqual(["ticketId", "ticketDisplayId"]);
+  });
+
+  it("lists each candidate once", () => {
+    expect(ticketIdCandidates([f("ticketId"), f("ticketId2")]).map((x) => x.name)).toEqual([
+      "ticketId",
+      "ticketId2",
+    ]);
+  });
+
+  it("returns nothing when no field looks like an id", () => {
+    expect(ticketIdCandidates([f("alpha"), f("beta")])).toEqual([]);
   });
 });
