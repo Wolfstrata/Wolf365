@@ -360,3 +360,34 @@ export function ticketIdCandidates<T extends { name: string }>(fields: T[]): T[]
   take(fields.filter((f) => /id$/i.test(f.name)).sort(byRank));
   return out;
 }
+
+/**
+ * Candidate conversation-query names for a tenant, best first.
+ *
+ * Two sources: the names we know SuperOps has used, and anything in this
+ * tenant's own schema that looks conversation-shaped. The second matters because
+ * a hardcoded list is a guess about someone else's API — a tenant exposing
+ * `getTicketConversationList` under a name we never thought of would otherwise
+ * be invisible.
+ *
+ * Ordering here is only by name. Whether a query can actually be called with a
+ * ticket id is decided by introspecting its arguments, which is what stops the
+ * caller settling on a query that fetches one conversation by conversation id.
+ */
+export function conversationQueryCandidates(
+  available: string[],
+  preferred: string[],
+): string[] {
+  const have = new Set(available);
+  const out = preferred.filter((n) => have.has(n));
+  const seen = new Set(out);
+  // A list query is more likely to take a ticket id than a singular one, so it
+  // comes first among the discovered names.
+  const discovered = available
+    .filter(
+      (n) =>
+        /^get/i.test(n) && /conversation|note|comment|repl(y|ies)|message/i.test(n) && !seen.has(n),
+    )
+    .sort((a, b) => Number(/list$/i.test(b)) - Number(/list$/i.test(a)) || a.localeCompare(b));
+  return [...out, ...discovered];
+}

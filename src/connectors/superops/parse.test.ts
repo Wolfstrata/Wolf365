@@ -11,6 +11,7 @@ import {
   parseTicket,
   pickTicketIdArg,
   ticketIdCandidates,
+  conversationQueryCandidates,
   parseWorklog,
 } from "@/connectors/superops/parse";
 
@@ -200,5 +201,45 @@ describe("ticketIdCandidates", () => {
 
   it("returns nothing when no field looks like an id", () => {
     expect(ticketIdCandidates([f("alpha"), f("beta")])).toEqual([]);
+  });
+});
+
+describe("conversationQueryCandidates", () => {
+  const preferred = ["getTicketConversation", "getConversationList", "getTicketNotes"];
+
+  it("keeps known names first, in their given order", () => {
+    expect(
+      conversationQueryCandidates(
+        ["getConversationList", "getClientList", "getTicketConversation"],
+        preferred,
+      ),
+    ).toEqual(["getTicketConversation", "getConversationList"]);
+  });
+
+  it("discovers conversation-shaped names the hardcoded list never knew", () => {
+    // A hardcoded list is a guess about someone else's API; a tenant naming it
+    // something else would otherwise be invisible.
+    expect(conversationQueryCandidates(["getTicketReplyList", "getClientList"], preferred)).toEqual([
+      "getTicketReplyList",
+    ]);
+  });
+
+  it("prefers list queries among discovered names", () => {
+    // A singular query usually fetches one record by its own id, which is no use
+    // when all we have is the ticket.
+    expect(
+      conversationQueryCandidates(["getTicketComment", "getTicketCommentList"], preferred),
+    ).toEqual(["getTicketCommentList", "getTicketComment"]);
+  });
+
+  it("never repeats a name that is both known and discoverable", () => {
+    const out = conversationQueryCandidates(["getConversationList"], preferred);
+    expect(out).toEqual(["getConversationList"]);
+  });
+
+  it("ignores unrelated and non-get names", () => {
+    expect(
+      conversationQueryCandidates(["createConversation", "getClientList", "getAssetList"], preferred),
+    ).toEqual([]);
   });
 });

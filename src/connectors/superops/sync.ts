@@ -30,6 +30,7 @@ import {
   parseWorklog,
   pickTicketIdArg,
   ticketIdCandidates,
+  conversationQueryCandidates,
   type Obj,
 } from "@/connectors/superops/parse";
 
@@ -1270,6 +1271,128 @@ async function queryNames(ctx: SuperOpsCtx): Promise<string[]> {
   return fields.map((f) => f.name);
 }
 
+interface ResolvedConversationQuery {
+  queryName: string | null;
+  argLabel: string | null;
+  call: { query: string; buildVars: (ticketId: string) => Record<string, unknown> } | null;
+  /** Everything tried and why it was rejected, for the message when nothing works. */
+  attempts: string[];
+}
+
+/**
+ * Find a conversation query this tenant will answer for a *ticket* id, by trying.
+ *
+ * The lesson that produced this: `getTicketConversation` exists on the tenant,
+ * so it was chosen — but it takes `TicketConversationIdentifierInput` whose only
+ * identifier is `conversationId`. It fetches one conversation you already know
+ * the id of; it cannot list a ticket's history. A query's name says nothing
+ * about what it can be called with, so each candidate is checked against its
+ * actual arguments and then probed with a real ticket id. The first that answers
+ * wins, and nothing is committed to on the strength of its name.
+ *
+ * Every rejection is recorded, so a total failure can say what was tried rather
+ * than reporting an empty history.
+ */
+async function resolveConversationQuery(
+  ctx: SuperOpsCtx,
+  names: string[],
+  probeTicketId: string,
+): Promise<ResolvedConversationQuery> {
+  const attempts: string[] = [];
+  let lastName: string | null = null;
+
+  for (const queryName of names) {
+    lastName = queryName;
+    const args = await introspectQueryArgs(ctx, queryName);
+    if (args == null) {
+      attempts.push(`${queryName} (arguments not introspectable)`);
+      continue;
+    }
+    const idArg = pickTicketIdArg(args);
+    if (!idArg && args.some((a) => a.required)) {
+      attempts.push(
+        `${queryName} (takes ${args.map((a) => `${a.name}: ${a.signature}`).join(", ")}, ` +
+          `none of which is a ticket id)`,
+      );
+      continue;
+    }
+
+    // What the ticket id has to be wrapped in. A scalar argument takes it
+    // directly; an input object needs the right field, which is probed below.
+    const shapes: { label: string; build: (id: string) => unknown }[] = [];
+    if (!idArg) {
+      shapes.push({ label: "no argument", build: () => undefined });
+    } else if (idArg.kind === "INPUT_OBJECT" && idArg.baseName) {
+      const inputFields = await introspectInputFields(ctx, idArg.baseName);
+      const candidates = ticketIdCandidates(inputFields ?? []).slice(0, 4);
+      if (candidates.length === 0) {
+        attempts.push(
+          `${queryName} (${idArg.name}: ${idArg.signature} has no ticket-id field; it offers ` +
+            `${(inputFields ?? []).map((f) => f.name).join(", ") || "nothing"})`,
+        );
+        continue;
+      }
+      // SuperOps' list inputs carry pagination under `listInfo`; try that too,
+      // but only when the field exists — inventing one would turn a field-name
+      // problem into an unknown-field problem.
+      const hasListInfo = (inputFields ?? []).some((f) => /listinfo/i.test(f.name));
+      for (const c of candidates) {
+        shapes.push({ label: `${idArg.name} { ${c.name} }`, build: (id) => ({ [c.name]: id }) });
+        if (hasListInfo) {
+          shapes.push({
+            label: `${idArg.name} { ${c.name}, listInfo }`,
+            build: (id) => ({ [c.name]: id, listInfo: { page: 1, pageSize: PAGE_SIZE } }),
+          });
+        }
+      }
+    } else {
+      shapes.push({ label: `${idArg.name}: ${idArg.signature}`, build: (id) => id });
+    }
+
+    // What to select back.
+    const returnType = await introspectQueryReturnType(ctx, queryName);
+    if (!returnType) {
+      attempts.push(`${queryName} (return type not introspectable)`);
+      continue;
+    }
+    const detail = (await introspectTypeFieldsDetailed(ctx, returnType)) ?? [];
+    const listField = detail.find(
+      (f) => f.base.kind === "OBJECT" && /conversation|note|comment|repl|message/i.test(f.name),
+    );
+    const elementType = listField?.base.name ?? returnType;
+    const selection = await buildTypeSelection(ctx, elementType, 1, new Set([elementType]));
+    if (!selection.trim()) {
+      attempts.push(`${queryName} (returns ${elementType}, which exposes no readable fields)`);
+      continue;
+    }
+    const wrapped = listField ? `${listField.name} { ${selection} }` : selection;
+    const query = idArg
+      ? `query ($id: ${idArg.signature}) { ${queryName}(${idArg.name}: $id) { ${wrapped} } }`
+      : `query { ${queryName} { ${wrapped} } }`;
+
+    for (const shape of shapes) {
+      const vars = idArg ? { id: shape.build(probeTicketId) } : {};
+      const probe = await superOpsGraphQL(ctx, "sync_ticket_notes_probe", query, vars);
+      if (probe.ok) {
+        return {
+          queryName,
+          argLabel: shape.label,
+          call: {
+            query,
+            buildVars: (id) => (idArg ? { id: shape.build(id) } : {}),
+          },
+          attempts,
+        };
+      }
+      attempts.push(
+        `${queryName} ${shape.label} (${describeGraphQLErrors(probe.errors) || `HTTP ${probe.status}`})`,
+      );
+    }
+  }
+
+  return { queryName: lastName, argLabel: null, call: null, attempts };
+}
+
 export interface NoteSyncResult {
   notes: number;
   ticketsScanned: number;
@@ -1352,113 +1475,31 @@ export async function syncSuperOpsTicketNotes(
 
     if (needFetch.length === 0) return result;
 
-    // Path 2: discover a conversation query and call it per ticket.
-    const available = new Set(await queryNames(ctx));
-    const queryName = NOTE_QUERY_CANDIDATES.find((n) => available.has(n)) ?? null;
-    result.queryUsed = queryName;
-    if (!queryName) return result;
+    // Path 2: find a conversation query this tenant will actually answer, then
+    // call it per ticket.
+    const available = await queryNames(ctx);
+    const names = conversationQueryCandidates(available, NOTE_QUERY_CANDIDATES);
+    if (names.length === 0) return result;
 
-    // How to call it. The name being present says nothing about the argument it
-    // wants, and a wrong argument fails every ticket identically.
-    const args = await introspectQueryArgs(ctx, queryName);
-    const idArg = args ? pickTicketIdArg(args) : null;
-    if (args && args.some((a) => a.required) && !idArg) {
+    const resolved = await resolveConversationQuery(ctx, names, needFetch[0]!.superOpsId);
+    // Only set when one actually answered: "used" must mean used, or the next
+    // person debugging this reads a name that never worked as the one that did.
+    result.queryUsed = resolved.call ? resolved.queryName : null;
+    result.argUsed = resolved.argLabel;
+    if (!resolved.call) {
       result.error =
-        `Found ${queryName} but could not tell which argument takes the ticket id ` +
-        `(it accepts: ${args.map((a) => `${a.name}: ${a.signature}`).join(", ") || "nothing"}). ` +
-        `Nothing was mirrored.`;
+        `No conversation query on this tenant would answer for a ticket id. Tried: ` +
+        `${resolved.attempts.join("; ")}. Nothing was mirrored.`;
       return result;
     }
-    result.argUsed = idArg ? `${idArg.name}: ${idArg.signature}` : null;
-
-    const returnType = await introspectQueryReturnType(ctx, queryName);
-    if (!returnType) {
-      result.error = `Could not introspect the return type of ${queryName}, so no selection could be built.`;
-      return result;
-    }
-    // The collection field on the return type — its name varies with the query.
-    const detail = (await introspectTypeFieldsDetailed(ctx, returnType)) ?? [];
-    const listField = detail.find(
-      (f) => f.base.kind === "OBJECT" && /conversation|note|comment|repl|message/i.test(f.name),
-    );
-    const elementType = listField?.base.name ?? returnType;
-    const selection = await buildTypeSelection(ctx, elementType, 1, new Set([elementType]));
-    if (!selection.trim()) {
-      result.error = `${queryName} returns ${elementType}, which exposes no readable fields.`;
-      return result;
-    }
-
-    const wrapped = listField ? `${listField.name} { ${selection} }` : selection;
-    const query = idArg
-      ? `query ($id: ${idArg.signature}) { ${queryName}(${idArg.name}: $id) { ${wrapped} } }`
-      : `query { ${queryName} { ${wrapped} } }`;
-
-    // The argument may be an input object rather than a scalar — SuperOps wants
-    // `input: TicketConversationIdentifierInput!`, not a bare id. Which of its
-    // fields carries the ticket id cannot be reasoned out (a wrong shape comes
-    // back as a bare "Internal Server Error"), so the plausible ones are probed
-    // against one real ticket and the first that answers is used.
-    let buildVars: (id: string) => Record<string, unknown> = (id) => ({ id });
-    if (idArg && idArg.kind === "INPUT_OBJECT" && idArg.baseName) {
-      const inputFields = await introspectInputFields(ctx, idArg.baseName);
-      const candidates = ticketIdCandidates(inputFields ?? []).slice(0, 4);
-      if (candidates.length === 0) {
-        result.error =
-          `${queryName} takes ${idArg.name}: ${idArg.signature}, and none of its fields ` +
-          `(${(inputFields ?? []).map((f) => f.name).join(", ") || "none"}) looks like a ticket id. ` +
-          `Nothing was mirrored.`;
-        return result;
-      }
-      // SuperOps' list inputs carry pagination under `listInfo`; if this input
-      // declares one, the id alone may not satisfy it. Both shapes are tried,
-      // but only when the field actually exists — inventing one would turn a
-      // field-name problem into an unknown-field problem.
-      const hasListInfo = (inputFields ?? []).some((f) => /listinfo/i.test(f.name));
-      const shapes: { label: string; build: (id: string) => Record<string, unknown> }[] = [];
-      for (const c of candidates) {
-        shapes.push({ label: c.name, build: (id) => ({ [c.name]: id }) });
-        if (hasListInfo) {
-          shapes.push({
-            label: `${c.name} + listInfo`,
-            build: (id) => ({ [c.name]: id, listInfo: { page: 1, pageSize: PAGE_SIZE } }),
-          });
-        }
-      }
-
-      const probeId = needFetch[0]!.superOpsId;
-      let chosen: ((id: string) => Record<string, unknown>) | null = null;
-      let chosenLabel = "";
-      const attempts: string[] = [];
-      for (const shape of shapes) {
-        const probe = await superOpsGraphQL(ctx, "sync_ticket_notes_probe", query, {
-          id: shape.build(probeId),
-        });
-        if (probe.ok) {
-          chosen = shape.build;
-          chosenLabel = shape.label;
-          break;
-        }
-        attempts.push(
-          `${shape.label} (${describeGraphQLErrors(probe.errors) || `HTTP ${probe.status}`})`,
-        );
-      }
-      if (!chosen) {
-        result.error =
-          `${queryName} refused every shape tried for ${idArg.name}: ${idArg.signature} — ` +
-          `${attempts.join("; ")}. Nothing was mirrored.`;
-        return result;
-      }
-      const build = chosen;
-      result.argUsed = `${idArg.name}: ${idArg.signature} { ${chosenLabel} }`;
-      buildVars = (id) => ({ id: build(id) });
-    }
+    const { query, buildVars } = resolved.call;
 
     for (const ticket of needFetch) {
       const res = await superOpsGraphQL(
         ctx,
         "sync_ticket_notes",
         query,
-        idArg ? buildVars(ticket.superOpsId) : {},
+        buildVars(ticket.superOpsId),
       );
       // One ticket failing must not abort the run — a migration of thousands
       // cannot be held up by a single unreadable record — but it is counted and
