@@ -176,8 +176,8 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
   },
   migration: {
     title: "SuperOps migration",
-    body: "Bringing history across from SuperOps, and the switch that ends it. The coverage table compares what Wolf365 has mirrored against what SilverFang has imported, so \"am I safe to cancel?\" is answered by numbers rather than by remembering which buttons you pressed.",
-    todo: "It cannot tell you whether the mirror itself is complete — check the ticket sync reports \"Backfill complete\" on Connector Data first. Switching SuperOps off stops all syncing and importing but deletes nothing, and is reversible.",
+    body: "Bringing history across from SuperOps, and the switch that ends it. The coverage table compares what Wolf365 has mirrored against what SilverFang has imported, so \"am I safe to cancel?\" is answered by numbers rather than by memory. Running the service desk and switching a connector off for the whole company are different jobs, so this page is Administrator-only.",
+    todo: "Administrator only. It cannot tell you whether the mirror itself is complete — check the ticket sync reports \"Backfill complete\" on Connector Data first. Switching SuperOps off deletes nothing and is reversible.",
   },
   ticketImport: {
     title: "Import tickets from SuperOps",

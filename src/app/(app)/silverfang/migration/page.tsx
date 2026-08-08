@@ -23,7 +23,10 @@ export const dynamic = "force-dynamic";
  * whether the mirror itself is complete.
  */
 export default async function MigrationPage() {
-  await requirePermission("silverfang:configure");
+  // Administrator only. A SilverFang administrator runs the service desk; turning
+  // a connector off for the whole install — and with it every sync and import —
+  // is not part of running the service desk.
+  await requirePermission("connectors:configure");
   const [policy, coverage] = await Promise.all([migrationPolicy(), migrationCoverage()]);
   const complete = coverageComplete(coverage);
 

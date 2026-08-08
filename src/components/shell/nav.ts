@@ -40,7 +40,11 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Service Reporting", href: "/silverfang/reports", icon: "BarChart3", section: "SilverFang", permission: "time:approve" },
   { label: "Email", href: "/silverfang/email", icon: "Inbox", section: "SilverFang", permission: "silverfang:configure" },
   { label: "SilverFang Setup", href: "/silverfang/setup", icon: "SlidersHorizontal", section: "SilverFang", permission: "silverfang:configure" },
-  { label: "SuperOps Migration", href: "/silverfang/migration", icon: "GitMerge", section: "SilverFang", permission: "silverfang:configure" },
+  // Administrator only, via connectors:configure — the one permission POWER_USER
+  // deliberately lacks. Switching SuperOps off is connector configuration that
+  // stops every sync and import for the whole install, which is a bigger decision
+  // than running the SilverFang module.
+  { label: "SuperOps Migration", href: "/silverfang/migration", icon: "GitMerge", section: "SilverFang", permission: "connectors:configure" },
   // Last in the section, and readable by anyone who can see a ticket —
   // documentation only the administrator can open is not documentation.
   { label: "SilverFang Docs", href: "/silverfang/docs", icon: "BookText", section: "SilverFang", permission: "tickets:read" },

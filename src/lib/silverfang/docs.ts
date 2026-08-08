@@ -268,7 +268,7 @@ export const DOC_SECTIONS: DocSection[] = [
       },
       { h: "The cutover" },
       {
-        p: "One switch, for the whole install. Turning SuperOps off stops the scheduled sync, the manual syncs and every import path, and SilverFang becomes the source of truth.",
+        p: "One switch, for the whole install. Turning SuperOps off stops the scheduled sync, the manual syncs and every import path, and SilverFang becomes the source of truth. The SuperOps Migration page is Administrator-only — a SilverFang administrator runs the service desk, but turning a connector off for the whole company is not part of running the service desk.",
       },
       {
         note: "Switching off deletes nothing. The tickets, time, notes and contacts already imported are SilverFang's own records — that is the point of having migrated them. The switch is reversible if you need one more pass before the subscription ends.",

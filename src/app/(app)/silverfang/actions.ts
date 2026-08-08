@@ -1122,7 +1122,9 @@ export async function syncSuperOpsNotesAction(
   _prev: SfActionResult | null,
   _formData: FormData,
 ): Promise<SfActionResult> {
-  const user = await requirePermission("silverfang:configure");
+  // Administrator only, matching the page it lives on. Gated server-side rather
+  // than only hidden from the nav — a hidden button is not a permission check.
+  const user = await requirePermission("connectors:configure");
   try {
     if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const { runSuperOpsNoteSync } = await import("@/lib/superops/tickets");
@@ -1181,7 +1183,7 @@ export async function importSuperOpsNotesAction(
   _prev: SfActionResult | null,
   _formData: FormData,
 ): Promise<SfActionResult> {
-  const user = await requirePermission("silverfang:configure");
+  const user = await requirePermission("connectors:configure");
   try {
     if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const { importSuperOpsTicketNotes } = await import(
@@ -1229,7 +1231,10 @@ export async function setSuperOpsEnabledAction(
   _prev: SfActionResult | null,
   formData: FormData,
 ): Promise<SfActionResult> {
-  const user = await requirePermission("silverfang:configure");
+  // The switch itself: Administrator only. It stops every sync and every import
+  // across the whole install, so it is deliberately out of reach of the role that
+  // only runs SilverFang.
+  const user = await requirePermission("connectors:configure");
   try {
     const input = cutoverSchema.parse({
       enabled: formData.get("enabled") === "on",
