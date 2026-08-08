@@ -7,14 +7,17 @@ import { importSuperOpsClientsAction, type SfActionResult } from "../actions";
 /**
  * Import SuperOps clients + contacts. Safe to re-run — contacts key off their
  * source id, so a second run updates rather than duplicating.
+ *
+ * `className` exists so the migration runbook can show the same button
+ * left-aligned in its numbered step, rather than a second copy of the wiring.
  */
-export function ImportSuperOpsButton() {
+export function ImportSuperOpsButton({ className }: { className?: string } = {}) {
   const [result, action, pending] = useActionState<SfActionResult | null, FormData>(
     importSuperOpsClientsAction,
     null,
   );
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className={className ?? "flex flex-col items-end gap-2 text-right"}>
       <form action={action}>
         <button
           type="submit"
@@ -26,9 +29,7 @@ export function ImportSuperOpsButton() {
         </button>
       </form>
       {result && (
-        <p
-          className={`max-w-md text-right text-xs ${result.ok ? "text-success" : "text-danger"}`}
-        >
+        <p className={`max-w-xl text-xs ${result.ok ? "text-success" : "text-danger"}`}>
           {result.message}
         </p>
       )}

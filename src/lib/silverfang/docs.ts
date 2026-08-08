@@ -259,11 +259,17 @@ export const DOC_SECTIONS: DocSection[] = [
       },
       { h: "The order to do it in" },
       {
+        p: "The SuperOps Migration page has every step as a numbered button, in the order they have to happen. Each one also lives on the screen it belongs to — the ticket import beside the tickets, the connector sync on Connector Data — but the sequence is only in one place, because the order is load-bearing rather than a suggestion.",
+      },
+      {
         list: [
-          "Clients and contacts, from the Clients page. Nothing else can import until a SuperOps client is linked to a Wolf365 client.",
-          "Tickets, from Tickets → Import from SuperOps. Asks whether to overwrite ones it imported before.",
-          "Worklogs, on the same page. They become time entries, as drafts.",
-          "Conversations, from SuperOps Migration. Mirror first, then import them onto the tickets.",
+          "Mirror: account data — clients, sites, contacts, assets, contracts, invoices.",
+          "Mirror: tickets and worklogs. Bounded and resumable — press until it says “Backfill complete”.",
+          "Mirror: conversations.",
+          "Import: clients and contacts. Nothing else can import until a SuperOps client is linked to a Wolf365 client.",
+          "Import: tickets. Asks whether to overwrite ones it imported before.",
+          "Import: worklogs. They become time entries, as drafts.",
+          "Import: conversations, onto the tickets from step 5.",
         ],
       },
       {
