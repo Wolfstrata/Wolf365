@@ -285,3 +285,22 @@ describe("describeNoteSync — bounded runs", () => {
     expect(r.message).toContain("DataFetchingException / path=getTicketNoteList");
   });
 });
+
+describe("describeNoteSync — nothing to scan", () => {
+  const base = { notes: 0, ticketsScanned: 0, fromEmbedded: 0, queryUsed: null };
+
+  it("tells you to sync tickets only when there really are none", () => {
+    const r = describeNoteSync({ ...base, totalTickets: 0 });
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("run the ticket sync first");
+  });
+
+  it("says the work is done when every mirrored ticket is already checked", () => {
+    // The opposite advice to the case above; getting them the wrong way round
+    // sends you to redo a sync that was already complete.
+    const r = describeNoteSync({ ...base, totalTickets: 261 });
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain("All 261 mirrored ticket(s) have already been checked");
+    expect(r.message).not.toContain("run the ticket sync first");
+  });
+});

@@ -1149,6 +1149,7 @@ export async function syncSuperOpsNotesAction(
         firstError: result.firstError,
         errorSamples: result.errorSamples,
         remaining: result.remaining,
+        totalTickets: result.totalTickets,
       },
     });
     revalidatePath("/silverfang/migration");

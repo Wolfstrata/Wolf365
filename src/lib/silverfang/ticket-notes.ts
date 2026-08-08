@@ -260,6 +260,8 @@ export interface NoteSyncOutcome {
   emptyTickets?: number;
   /** Tickets not yet asked about, because the run is bounded by the rate limit. */
   remaining?: number;
+  /** Every mirrored ticket, checked or not. */
+  totalTickets?: number;
   error?: string;
 }
 
@@ -291,9 +293,20 @@ export function describeNoteSync(r: NoteSyncOutcome): { ok: boolean; message: st
   }
 
   if (r.ticketsScanned === 0) {
+    // Two very different zeros. Reporting "run the ticket sync first" when the
+    // sync was already complete sends you to redo finished work and hides that
+    // the mirror is actually done.
+    if ((r.totalTickets ?? 0) === 0) {
+      return {
+        ok: false,
+        message: "No SuperOps tickets are mirrored yet — run the ticket sync first.",
+      };
+    }
     return {
-      ok: false,
-      message: "No SuperOps tickets are mirrored yet — run the ticket sync first.",
+      ok: true,
+      message:
+        `All ${r.totalTickets} mirrored ticket(s) have already been checked for ` +
+        `conversations. Import them below.`,
     };
   }
 

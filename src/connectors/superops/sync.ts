@@ -1437,6 +1437,13 @@ export interface NoteSyncResult {
    * rate limit, so "press again to continue" is the honest report, not "done".
    */
   remaining: number;
+  /**
+   * Every mirrored ticket, checked or not. Carried so a run that does nothing can
+   * say *why*: no tickets mirrored at all is a different problem from all of them
+   * already done, and reporting the first when it is the second sends you back to
+   * re-run a sync that was already complete.
+   */
+  totalTickets: number;
   error?: string;
 }
 
@@ -1475,20 +1482,23 @@ export async function syncSuperOpsTicketNotes(
     unparsedRecords: 0,
     emptyTickets: 0,
     remaining: 0,
+    totalTickets: 0,
     errorSamples: [],
   };
 
   try {
-    // Only tickets not yet checked, or changed since they were. Without this a
-    // re-run spends the whole minute's quota re-asking the same first hundred
-    // and never reaches the rest — which is exactly what happened.
-    const pending = {
-      OR: [
-        { notesCheckedAt: null },
-        { notesCheckedAt: { lt: prisma.superOpsTicket.fields.updatedTime } },
-      ],
-    };
-    const [tickets, totalPending] = await Promise.all([
+    // Tickets not yet asked about. Without this a re-run spends the whole
+    // minute's quota re-asking the same first hundred and never reaches the rest
+    // — which is exactly what happened.
+    //
+    // A plain "is it null" rather than comparing it against updatedTime: the
+    // field-reference form is the one novel thing in this query, and when a run
+    // reported no tickets at all against a mirror holding 261 of them, the
+    // fragile construct was the thing to remove rather than the thing to trust.
+    // Re-checking a ticket therefore means clearing the column, not waiting for
+    // it to age out.
+    const pending = { notesCheckedAt: null };
+    const [tickets, totalPending, totalTickets] = await Promise.all([
       prisma.superOpsTicket.findMany({
         where: pending,
         orderBy: { updatedTime: "desc" },
@@ -1496,7 +1506,9 @@ export async function syncSuperOpsTicketNotes(
         select: { id: true, superOpsId: true, raw: true },
       }),
       prisma.superOpsTicket.count({ where: pending }),
+      prisma.superOpsTicket.count(),
     ]);
+    result.totalTickets = totalTickets;
     result.remaining = Math.max(0, totalPending - tickets.length);
     if (tickets.length === 0) return result;
 
