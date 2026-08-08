@@ -174,6 +174,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "The manual: how boards, ticket ordering, time, agreements, projects, templates and email actually behave — including the deliberate surprises, like email to clients being off by default and block time never being auto-selected.",
     todo: "Start at Getting set up if this is a fresh install; it lists the order to do things in. Every section links from the contents at the top.",
   },
+  migration: {
+    title: "SuperOps migration",
+    body: "Bringing history across from SuperOps, and the switch that ends it. The coverage table compares what Wolf365 has mirrored against what SilverFang has imported, so \"am I safe to cancel?\" is answered by numbers rather than by remembering which buttons you pressed.",
+    todo: "It cannot tell you whether the mirror itself is complete — check the ticket sync reports \"Backfill complete\" on Connector Data first. Switching SuperOps off stops all syncing and importing but deletes nothing, and is reversible.",
+  },
   ticketImport: {
     title: "Import tickets from SuperOps",
     body: "Turns synced SuperOps tickets into real SilverFang tickets. Matched by SuperOps ticket id, so re-running finds the same ticket rather than duplicating it. Imported tickets land on Service Desk with priority and status mapped across, and pick up a managed client's agreement so they are not unrated.",

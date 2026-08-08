@@ -13,6 +13,7 @@ import {
   type SuperOpsCtx,
 } from "@/connectors/superops/client";
 import * as Q from "@/connectors/superops/queries";
+import { extractEmbeddedNotes, parseNote } from "@/lib/silverfang/ticket-notes";
 import {
   firstObjectArray,
   pick,
@@ -1233,4 +1234,170 @@ export async function syncSuperOpsAccountData(ctx: SuperOpsCtx): Promise<{
       },
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Ticket conversations / notes
+// ---------------------------------------------------------------------------
+
+/**
+ * Query names that plausibly return a ticket's conversation, best first.
+ *
+ * Discovered rather than hardcoded: SuperOps' schema differs between tenants, and
+ * a hardcoded name that does not exist fails the whole query. The first one this
+ * tenant actually exposes is used.
+ */
+const NOTE_QUERY_CANDIDATES = [
+  "getTicketConversation",
+  "getConversationList",
+  "getTicketConversationList",
+  "getTicketNotes",
+  "getNoteList",
+  "getTicketComments",
+];
+
+/** Every top-level query name this tenant exposes. */
+async function queryNames(ctx: SuperOpsCtx): Promise<string[]> {
+  const q = `query { __schema { queryType { fields { name } } } }`;
+  const res = await superOpsGraphQL(ctx, "introspect_queries", q, {});
+  const fields = (
+    res.data as { __schema?: { queryType?: { fields?: { name: string }[] } } } | null
+  )?.__schema?.queryType?.fields;
+  if (!res.ok || !Array.isArray(fields)) return [];
+  return fields.map((f) => f.name);
+}
+
+export interface NoteSyncResult {
+  notes: number;
+  ticketsScanned: number;
+  /** Notes found already embedded in the ticket JSON, costing no extra call. */
+  fromEmbedded: number;
+  /** The discovered query name, or null when this tenant exposes none. */
+  queryUsed: string | null;
+  error?: string;
+}
+
+/**
+ * Mirror ticket conversations into `SuperOpsTicketNote`.
+ *
+ * Two paths, in this order:
+ *
+ *  1. **Embedded.** The ticket query is introspection-built and expands nested
+ *     objects, so on many tenants the conversation is already in the stored ticket
+ *     JSON. Reading it costs nothing and cannot fail.
+ *  2. **Fetched.** For tenants where it is not embedded, the conversation query is
+ *     discovered by introspection and called per ticket.
+ *
+ * When neither yields anything the result says so — `queryUsed: null` with zero
+ * notes is "this tenant exposes no conversation API", which is a different problem
+ * from "these tickets have no conversation", and the caller reports the difference
+ * rather than showing a silent zero.
+ */
+export async function syncSuperOpsTicketNotes(
+  ctx: SuperOpsCtx,
+  opts: { maxTickets?: number } = {},
+): Promise<NoteSyncResult> {
+  const maxTickets = opts.maxTickets ?? 500;
+  const result: NoteSyncResult = {
+    notes: 0,
+    ticketsScanned: 0,
+    fromEmbedded: 0,
+    queryUsed: null,
+  };
+
+  try {
+    const tickets = await prisma.superOpsTicket.findMany({
+      orderBy: { updatedTime: "desc" },
+      take: maxTickets,
+      select: { id: true, superOpsId: true, raw: true },
+    });
+    if (tickets.length === 0) return result;
+
+    // Path 1: whatever is already in the stored ticket JSON.
+    const needFetch: { id: string; superOpsId: string }[] = [];
+    for (const ticket of tickets) {
+      result.ticketsScanned += 1;
+      const embedded = extractEmbeddedNotes(ticket.raw, ticket.superOpsId);
+      if (embedded.length === 0) {
+        needFetch.push({ id: ticket.id, superOpsId: ticket.superOpsId });
+        continue;
+      }
+      for (const note of embedded) {
+        await storeNote(ticket.id, note, null);
+        result.notes += 1;
+        result.fromEmbedded += 1;
+      }
+    }
+
+    if (needFetch.length === 0) return result;
+
+    // Path 2: discover a conversation query and call it per ticket.
+    const available = new Set(await queryNames(ctx));
+    const queryName = NOTE_QUERY_CANDIDATES.find((n) => available.has(n)) ?? null;
+    result.queryUsed = queryName;
+    if (!queryName) return result;
+
+    const returnType = await introspectQueryReturnType(ctx, queryName);
+    if (!returnType) return result;
+    // The collection field on the return type — its name varies with the query.
+    const detail = (await introspectTypeFieldsDetailed(ctx, returnType)) ?? [];
+    const listField = detail.find(
+      (f) => f.base.kind === "OBJECT" && /conversation|note|comment|repl|message/i.test(f.name),
+    );
+    const elementType = listField?.base.name ?? returnType;
+    const selection = await buildTypeSelection(ctx, elementType, 1, new Set([elementType]));
+    if (!selection.trim()) return result;
+
+    const wrapped = listField
+      ? `${listField.name} { ${selection} }`
+      : selection;
+    const query = `query ($id: ID!) { ${queryName}(ticketId: $id) { ${wrapped} } }`;
+
+    for (const ticket of needFetch) {
+      const res = await superOpsGraphQL(ctx, "sync_ticket_notes", query, {
+        id: ticket.superOpsId,
+      });
+      // One ticket failing must not abort the run: a migration of thousands
+      // cannot be held up by a single unreadable record.
+      if (!res.ok) continue;
+      const records = firstObjectArray(res.data) ?? [];
+      // A plain loop, not forEach: an async callback there is not awaited, so the
+      // writes would race the counter and the function would return before they
+      // landed.
+      for (const [i, raw] of records.entries()) {
+        const parsed = parseNote(raw, `${ticket.superOpsId}:${i}`);
+        if (!parsed) continue;
+        await storeNote(ticket.id, parsed, raw);
+        result.notes += 1;
+      }
+    }
+  } catch (err) {
+    result.error = err instanceof Error ? err.message : "ticket note sync error";
+  }
+
+  return result;
+}
+
+/** Upsert one mirrored note, keyed on its SuperOps id. */
+async function storeNote(
+  ticketId: string,
+  note: ReturnType<typeof parseNote> & object,
+  raw: unknown,
+): Promise<void> {
+  const data = {
+    ticketId,
+    kind: note.kind,
+    isPrivate: note.isPrivate,
+    author: note.author,
+    authorEmail: note.authorEmail,
+    body: note.body,
+    createdTime: note.createdAt,
+    ...(raw != null ? { raw: raw as Prisma.InputJsonValue } : {}),
+    lastSyncedAt: new Date(),
+  };
+  await prisma.superOpsTicketNote.upsert({
+    where: { superOpsId: note.externalId },
+    create: { superOpsId: note.externalId, ...data },
+    update: data,
+  });
 }

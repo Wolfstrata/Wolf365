@@ -6,6 +6,7 @@ import { safeErrorMessage } from "@/lib/redact";
 import { runSync } from "@/connectors/runtime";
 import { runSuperOpsTicketSync } from "@/lib/superops/tickets";
 import { materializeClients } from "@/lib/mapping/service";
+import { SUPEROPS_OFF_MESSAGE, superOpsEnabled } from "@/lib/silverfang/migration-policy";
 
 export interface SyncActionResult {
   ok: boolean;
@@ -19,6 +20,7 @@ export async function syncSuperOpsAction(
 ): Promise<SyncActionResult> {
   const user = await requirePermission("connectors:sync");
   try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const r = await runSync("SUPEROPS", "manual", user.id);
     const s = (r.summary ?? {}) as Record<string, unknown>;
     revalidatePath("/synced/superops");
@@ -52,6 +54,7 @@ export async function syncSuperOpsTicketsAction(
 ): Promise<SyncActionResult> {
   await requirePermission("connectors:sync");
   try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const r = await runSuperOpsTicketSync();
     revalidatePath("/synced/superops");
     const done = r.ticketsDone && r.worklogsDone;

@@ -26,6 +26,7 @@ import {
   type DefaultAgreementReason,
 } from "@/lib/silverfang/default-agreement";
 import { describeAssignment } from "@/lib/silverfang/assignees";
+import { SUPEROPS_OFF_MESSAGE, superOpsEnabled } from "@/lib/silverfang/migration-policy";
 import {
   defaultAgreementFor,
   ensureSilverFangDefaults,
@@ -923,6 +924,7 @@ export async function importSuperOpsClientsAction(
 ): Promise<SfActionResult> {
   const user = await requirePermission("silverfang:configure");
   try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const { importSuperOpsClients, describeImport } = await import(
       "@/lib/silverfang/import"
     );
@@ -1053,6 +1055,10 @@ export async function importSuperOpsTicketsAction(
 ): Promise<SfActionResult> {
   const user = await requirePermission("silverfang:configure");
   try {
+    // The cutover switch. Once SuperOps is off, an import button that can only
+    // ever bring across stale data is a trap, so every path refuses with the
+    // same message.
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const input = ticketImportSchema.parse({
       overwrite: formData.get("overwrite") === "yes",
       expectedExisting: formValue(formData, "expectedExisting"),
@@ -1106,6 +1112,160 @@ export async function importSuperOpsTicketsAction(
 }
 
 /**
+ * Mirror SuperOps ticket conversations into Wolf365.
+ *
+ * Two-stage on purpose, like every other connector entity: mirror first, import
+ * second. The mirror is a faithful read-only copy, so a mapping can be corrected
+ * and re-imported without going back to an API that may by then be cancelled.
+ */
+export async function syncSuperOpsNotesAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
+    const { runSuperOpsNoteSync } = await import("@/lib/superops/tickets");
+    const result = await runSuperOpsNoteSync({ maxTickets: 500 });
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:notes-sync",
+      metadata: {
+        notes: result.notes,
+        ticketsScanned: result.ticketsScanned,
+        fromEmbedded: result.fromEmbedded,
+        queryUsed: result.queryUsed,
+      },
+    });
+    revalidatePath("/silverfang/migration");
+
+    if (result.error) {
+      return { ok: false, message: `Partial: ${result.notes} mirrored. ${result.error}` };
+    }
+    if (result.notes === 0 && result.queryUsed === null && result.ticketsScanned > 0) {
+      // The distinction that matters: nothing found because this tenant exposes no
+      // conversation API, versus nothing found because these tickets have none.
+      return {
+        ok: false,
+        message:
+          `Scanned ${result.ticketsScanned} ticket(s) and found no conversations embedded in ` +
+          `the synced data, and this SuperOps tenant exposes no conversation query that ` +
+          `Wolf365 recognises. Nothing can be mirrored — the ticket history is not reachable ` +
+          `through the API as configured.`,
+      };
+    }
+    return {
+      ok: true,
+      message:
+        `${result.notes} conversation entr${result.notes === 1 ? "y" : "ies"} mirrored from ` +
+        `${result.ticketsScanned} ticket(s)` +
+        (result.fromEmbedded > 0
+          ? `, ${result.fromEmbedded} of them already embedded in the synced ticket data`
+          : "") +
+        (result.queryUsed ? ` (via ${result.queryUsed})` : "") +
+        ". Import them below.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
+ * Import mirrored SuperOps conversations as ticket notes.
+ *
+ * Third step, after tickets: a note can only land on a ticket that is here.
+ */
+export async function importSuperOpsNotesAction(
+  _prev: SfActionResult | null,
+  _formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
+    const { importSuperOpsTicketNotes } = await import(
+      "@/lib/silverfang/ticket-import-service"
+    );
+    const result = await importSuperOpsTicketNotes();
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:notes-import",
+      metadata: {
+        available: result.available,
+        imported: result.imported,
+        alreadyImported: result.alreadyImported,
+        noTicket: result.noTicket,
+      },
+    });
+    revalidatePath("/silverfang/tickets/import");
+    revalidatePath("/silverfang/tickets");
+    return { ok: true, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+const cutoverSchema = z.object({
+  enabled: z.coerce.boolean(),
+  notes: z.preprocess(emptyToUndefined, z.string().max(2_000).optional()),
+});
+
+/**
+ * Switch SuperOps off (or back on) for the whole install.
+ *
+ * Off means SilverFang is the source of truth: the scheduled sync stops, the
+ * manual syncs refuse, and every import path refuses. Nothing already imported is
+ * touched — those are SilverFang's own records now, which is the point of having
+ * migrated them.
+ *
+ * Reversible on purpose. "Cancel the subscription" is irreversible; this is the
+ * software switch, and being able to turn it back on for one more pass is worth
+ * more than the theatre of making it permanent.
+ */
+export async function setSuperOpsEnabledAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const input = cutoverSchema.parse({
+      enabled: formData.get("enabled") === "on",
+      notes: formValue(formData, "notes"),
+    });
+    const { setSuperOpsEnabled } = await import("@/lib/silverfang/migration-policy");
+    const policy = await setSuperOpsEnabled(
+      { enabled: input.enabled, notes: input.notes ?? null },
+      { email: user.email },
+    );
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:superops-cutover",
+      metadata: {
+        superOpsEnabled: policy.superOpsEnabled,
+        cutoverAt: policy.cutoverAt?.toISOString() ?? null,
+      },
+    });
+    revalidatePath("/silverfang/migration");
+    revalidatePath("/silverfang/tickets/import");
+    revalidatePath("/silverfang/setup");
+    revalidatePath("/synced/superops");
+    return {
+      ok: true,
+      message: policy.superOpsEnabled
+        ? "SuperOps is on again. Syncs and imports will run."
+        : "SuperOps is off. SilverFang is the source of truth — nothing already imported was changed.",
+    };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
+/**
  * Import SuperOps worklogs as time entries against already-imported tickets.
  *
  * Separate from the ticket import, and run after it, because a worklog can only
@@ -1119,6 +1279,7 @@ export async function importSuperOpsWorklogsAction(
 ): Promise<SfActionResult> {
   const user = await requirePermission("silverfang:configure");
   try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const { importSuperOpsWorklogs } = await import(
       "@/lib/silverfang/ticket-import-service"
     );
@@ -1201,6 +1362,7 @@ export async function createManagedAgreementsAction(
 ): Promise<SfActionResult> {
   const user = await requirePermission("agreements:manage");
   try {
+    if (!(await superOpsEnabled())) return { ok: false, message: SUPEROPS_OFF_MESSAGE };
     const { createManagedAgreements, describeManagedRun } = await import(
       "@/lib/silverfang/managed-service"
     );

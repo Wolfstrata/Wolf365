@@ -62,7 +62,14 @@ export async function GET(request: Request) {
   // backfill per cron run (the account-level entities sync above via runSync).
   // Best-effort; only when the SuperOps connector is enabled.
   let superOpsTickets: unknown;
-  if (enabled.some((c) => c.type === "SUPEROPS")) {
+  // The cutover switch. Once SuperOps is off, the scheduled sync stops too —
+  // a connector still running against a cancelled subscription just produces
+  // failures nobody needs to read.
+  const { superOpsEnabled } = await import("@/lib/silverfang/migration-policy");
+  const superOpsLive = await superOpsEnabled();
+  if (!superOpsLive) {
+    superOpsTickets = { skipped: "SuperOps switched off — SilverFang is the source of truth" };
+  } else if (enabled.some((c) => c.type === "SUPEROPS")) {
     try {
       const { runSuperOpsTicketSync } = await import("@/lib/superops/tickets");
       superOpsTickets = await runSuperOpsTicketSync({ maxTickets: 500, maxWorklogs: 1000 });

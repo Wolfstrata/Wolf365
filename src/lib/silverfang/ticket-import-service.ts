@@ -10,9 +10,11 @@ import {
 } from "@/lib/silverfang/service";
 import { toWorkDate, weekStartOf } from "@/lib/silverfang/time";
 import { contactEmailIndex, textWrite } from "@/lib/silverfang/pii";
+import { isInternalNote } from "@/lib/silverfang/ticket-notes";
 import {
   describeImport,
   extractTicketDetail,
+  htmlToText,
   importAction,
   mapPriority,
   matchStatus,
@@ -353,6 +355,128 @@ async function importBoard() {
     include,
   });
   return any && any.statuses.length > 0 ? any : null;
+}
+
+export interface NoteImportResult {
+  imported: number;
+  alreadyImported: number;
+  /** No SilverFang ticket for the note's SuperOps ticket. */
+  noTicket: number;
+  /** Nothing mirrored yet — the notes sync has not run, or found nothing. */
+  available: number;
+  message: string;
+}
+
+/**
+ * Import mirrored SuperOps conversations as SilverFang ticket notes.
+ *
+ * Keyed on the note's SuperOps id, so a re-run adds nothing: a duplicated
+ * conversation is the most immediately visible way an import can be wrong, and it
+ * would be visible on every migrated ticket at once.
+ *
+ * Visibility is decided by `isInternalNote`, which treats *unknown* as internal.
+ * A migrated internal note that leaked to a client is not recoverable; a client
+ * reply marked internal is a cosmetic problem on a historical ticket. The
+ * asymmetry decides the default.
+ */
+export async function importSuperOpsTicketNotes(): Promise<NoteImportResult> {
+  const result: NoteImportResult = {
+    imported: 0,
+    alreadyImported: 0,
+    noTicket: 0,
+    available: 0,
+    message: "",
+  };
+
+  const notes = await prisma.superOpsTicketNote.findMany({
+    where: { ticketId: { not: null }, body: { not: null } },
+    orderBy: { createdTime: "asc" },
+    take: RUN_LIMIT * 5,
+    select: {
+      superOpsId: true,
+      kind: true,
+      isPrivate: true,
+      author: true,
+      authorEmail: true,
+      body: true,
+      createdTime: true,
+      ticket: { select: { superOpsId: true } },
+    },
+  });
+  result.available = notes.length;
+  if (notes.length === 0) {
+    return {
+      ...result,
+      message:
+        "No SuperOps conversations are mirrored yet. Run the ticket notes sync from Connector " +
+        "Data first — and if it reports no conversation query, this SuperOps tenant does not " +
+        "expose one, which is different from these tickets having no history.",
+    };
+  }
+
+  const sourceTicketIds = [...new Set(notes.map((n) => n.ticket!.superOpsId))];
+  const tickets = await prisma.sfTicket.findMany({
+    where: { sourceSystem: SUPEROPS_TICKET_SOURCE, externalId: { in: sourceTicketIds } },
+    select: { id: true, externalId: true },
+  });
+  const ticketBySource = new Map(tickets.map((t) => [t.externalId!, t.id]));
+
+  const existing = await prisma.sfTicketNote.findMany({
+    where: {
+      sourceSystem: SUPEROPS_TICKET_SOURCE,
+      externalId: { in: notes.map((n) => n.superOpsId) },
+    },
+    select: { externalId: true },
+  });
+  const done = new Set(existing.map((e) => e.externalId!));
+
+  for (const note of notes) {
+    if (done.has(note.superOpsId)) {
+      result.alreadyImported += 1;
+      continue;
+    }
+    const ticketId = ticketBySource.get(note.ticket!.superOpsId);
+    if (!ticketId) {
+      result.noTicket += 1;
+      continue;
+    }
+
+    const internalOnly = isInternalNote({
+      externalId: note.superOpsId,
+      kind: (note.kind as "reply" | "note" | "system" | null) ?? "note",
+      isPrivate: note.isPrivate,
+      author: note.author,
+      authorEmail: note.authorEmail,
+      body: note.body,
+      createdAt: note.createdTime,
+    });
+
+    await prisma.sfTicketNote.create({
+      data: {
+        ticketId,
+        // Bodies are HTML in SuperOps and encrypted at rest here, like every
+        // other note.
+        body: textWrite(htmlToText(note.body ?? "")) ?? "",
+        internalOnly,
+        authorEmail: note.authorEmail ?? note.author,
+        // The original timestamp, so a migrated thread reads in the order it
+        // happened rather than all arriving at import time.
+        createdAt: note.createdTime ?? new Date(),
+        sourceSystem: SUPEROPS_TICKET_SOURCE,
+        externalId: note.superOpsId,
+      },
+    });
+    result.imported += 1;
+  }
+
+  const parts = [`${result.imported} note${result.imported === 1 ? "" : "s"} imported`];
+  if (result.alreadyImported > 0) parts.push(`${result.alreadyImported} already here`);
+  if (result.noTicket > 0) parts.push(`${result.noTicket} with no imported ticket`);
+  result.message =
+    `${parts.join(", ")}. Anything SuperOps did not clearly mark as client-visible was ` +
+    `imported as an internal note — that way round, because a leaked internal note cannot ` +
+    `be taken back.`;
+  return result;
 }
 
 /**

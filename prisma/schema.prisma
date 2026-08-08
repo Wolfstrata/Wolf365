@@ -798,6 +798,7 @@ model SuperOpsTicket {
   lastSyncedAt     DateTime @default(now())
 
   worklogs SuperOpsWorklog[]
+  notes    SuperOpsTicketNote[]
 
   @@index([superOpsClientId])
   @@index([updatedTime])
@@ -823,6 +824,36 @@ model SuperOpsWorklog {
   @@index([ticketId])
   @@index([superOpsClientId])
   @@index([entryTime])
+}
+
+/// A note or conversation entry on a SuperOps ticket, mirrored read-only.
+///
+/// Separate from SuperOpsTicket because a ticket has many, and because the shape
+/// varies: SuperOps exposes replies, private notes and system events through the
+/// same collection, distinguished only by a type field whose name differs between
+/// tenants. `raw` keeps the original so a mapping can be corrected later without
+/// re-fetching everything.
+model SuperOpsTicketNote {
+  id       String          @id @default(cuid())
+  ticketId String?
+  ticket   SuperOpsTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// SuperOps' own id for the entry. Synthesised from the ticket id and an index
+  /// when SuperOps does not give one, so the mirror still de-duplicates.
+  superOpsId String @unique
+
+  /// "reply" | "note" | "system" — normalised from whatever field carried it.
+  kind        String?
+  /// True when SuperOps marked it private/internal. Null when it did not say.
+  isPrivate   Boolean?
+  author      String?
+  authorEmail String?
+  body        String? @db.Text
+  createdTime DateTime?
+
+  raw          Json?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([ticketId, createdTime])
 }
 
 // Resumable full-history sync checkpoint (e.g. tickets/worklogs), keyed by entity.
@@ -1710,9 +1741,16 @@ model SfTicketNote {
   authorId    String?
   authorEmail String?
 
+  /// Provenance for a note imported from another system. The unique pair stops a
+  /// re-import duplicating the conversation, which would be immediately visible
+  /// and immediately annoying on every migrated ticket.
+  sourceSystem String?
+  externalId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([sourceSystem, externalId])
   @@index([ticketId, createdAt])
 }
 
@@ -2627,6 +2665,33 @@ model SfEmailPolicy {
   outboundEnabled Boolean @default(false)
 
   /// Who last changed it, denormalized so the record survives user deletion.
+  updatedByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// The SuperOps → SilverFang migration switch.
+///
+/// One row, because this is a property of the whole install: either SuperOps is
+/// still a source of data or SilverFang is the source of truth. A per-connector
+/// toggle would leave the two half-on, which is the state that produces
+/// contradictions nobody can explain.
+///
+/// Turning it off stops BOTH the connector sync and every import path. It does
+/// not delete anything already imported — the tickets, time and notes stay,
+/// because they are now SilverFang's own records.
+model SfMigrationPolicy {
+  id String @id @default("singleton")
+
+  /// False once SuperOps has been switched off. Default true, so nothing changes
+  /// for an install mid-migration.
+  superOpsEnabled Boolean @default(true)
+  /// When it was switched off, for the audit trail and for the banner.
+  cutoverAt       DateTime?
+  /// Free-text note about the cutover, e.g. the date the subscription ended.
+  notes           String? @db.Text
+
   updatedByEmail String?
 
   createdAt DateTime @default(now())

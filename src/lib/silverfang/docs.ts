@@ -243,6 +243,39 @@ export const DOC_SECTIONS: DocSection[] = [
     ],
   },
   {
+    id: "migration",
+    title: "Migrating from SuperOps",
+    summary: "Bring the history across, then switch SuperOps off.",
+    blocks: [
+      {
+        p: "Everything moves in two stages, and always in that order: the connector **mirrors** SuperOps into read-only tables, then an **import** turns those rows into SilverFang records. The mirror is a faithful copy, so a mapping can be corrected and re-imported later without going back to an API that may by then be cancelled.",
+      },
+      { h: "The order to do it in" },
+      {
+        list: [
+          "Clients and contacts, from the Clients page. Nothing else can import until a SuperOps client is linked to a Wolf365 client.",
+          "Tickets, from Tickets → Import from SuperOps. Asks whether to overwrite ones it imported before.",
+          "Worklogs, on the same page. They become time entries, as drafts.",
+          "Conversations, from SuperOps Migration. Mirror first, then import them onto the tickets.",
+        ],
+      },
+      {
+        p: "Every step is keyed on the source record's id, so all of them are safe to re-run: a second pass finds the same record instead of duplicating it. Run them as often as you like while both systems are live.",
+      },
+      { h: "Knowing when you are done" },
+      {
+        p: "The SuperOps Migration page compares what has been mirrored against what has been imported, line by line. What it cannot tell you is whether the mirror itself is complete — check that the ticket sync reports \u201cBackfill complete\u201d on Connector Data before trusting the totals.",
+      },
+      { h: "The cutover" },
+      {
+        p: "One switch, for the whole install. Turning SuperOps off stops the scheduled sync, the manual syncs and every import path, and SilverFang becomes the source of truth.",
+      },
+      {
+        note: "Switching off deletes nothing. The tickets, time, notes and contacts already imported are SilverFang's own records — that is the point of having migrated them. The switch is reversible if you need one more pass before the subscription ends.",
+      },
+    ],
+  },
+  {
     id: "roles",
     title: "Roles and access",
     summary: "Who can do what, and the two independent gates.",
