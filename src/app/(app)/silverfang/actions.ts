@@ -25,6 +25,7 @@ import {
   describeDefaultAgreement,
   type DefaultAgreementReason,
 } from "@/lib/silverfang/default-agreement";
+import { describeAssignment } from "@/lib/silverfang/assignees";
 import {
   defaultAgreementFor,
   ensureSilverFangDefaults,
@@ -32,6 +33,7 @@ import {
   nextTicketNumber,
   recomputeTicketHours,
   resolveTimeEntryRate,
+  setTicketAssignees,
   slaDueDatesFor,
   timeAuthorizationFor,
 } from "@/lib/silverfang/service";
@@ -59,7 +61,8 @@ const ticketSchema = z.object({
   source: z.enum(SfTicketSource),
   summary: z.string().trim().min(1, "Summary is required").max(300),
   description: z.preprocess(emptyToUndefined, z.string().max(20_000).optional()),
-  assigneeId: optionalId,
+  /** Every assignee, primary first. Empty means unassigned. */
+  assigneeIds: z.array(z.string().min(1)).default([]),
   agreementId: optionalId,
   projectId: optionalId,
   projectPhaseId: optionalId,
@@ -226,7 +229,8 @@ export async function saveTicketAction(
       track("summary", existing.summary, input.summary);
       track("priority", existing.priority, input.priority);
       track("status", existing.status.name, chosenStatus.name);
-      track("assigneeId", existing.assigneeId, input.assigneeId ?? null);
+      // Assignment is not tracked here: `setTicketAssignees` owns both columns and
+      // writes its own history row. Diffing it in two places would double-log it.
       track("boardId", existing.boardId, input.boardId);
       track("agreementId", existing.agreementId, input.agreementId ?? null);
       track("contactId", existing.contactId, input.contactId ?? null);
@@ -245,7 +249,6 @@ export async function saveTicketAction(
             source: input.source,
             summary: input.summary,
             description: textWrite(input.description),
-            assigneeId: input.assigneeId ?? null,
             agreementId: input.agreementId ?? null,
             projectId: link.projectId,
             projectPhaseId: link.projectPhaseId,
@@ -288,12 +291,22 @@ export async function saveTicketAction(
           : []),
       ]);
 
+      // One writer for both assignment columns, and it logs its own history row —
+      // see `setTicketAssignees`.
+      const assignment = await setTicketAssignees(
+        { ticketId: input.id, userIds: input.assigneeIds },
+        { id: user.id, email: user.email },
+      );
+
       await audit({
         action: closing ? "TICKET_CLOSED" : "TICKET_UPDATED",
         actorId: user.id,
         actorEmail: user.email,
         target: `sfTicket:${input.id}`,
-        metadata: { fields: changes.map((c) => c.field) },
+        metadata: {
+          fields: changes.map((c) => c.field),
+          ...(assignment.change.changed ? { assignees: assignment.change.userIds } : {}),
+        },
       });
       revalidatePath("/silverfang/tickets");
       revalidatePath(`/silverfang/tickets/${input.id}`);
@@ -316,7 +329,6 @@ export async function saveTicketAction(
           source: input.source,
           summary: input.summary,
           description: textWrite(input.description),
-          assigneeId: input.assigneeId ?? null,
           agreementId: input.agreementId ?? null,
           projectId: link.projectId,
           projectPhaseId: link.projectPhaseId,
@@ -333,6 +345,10 @@ export async function saveTicketAction(
         },
       });
     });
+    await setTicketAssignees(
+      { ticketId: created.id, userIds: input.assigneeIds },
+      { id: user.id, email: user.email },
+    );
     ticketId = created.id;
 
     await audit({
@@ -439,8 +455,8 @@ const inlineRowSchema = z.object({
   ticketId: z.string().min(1),
   statusId: optionalId,
   priority: z.enum(SfTicketPriority),
-  /** Empty string means "unassigned", which is different from "leave alone". */
-  assigneeId: z.preprocess((v) => (typeof v === "string" ? v : ""), z.string()),
+  /** Every assignee. An empty list means unassigned, not "leave alone". */
+  assigneeIds: z.array(z.string().min(1)).default([]),
 });
 
 /**
@@ -468,7 +484,7 @@ export async function updateTicketRowAction(
       ticketId: formValue(formData, "ticketId"),
       statusId: formValue(formData, "statusId"),
       priority: formValue(formData, "priority"),
-      assigneeId: formValue(formData, "assigneeId"),
+      assigneeIds: formData.getAll("assigneeIds").map(String).filter(Boolean),
     });
 
     const ticket = await prisma.sfTicket.findUnique({ where: { id: input.ticketId } });
@@ -501,35 +517,33 @@ export async function updateTicketRowAction(
       changed.push(`priority to ${input.priority}`);
     }
 
-    const nextAssignee = input.assigneeId.trim() === "" ? null : input.assigneeId.trim();
-    if (nextAssignee !== ticket.assigneeId) {
+    // The picker starts from the row's current assignees, so a submitted list is a
+    // deliberate set — including an empty one, which means unassign.
+    const current = await prisma.sfTicketAssignee.findMany({
+      where: { ticketId: input.ticketId },
+      select: { userId: true },
+    });
+    const assignmentDiffers =
+      current.length !== input.assigneeIds.length ||
+      input.assigneeIds.some((id) => !current.some((c) => c.userId === id));
+    if (assignmentDiffers || (ticket.assigneeId == null) !== (input.assigneeIds.length === 0)) {
       // Reassigning is its own permission, checked here rather than being folded
       // into tickets:write because it is a different act.
       await requirePermission("tickets:assign");
-      await prisma.$transaction([
-        prisma.sfTicket.update({
-          where: { id: input.ticketId },
-          data: { assigneeId: nextAssignee },
-        }),
-        prisma.sfTicketHistory.create({
-          data: {
-            ticketId: input.ticketId,
-            field: "assigneeId",
-            oldValue: ticket.assigneeId,
-            newValue: nextAssignee,
-            changedById: user.id,
-            changedByEmail: user.email,
-          },
-        }),
-      ]);
-      await audit({
-        action: "TICKET_ASSIGNED",
-        actorId: user.id,
-        actorEmail: user.email,
-        target: `sfTicket:${input.ticketId}`,
-        metadata: { assigneeId: nextAssignee },
-      });
-      changed.push(nextAssignee ? "assignee" : "unassigned");
+      const { change, nameOf } = await setTicketAssignees(
+        { ticketId: input.ticketId, userIds: input.assigneeIds },
+        { id: user.id, email: user.email },
+      );
+      if (change.changed) {
+        await audit({
+          action: "TICKET_ASSIGNED",
+          actorId: user.id,
+          actorEmail: user.email,
+          target: `sfTicket:${input.ticketId}`,
+          metadata: { assignees: change.userIds },
+        });
+        changed.push(describeAssignment(change, nameOf));
+      }
     }
 
     if (changed.length === 0) return { ok: true, message: "No changes." };
@@ -543,38 +557,32 @@ export async function updateTicketRowAction(
   }
 }
 
-/** Assign (or unassign) a ticket. */
+/**
+ * Add or remove assignees on a ticket (the picker on the ticket page).
+ *
+ * `mode=add` is strictly additive and cannot drop anyone — that is what makes it
+ * safe from a page that may have been open while somebody else was assigned.
+ * Without a mode it replaces the set, which is the only way to express a removal.
+ */
 export async function assignTicketAction(formData: FormData): Promise<void> {
   const user = await requirePermission("tickets:assign");
   const ticketId = z.string().min(1).parse(formData.get("ticketId"));
-  const raw = formData.get("assigneeId");
-  const assigneeId = typeof raw === "string" && raw.trim() !== "" ? raw : null;
+  const userIds = formData.getAll("assigneeIds").map(String).filter(Boolean);
+  const mode = formData.get("mode") === "add" ? "add" : "set";
 
-  const ticket = await prisma.sfTicket.findUnique({ where: { id: ticketId } });
-  if (!ticket || ticket.assigneeId === assigneeId) return;
+  const { change } = await setTicketAssignees({ ticketId, userIds, mode }, user);
+  if (!change.changed) return;
 
-  await prisma.$transaction([
-    prisma.sfTicket.update({ where: { id: ticketId }, data: { assigneeId } }),
-    prisma.sfTicketHistory.create({
-      data: {
-        ticketId,
-        field: "assigneeId",
-        oldValue: ticket.assigneeId,
-        newValue: assigneeId,
-        changedById: user.id,
-        changedByEmail: user.email,
-      },
-    }),
-  ]);
   await audit({
     action: "TICKET_ASSIGNED",
     actorId: user.id,
     actorEmail: user.email,
     target: `sfTicket:${ticketId}`,
-    metadata: { assigneeId },
+    metadata: { assignees: change.userIds, mode },
   });
   revalidatePath(`/silverfang/tickets/${ticketId}`);
   revalidatePath("/silverfang/tickets");
+  revalidatePath("/silverfang/my-tickets");
 }
 
 // ---------------------------------------------------------------------------

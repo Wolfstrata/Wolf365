@@ -20,6 +20,12 @@ import {
   type DefaultAgreementPick,
 } from "@/lib/silverfang/default-agreement";
 import { blockingReasons, type Restriction } from "@/lib/silverfang/authorized-techs";
+import {
+  addAssignees,
+  normalizeAssigneeIds,
+  resolveAssignment,
+  type AssignmentChange,
+} from "@/lib/silverfang/assignees";
 
 /**
  * Server-only SilverFang services: the I/O edges around the pure logic modules.
@@ -316,6 +322,102 @@ export async function defaultAgreementFor(
     profileDefaultId: profile?.defaultAgreementId ?? null,
     now,
   });
+}
+
+/**
+ * The one and only writer of ticket assignment.
+ *
+ * Both `SfTicket.assigneeId` (the primary) and the `SfTicketAssignee` rows are
+ * written here, in one transaction, from one derivation. That is the whole reason
+ * this function exists: two places holding the answer is a drift risk, and a
+ * second writer would eventually leave a ticket whose primary is not in its own
+ * assignee list.
+ *
+ * `mode: "add"` is strictly additive and cannot drop anyone, which is what makes
+ * it safe for a bulk action driven by a possibly-stale page. `mode: "set"`
+ * replaces the set, which is what a multi-select submits and the only way to
+ * express a removal.
+ *
+ * Unknown or disabled users are dropped rather than stored: a stale id would make
+ * a ticket look assigned to nobody visible.
+ */
+export async function setTicketAssignees(
+  input: {
+    ticketId: string;
+    userIds: string[];
+    mode?: "set" | "add";
+  },
+  actor: { id: string; email: string },
+): Promise<{ change: AssignmentChange; nameOf: (id: string) => string }> {
+  const ticket = await prisma.sfTicket.findUnique({
+    where: { id: input.ticketId },
+    select: { id: true, assigneeId: true, assignees: { select: { userId: true } } },
+  });
+  const empty: AssignmentChange = {
+    userIds: [],
+    primaryId: null,
+    added: [],
+    removed: [],
+    changed: false,
+  };
+  if (!ticket) return { change: empty, nameOf: (id) => id };
+
+  const requested = normalizeAssigneeIds(input.userIds);
+  const valid = await prisma.user.findMany({
+    where: { id: { in: requested }, disabled: false },
+    select: { id: true, name: true, email: true },
+  });
+  const names = new Map(valid.map((u) => [u.id, u.name ?? u.email]));
+  const nameOf = (id: string) => names.get(id) ?? id;
+  const validIds = requested.filter((id) => names.has(id));
+
+  // The primary is included in the join table, so the current set is just the
+  // rows — but tolerate a legacy ticket assigned before the table existed.
+  const current = normalizeAssigneeIds([
+    ...(ticket.assigneeId ? [ticket.assigneeId] : []),
+    ...ticket.assignees.map((a) => a.userId),
+  ]);
+
+  const change =
+    input.mode === "add"
+      ? addAssignees({ current, currentPrimary: ticket.assigneeId, add: validIds })
+      : resolveAssignment({ current, currentPrimary: ticket.assigneeId, requested: validIds });
+
+  if (!change.changed) return { change, nameOf };
+
+  await prisma.$transaction([
+    prisma.sfTicketAssignee.deleteMany({
+      where: { ticketId: ticket.id, userId: { notIn: change.userIds } },
+    }),
+    ...change.added.map((userId) =>
+      prisma.sfTicketAssignee.upsert({
+        where: { ticketId_userId: { ticketId: ticket.id, userId } },
+        create: {
+          ticketId: ticket.id,
+          userId,
+          addedById: actor.id,
+          addedByEmail: actor.email,
+        },
+        update: {},
+      }),
+    ),
+    prisma.sfTicket.update({
+      where: { id: ticket.id },
+      data: { assigneeId: change.primaryId },
+    }),
+    prisma.sfTicketHistory.create({
+      data: {
+        ticketId: ticket.id,
+        field: "assignees",
+        oldValue: current.map(nameOf).join(", ") || null,
+        newValue: change.userIds.map(nameOf).join(", ") || null,
+        changedById: actor.id,
+        changedByEmail: actor.email,
+      },
+    }),
+  ]);
+
+  return { change, nameOf };
 }
 
 /**

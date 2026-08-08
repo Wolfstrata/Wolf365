@@ -9,6 +9,8 @@ import { LocalTime } from "@/components/ui/local-time";
 import { PRIORITY_LABELS, PRIORITY_STYLES } from "@/lib/silverfang/constants";
 import { formatHours } from "@/lib/silverfang/time";
 import { queueSortKey } from "@/lib/silverfang/ticket-order";
+import { assigneeSummary } from "@/lib/silverfang/assignees";
+import { MultiCombobox } from "@/components/ui/combobox";
 import {
   moveTicketsToBoardAction,
   moveTicketsToProjectAction,
@@ -33,8 +35,13 @@ export interface TicketRow {
   statusId: string;
   statusIsClosed: boolean;
   priority: SfTicketPriority;
+  /** Primary assignee's name, kept for sorting and for a one-name summary. */
   assignee: string | null;
+  /** Primary assignee's id. */
   assigneeId: string | null;
+  /** Everyone on the ticket, primary first. */
+  assigneeIds: string[];
+  assigneeNames: string[];
   actualHours: number;
   openedAt: string; // ISO
   /** Creation instant, which is what the ordering tie-breaks on. */
@@ -55,6 +62,39 @@ export interface TicketRow {
  */
 function rowFormId(id: string): string {
   return `sf-row-${id}`;
+}
+
+/**
+ * The assignee picker inside an editing row.
+ *
+ * Its own component because it needs state: a multi-select is a controlled list,
+ * and the hidden inputs it renders have to be tied to the row's form with `form=`
+ * since a `<form>` cannot wrap table cells.
+ *
+ * Seeded from the row's current assignees rather than from empty, which is what
+ * makes editing additive — saving a row you only meant to reprioritise must not
+ * unassign everyone on it.
+ */
+function InlineAssignees({
+  row,
+  users,
+}: {
+  row: TicketRow;
+  users: { id: string; name: string }[];
+}) {
+  const [ids, setIds] = useState<string[]>(row.assigneeIds);
+  return (
+    <MultiCombobox
+      name="assigneeIds"
+      formId={rowFormId(row.id)}
+      options={users.map((u) => ({ id: u.id, label: u.name }))}
+      value={ids}
+      onChange={setIds}
+      placeholder="Add assignee…"
+      emptySelectionLabel="Unassigned"
+      className="w-48"
+    />
+  );
 }
 
 /** Edit / Save / Cancel for one row, and the form the row's controls submit to. */
@@ -321,25 +361,17 @@ export function TicketsTable({
     { key: "board", label: "Board", sortValue: (r) => r.board.toLowerCase(), render: (r) => r.board },
     {
       key: "assignee",
-      label: "Assignee",
+      label: "Assignees",
+      // Sorted on the primary: a multi-assignee ticket still has one owner, and
+      // sorting on a joined list would order by an accident of who joined first.
       sortValue: (r) => (r.assignee ?? "").toLowerCase(),
       render: (r) =>
         editingId === r.id && inline ? (
-          <select
-            name="assigneeId"
-            form={rowFormId(r.id)}
-            defaultValue={r.assigneeId ?? ""}
-            className="w-40 rounded-md border bg-background px-2 py-1 text-xs"
-          >
-            <option value="">Unassigned</option>
-            {inline.users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
+          <InlineAssignees row={r} users={inline.users} />
+        ) : r.assigneeNames.length === 0 ? (
+          <span className="text-muted-foreground">Unassigned</span>
         ) : (
-          (r.assignee ?? <span className="text-muted-foreground">Unassigned</span>)
+          <span title={r.assigneeNames.join(", ")}>{assigneeSummary(r.assigneeNames)}</span>
         ),
     },
     {

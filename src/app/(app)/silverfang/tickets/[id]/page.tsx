@@ -18,7 +18,9 @@ import { loadSla, timeAuthorizationFor } from "@/lib/silverfang/service";
 import { defaultReplyRecipients } from "@/lib/silverfang/email-send";
 import { clientEmailAllowed, outboundEnabled } from "@/lib/silverfang/email-policy";
 import { POLICY_ID } from "@/lib/silverfang/mail";
-import { setTicketStatusAction, assignTicketAction } from "../../actions";
+import { setTicketStatusAction } from "../../actions";
+import { AssigneePicker } from "./assignee-picker";
+import { assigneeSummary } from "@/lib/silverfang/assignees";
 import { EmailForm } from "./email-form";
 import { NoteForm } from "./note-form";
 import { TimeCard, type TimeEntryRow } from "./time-card";
@@ -95,6 +97,10 @@ export default async function TicketDetailPage({
       board: { include: { statuses: { orderBy: { sortOrder: "asc" } } } },
       status: true,
       assignee: { select: { id: true, name: true, email: true } },
+      assignees: {
+        orderBy: { createdAt: "asc" },
+        select: { userId: true, user: { select: { name: true, email: true } } },
+      },
       agreement: { select: { id: true, name: true, type: true } },
       project: { select: { id: true, name: true } },
       projectPhase: { select: { id: true, name: true } },
@@ -166,6 +172,18 @@ export default async function TicketDetailPage({
 
   const canWrite = can(user.role, "tickets:write");
   const canAssign = can(user.role, "tickets:assign");
+  // Primary first, so the picker's first chip is the primary and the order the
+  // page shows matches the order the action stores.
+  const assigneeIds = ticket.assigneeId
+    ? [
+        ticket.assigneeId,
+        ...ticket.assignees.filter((a) => a.userId !== ticket.assigneeId).map((a) => a.userId),
+      ]
+    : ticket.assignees.map((a) => a.userId);
+  const assigneeNames = assigneeIds.map((id) => {
+    const row = ticket.assignees.find((a) => a.userId === id);
+    return row?.user.name ?? row?.user.email ?? ticket.assignee?.name ?? ticket.assignee?.email ?? id;
+  });
   const canLogTime = can(user.role, "time:log");
   // An authorised-technician list on this ticket's agreement or project. Resolved
   // here so the card can say so up front; the server enforces it regardless.
@@ -290,7 +308,16 @@ export default async function TicketDetailPage({
                   : "—"
               }
             />
-            <StatItem label="Assignee" value={ticket.assignee?.name ?? ticket.assignee?.email ?? "Unassigned"} />
+            <StatItem
+              label={assigneeNames.length > 1 ? "Assignees" : "Assignee"}
+              value={
+                assigneeNames.length === 0 ? (
+                  "Unassigned"
+                ) : (
+                  <span title={assigneeNames.join(", ")}>{assigneeSummary(assigneeNames)}</span>
+                )
+              }
+            />
             <StatItem label="Source" value={SOURCE_LABELS[ticket.source]} />
             <StatItem label="Opened" value={<LocalTime value={ticket.openedAt.toISOString()} />} />
             <StatItem
@@ -375,27 +402,15 @@ export default async function TicketDetailPage({
               </form>
             )}
             {canAssign && (
-              <form action={assignTicketAction} className="flex items-end gap-2">
-                <input type="hidden" name="ticketId" value={ticket.id} />
-                <label className="text-xs font-medium text-muted-foreground">
-                  Assignee
-                  <select
-                    name="assigneeId"
-                    defaultValue={ticket.assigneeId ?? ""}
-                    className="mt-1 block w-56 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  >
-                    <option value="">Unassigned</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name ?? u.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
-                  Assign
-                </button>
-              </form>
+              <AssigneePicker
+                ticketId={ticket.id}
+                users={users.map((u) => ({
+                  id: u.id,
+                  name: u.name ?? u.email,
+                  email: u.email,
+                }))}
+                current={assigneeIds}
+              />
             )}
           </Card>
         )}

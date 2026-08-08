@@ -68,6 +68,7 @@ model User {
   sfAssignedTasks      SfProjectTask[] @relation("SfTaskAssignee")
   sfAuthorizedAgreements SfAgreementTech[]
   sfAuthorizedProjects   SfProjectTech[]
+  sfTicketAssignments    SfTicketAssignee[]
 
   @@index([role])
 }
@@ -1613,8 +1614,13 @@ model SfTicket {
   summary     String
   description String? @db.Text
 
+  /// PRIMARY assignee. Kept alongside `assignees` because a great deal needs a
+  /// single owner: the ASSIGNEE audience on auto-responses, utilisation reporting,
+  /// and the "unassigned" count. Always also present in `assignees`.
   assigneeId String?
   assignee   User?   @relation("SfTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// Everyone on the ticket, primary included. See SfTicketAssignee.
+  assignees  SfTicketAssignee[]
 
   // Optional links: what pays for this work, and project context.
   agreementId String?
@@ -2414,6 +2420,30 @@ model SfProjectTemplateTask {
 
 // Automatic email/notification rules (e.g. acknowledge on create, notify on
 // status change). Bodies are templates rendered at send time.
+/// Everyone assigned to a ticket.
+///
+/// `SfTicket.assigneeId` remains the PRIMARY assignee — the one auto-responses
+/// address, reports attribute to, and "unassigned" counts against. This table is
+/// the full set, primary included, so "who is on this ticket?" has exactly one
+/// answer to read.
+///
+/// Both are written only by `setTicketAssignees`, which is what stops them
+/// drifting apart. Nothing else should touch either.
+model SfTicketAssignee {
+  ticketId String
+  ticket   SfTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Assignment is additive, so who added whom is worth keeping.
+  addedById    String?
+  addedByEmail String?
+  createdAt    DateTime @default(now())
+
+  @@id([ticketId, userId])
+  @@index([userId])
+}
+
 /// A technician authorised to log time against one agreement.
 ///
 /// A whitelist, not a blacklist, and deliberately empty-means-everyone: a

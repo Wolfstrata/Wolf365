@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import type { ReactNode } from "react";
 import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/silverfang/constants";
+import { Combobox, MultiCombobox } from "@/components/ui/combobox";
 import type { SfActionResult } from "./actions";
 
 export interface TicketFormValues {
@@ -17,7 +18,8 @@ export interface TicketFormValues {
   source: string;
   summary: string;
   description: string;
-  assigneeId: string;
+  /** Comma-free list of assignee ids, primary first. */
+  assigneeIds: string[];
   agreementId: string;
   projectId: string;
   projectPhaseId: string;
@@ -97,6 +99,8 @@ export function TicketForm({
 
   // Client drives which contacts/agreements are selectable; board drives statuses.
   const [clientId, setClientId] = useState(values.clientId);
+  const [contactId, setContactId] = useState(values.contactId);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(values.assigneeIds);
   const [boardId, setBoardId] = useState(values.boardId);
   // A project ticket belongs to a phase of that project, so the phase list
   // follows the chosen project rather than being a free-standing select.
@@ -114,24 +118,21 @@ export function TicketForm({
       {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Client" required>
-          <select
+        <Field label="Client" required help="Start typing any part of the name.">
+          <Combobox
             name="clientId"
+            options={options.clients.map((c) => ({ id: c.id, label: c.name }))}
             value={clientId}
-            onChange={(e) => {
-              setClientId(e.target.value);
+            onChange={(id) => {
+              setClientId(id);
+              // The project list is per client, so a project chosen for the old
+              // client must not survive the switch.
               setProjectId("");
             }}
-            className={inputCls}
+            placeholder="Type to find a client…"
+            emptyLabel={null}
             required
-          >
-            <option value="">Select a client…</option>
-            {options.clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field
@@ -142,14 +143,17 @@ export function TicketForm({
               : undefined
           }
         >
-          <select name="contactId" defaultValue={values.contactId} className={inputCls}>
-            <option value="">No contact</option>
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {/* Keyed on the client so switching client cannot leave a contact from
+              the previous one selected. */}
+          <Combobox
+            key={clientId}
+            name="contactId"
+            options={contacts.map((c) => ({ id: c.id, label: c.name }))}
+            value={contactId}
+            onChange={setContactId}
+            placeholder="Type to find a contact…"
+            emptyLabel="No contact"
+          />
         </Field>
 
         <Field label="Board" required>
@@ -199,15 +203,23 @@ export function TicketForm({
           </select>
         </Field>
 
-        <Field label="Assignee">
-          <select name="assigneeId" defaultValue={values.assigneeId} className={inputCls}>
-            <option value="">Unassigned</option>
-            {options.users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name ?? u.email}
-              </option>
-            ))}
-          </select>
+        <Field
+          label="Assignees"
+          help="Several people can be on one ticket. The first is the primary — notifications and reporting use them."
+        >
+          <MultiCombobox
+            name="assigneeIds"
+            options={options.users.map((u) => ({
+              id: u.id,
+              label: u.name ?? u.email,
+              // Searchable by address too, since two people can share a first name.
+              keywords: u.email,
+            }))}
+            value={assigneeIds}
+            onChange={setAssigneeIds}
+            placeholder="Type to add someone…"
+            emptySelectionLabel="Unassigned"
+          />
         </Field>
 
         <Field

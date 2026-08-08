@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { UserPlus, Users } from "lucide-react";
 import { LocalTime } from "@/components/ui/local-time";
 import { describeTier, type SuggestionTier } from "@/lib/silverfang/sender-match";
+import { Combobox } from "@/components/ui/combobox";
 import {
   adoptAllSuggestedSendersAction,
   adoptSenderAction,
@@ -149,20 +150,19 @@ function SenderRow({
       ) : (
         <form action={action} className="mt-1.5 flex flex-wrap items-center gap-2">
           <input type="hidden" name="address" value={row.address} />
-          <select
-            name="clientId"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            required
-            className="w-64 rounded-md border bg-background px-2 py-1.5 text-xs"
-          >
-            <option value="">Choose a client…</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {/* Type-to-filter: with a couple of thousand clients, scrolling to the
+              right one for each of eighteen senders is the slow part. */}
+          <div className="w-64">
+            <Combobox
+              name="clientId"
+              options={clients.map((c) => ({ id: c.id, label: c.name }))}
+              value={clientId}
+              onChange={setClientId}
+              placeholder="Type to find a client…"
+              emptyLabel={null}
+              required
+            />
+          </div>
           <button
             type="submit"
             disabled={pending || !clientId}

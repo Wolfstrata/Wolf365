@@ -34,7 +34,12 @@ export function buildTicketWhere(f: TicketFilters): Prisma.SfTicketWhereInput {
   };
   if (f.boardId) where.boardId = f.boardId;
   if (f.statusId) where.statusId = f.statusId;
-  if (f.assigneeId) where.assigneeId = f.assigneeId;
+  if (f.assigneeId) {
+    // Any assignee, not only the primary. "My Tickets" has to mean every ticket
+    // I am on — a ticket where I am the second assignee is still my work, and
+    // filtering on the primary column alone would hide it.
+    where.assignees = { some: { userId: f.assigneeId } };
+  }
   if (f.clientId) where.clientId = f.clientId;
   if (f.contactId) where.contactId = f.contactId;
   if (f.agreementId) where.agreementId = f.agreementId;
@@ -77,6 +82,12 @@ export async function getTicketRows(
       board: { select: { id: true, name: true } },
       status: { select: { id: true, name: true, isClosed: true } },
       assignee: { select: { name: true, email: true } },
+      assignees: {
+        // Primary first, then by when they were added, so the order a cell shows
+        // is the order people joined rather than an arbitrary one.
+        orderBy: { createdAt: "asc" },
+        select: { userId: true, user: { select: { name: true, email: true } } },
+      },
     },
   });
 
@@ -128,6 +139,19 @@ export async function getTicketRows(
       // Ids as well as labels: inline editing needs to preselect the current
       // value, and a label cannot be matched back to an option reliably.
       assigneeId: t.assigneeId,
+      // Everyone on the ticket, primary first — the primary is in `assignees`
+      // too, so this is the whole set rather than "the others".
+      assigneeIds: orderPrimaryFirst(t.assigneeId, t.assignees.map((a) => a.userId)),
+      assigneeNames: orderPrimaryFirst(
+        t.assigneeId,
+        t.assignees.map((a) => a.userId),
+      ).map(
+        (id) =>
+          nameOfAssignee(t.assignees, id) ??
+          t.assignee?.name ??
+          t.assignee?.email ??
+          id,
+      ),
       actualHours: Number(t.actualHours),
       openedAt: t.openedAt.toISOString(),
       slaBreached: breached,
@@ -165,4 +189,18 @@ export async function getTicketFormOptions() {
     }),
   ]);
   return { boards, clients, users, chargeCodes };
+}
+
+/** Primary first, everyone else in the order they were added. */
+function orderPrimaryFirst(primaryId: string | null, ids: string[]): string[] {
+  const rest = ids.filter((id) => id !== primaryId);
+  return primaryId ? [primaryId, ...rest] : rest;
+}
+
+function nameOfAssignee(
+  rows: { userId: string; user: { name: string | null; email: string } }[],
+  id: string,
+): string | null {
+  const row = rows.find((r) => r.userId === id);
+  return row ? (row.user.name ?? row.user.email) : null;
 }

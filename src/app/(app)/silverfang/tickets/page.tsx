@@ -9,6 +9,7 @@ import { getTicketRows, getTicketFormOptions } from "@/lib/silverfang/queries";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
 import { TICKET_ORDER_EXPLANATION } from "@/lib/silverfang/ticket-order";
 import { TicketsTable } from "./tickets-table";
+import { QueueFilters } from "./queue-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -160,89 +161,30 @@ export default async function TicketsPage({
               )}
             </div>
 
-            {/* Filters — plain GET form, no client state needed. */}
+            {/* Filters. The client and assignee pickers are type-to-filter; see
+                QueueFilters for why that needs a client component. */}
             <Card>
-              <form method="get" className="flex flex-wrap items-end gap-3">
-                <input type="hidden" name="view" value={view} />
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Search
-                  <input
-                    name="q"
-                    defaultValue={sp.q ?? ""}
-                    placeholder="Summary or #number"
-                    className="mt-1 block w-56 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  />
-                </label>
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Board
-                  <select
-                    name="board"
-                    defaultValue={sp.board ?? ""}
-                    className="mt-1 block w-44 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  >
-                    <option value="">All boards</option>
-                    {options.boards.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Priority
-                  <select
-                    name="priority"
-                    defaultValue={sp.priority ?? ""}
-                    className="mt-1 block w-40 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  >
-                    <option value="">Any priority</option>
-                    {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Assignee
-                  <select
-                    name="assignee"
-                    defaultValue={sp.assignee ?? ""}
-                    className="mt-1 block w-48 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  >
-                    <option value="">Anyone</option>
-                    {options.users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name ?? u.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Client
-                  <select
-                    name="client"
-                    defaultValue={sp.client ?? ""}
-                    className="mt-1 block w-56 rounded-md border bg-background px-3 py-1.5 text-sm"
-                  >
-                    <option value="">All clients</option>
-                    {options.clients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button className="rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-accent">
-                  Apply
-                </button>
-                <Link
-                  href="/silverfang/tickets"
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Reset
-                </Link>
-              </form>
+              <QueueFilters
+                view={view}
+                boards={options.boards.map((b) => ({ id: b.id, name: b.name }))}
+                users={options.users.map((u) => ({
+                  id: u.id,
+                  name: u.name ?? u.email,
+                  email: u.email,
+                }))}
+                clients={options.clients}
+                priorities={Object.entries(PRIORITY_LABELS).map(([value, label]) => ({
+                  value,
+                  label,
+                }))}
+                initial={{
+                  q: sp.q ?? "",
+                  board: sp.board ?? "",
+                  priority: sp.priority ?? "",
+                  assignee: sp.assignee ?? "",
+                  client: sp.client ?? "",
+                }}
+              />
             </Card>
 
             <Card>

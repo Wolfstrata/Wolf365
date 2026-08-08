@@ -32,7 +32,7 @@ export function blankTicketValues(
     source: "PORTAL",
     summary: "",
     description: "",
-    assigneeId: "",
+    assigneeIds: [],
     agreementId: defaults.agreementId ?? "",
     projectId: defaults.projectId ?? "",
     projectPhaseId: defaults.projectPhaseId ?? "",
@@ -223,7 +223,10 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
 
 /** Map a stored ticket into form values. */
 export async function ticketToFormValues(id: string): Promise<TicketFormValues | null> {
-  const t = await prisma.sfTicket.findUnique({ where: { id } });
+  const t = await prisma.sfTicket.findUnique({
+    where: { id },
+    include: { assignees: { orderBy: { createdAt: "asc" }, select: { userId: true } } },
+  });
   if (!t) return null;
   return {
     id: t.id,
@@ -235,7 +238,10 @@ export async function ticketToFormValues(id: string): Promise<TicketFormValues |
     source: t.source,
     summary: t.summary,
     description: textRead(t.description) ?? "",
-    assigneeId: t.assigneeId ?? "",
+    // Primary first, so the chips read in the order that matters.
+    assigneeIds: t.assigneeId
+      ? [t.assigneeId, ...t.assignees.filter((a) => a.userId !== t.assigneeId).map((a) => a.userId)]
+      : t.assignees.map((a) => a.userId),
     agreementId: t.agreementId ?? "",
     projectId: t.projectId ?? "",
     projectPhaseId: t.projectPhaseId ?? "",
