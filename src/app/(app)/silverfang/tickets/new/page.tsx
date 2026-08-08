@@ -94,8 +94,8 @@ export default async function NewTicketPage({
         title={phase ? `New ticket in ${phase.name}` : "New ticket"}
         description={
           project
-            ? `Opens on the Projects board and counts against ${project.name}.`
-            : "Open a service ticket for a client."
+            ? `Opens on the Projects board and counts against ${project.name}. Its agreement, phase and owner come from the project — change anything that is wrong.`
+            : "Open a service ticket for a client. Board, contact and agreement fill in from the client; change anything that is wrong."
         }
       />
       <div className="space-y-4 p-4 sm:p-8">

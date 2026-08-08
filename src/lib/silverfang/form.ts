@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { contactRead, textRead } from "@/lib/silverfang/pii";
-import { boardNameFor } from "@/lib/silverfang/boards";
-import { defaultAgreementFor } from "@/lib/silverfang/service";
+import { deriveTicketContext, resolveClientId } from "@/lib/silverfang/ticket-defaults";
+import { pickDefaultAgreement } from "@/lib/silverfang/default-agreement";
 import type {
   TicketFormOptions,
   TicketFormValues,
@@ -21,6 +21,7 @@ export function blankTicketValues(
     agreementId?: string;
     projectId?: string;
     projectPhaseId?: string;
+    assigneeIds?: string[];
   } = {},
 ): TicketFormValues {
   return {
@@ -32,7 +33,7 @@ export function blankTicketValues(
     source: "PORTAL",
     summary: "",
     description: "",
-    assigneeIds: [],
+    assigneeIds: defaults.assigneeIds ?? [],
     agreementId: defaults.agreementId ?? "",
     projectId: defaults.projectId ?? "",
     projectPhaseId: defaults.projectPhaseId ?? "",
@@ -43,10 +44,15 @@ export function blankTicketValues(
 }
 
 /**
- * Starting values for a brand-new ticket. `requestedClientId` comes from the
- * caller (the "New ticket" button on a client page passes `?client=`); when it
- * names a real client, that client's SilverFang profile supplies the default
- * board and agreement.
+ * Starting values for a brand-new ticket: everything the context already
+ * determines, filled in.
+ *
+ * `requestedClientId` comes from the caller (the "New ticket" button on a client
+ * page passes `?client=`), but a link that names a project names its client too,
+ * so either is enough. From the client, the SilverFang profile supplies the
+ * default board and agreement; from the project, its own agreement, manager and
+ * — when it has only one — its phase. See `ticket-defaults.ts` for what is
+ * filled and what is deliberately left to the person raising the ticket.
  */
 export async function newTicketValues(
   options: TicketFormOptions,
@@ -56,92 +62,51 @@ export async function newTicketValues(
     projectPhaseId?: string;
     agreementId?: string;
     contactId?: string;
+    assigneeIds?: string[];
   } = {},
 ): Promise<TicketFormValues> {
   const firstBoardId = options.boards[0]?.id;
-  const clientId =
-    requestedClientId && options.clients.some((c) => c.id === requestedClientId)
-      ? requestedClientId
-      : "";
+  const allProjects = Object.values(options.projectsByClient).flat();
+  const clientId = resolveClientId({
+    requestedClientId,
+    clients: options.clients,
+    projects: allProjects,
+    requestedProjectId: requested.projectId,
+  });
   if (!clientId) return blankTicketValues({ boardId: firstBoardId });
-
-  const [profile, pick] = await Promise.all([
-    prisma.sfClientProfile.findUnique({
-      where: { clientId },
-      select: { defaultBoardId: true },
-    }),
-    // Honours the client's configured default first and falls back to their
-    // managed-services (then managed-NOC) agreement, so a managed client's ticket
-    // arrives already pointed at the agreement its time belongs on. Never picks
-    // block time — see `default-agreement.ts`.
-    defaultAgreementFor(clientId),
-  ]);
-
-  const clientAgreements = options.agreementsByClient[clientId] ?? [];
-  // An explicitly requested agreement wins — arriving from an agreement page means
-  // the ticket is for that agreement, which is more specific than the default.
-  // Validated against this client's list, so a stale link cannot file a ticket
-  // against another client's agreement.
-  const requestedAgreementId = requested.agreementId
-    ? clientAgreements.find((a) => a.id === requested.agreementId)?.id
-    : undefined;
-  // Only offer the default if the form can actually show it selected; the picker is
-  // fed by `agreementsByClient`, and a value not in the list would render as blank.
-  const agreementId =
-    requestedAgreementId ??
-    (pick && clientAgreements.some((a) => a.id === pick.id) ? pick.id : undefined);
-
-  // Same rule for the contact: honoured only when they belong to this client.
-  const contactId = requested.contactId
-    ? (options.contactsByClient[clientId] ?? []).find((c) => c.id === requested.contactId)?.id
-    : undefined;
 
   // A project (and phase) can be requested by the "New project ticket" button on
   // a phase — honoured only when it really belongs to this client.
-  const clientProjects = options.projectsByClient[clientId] ?? [];
-  const project = clientProjects.find((p) => p.id === requested.projectId);
-  const phase = project?.phases.find((p) => p.id === requested.projectPhaseId);
+  const project = (options.projectsByClient[clientId] ?? []).find(
+    (p) => p.id === requested.projectId,
+  );
 
-  // The board follows the kind of work: a project ticket opens on Projects, work
-  // under a managed agreement on MSA, everything else on the catch-all. A client's
-  // explicitly configured default board still wins, since somebody chose it.
-  const agreementType = agreementId
-    ? clientAgreements.find((a) => a.id === agreementId)?.type
-    : undefined;
-  const routedName = boardNameFor({
-    hasProject: Boolean(project),
-    agreementType: agreementType ?? null,
+  // Exactly what the form re-runs when someone changes the client here, so the
+  // first render and every later edit fill in the same things.
+  const derived = deriveTicketContext({
+    boards: options.boards,
+    agreements: options.agreementsByClient[clientId] ?? [],
+    contacts: options.contactsByClient[clientId] ?? [],
+    users: options.users,
+    clientDefaults: options.clientDefaults[clientId],
+    project,
+    requested,
   });
-  const routedBoardId = options.boards.find((b) => b.name === routedName)?.id;
-
-  // Only honour defaults that are still selectable — a board can be deactivated
-  // or an agreement expire after the profile was saved.
-  const clientDefaultBoardId =
-    profile?.defaultBoardId && options.boards.some((b) => b.id === profile.defaultBoardId)
-      ? profile.defaultBoardId
-      : undefined;
-
-  // A project ticket goes on Projects even when the client has a default board.
-  // That default is about where this client's ad-hoc work lands; it was not a
-  // decision to file their project work outside the project queue, and honouring
-  // it there is how a project's tickets end up scattered.
-  const boardId = project
-    ? (routedBoardId ?? clientDefaultBoardId ?? firstBoardId)
-    : (clientDefaultBoardId ?? routedBoardId ?? firstBoardId);
 
   return blankTicketValues({
     clientId,
-    boardId,
-    agreementId,
-    contactId,
+    boardId: derived.boardId || firstBoardId,
+    agreementId: derived.agreementId,
+    contactId: derived.contactId,
+    assigneeIds: derived.assigneeIds,
     projectId: project?.id,
-    projectPhaseId: phase?.id,
+    projectPhaseId: derived.projectPhaseId,
   });
 }
 
 /** Options for the ticket form's selects, including per-client dependent lists. */
 export async function getTicketFormData(): Promise<TicketFormOptions> {
-  const [boards, clients, users, contacts, agreements, projects] = await Promise.all([
+  const [boards, clients, users, contacts, agreements, projects, profiles] = await Promise.all([
     prisma.sfBoard.findMany({
       where: { active: true },
       orderBy: { sortOrder: "asc" },
@@ -160,12 +125,28 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
     prisma.sfContact.findMany({
       where: { active: true },
       orderBy: [{ isPrimary: "desc" }, { firstName: "asc" }],
-      select: { id: true, clientId: true, firstName: true, lastName: true, email: true },
+      select: {
+        id: true,
+        clientId: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        isPrimary: true,
+      },
     }),
     prisma.sfAgreement.findMany({
       where: { status: "ACTIVE" },
       orderBy: { name: "asc" },
-      select: { id: true, clientId: true, name: true, type: true },
+      // Dates come along so the default-agreement pick below sees the same term
+      // window the server-side picker does.
+      select: {
+        id: true,
+        clientId: true,
+        name: true,
+        type: true,
+        startDate: true,
+        endDate: true,
+      },
     }),
     // Only live projects: a ticket cannot usefully be raised against one that is
     // finished or cancelled.
@@ -176,10 +157,22 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
         id: true,
         clientId: true,
         name: true,
+        // Inherited by a ticket raised on the project: it bills the way the
+        // project does and starts with the project's owner watching it.
+        agreementId: true,
+        managerId: true,
         phases: {
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: { id: true, name: true },
         },
+      },
+    }),
+    prisma.sfClientProfile.findMany({
+      select: {
+        clientId: true,
+        defaultBoardId: true,
+        defaultAgreementId: true,
+        accountManager: true,
       },
     }),
   ]);
@@ -190,7 +183,11 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
     const c = contactRead(raw);
     const label =
       [c.firstName, c.lastName].filter(Boolean).join(" ") + (c.email ? ` <${c.email}>` : "");
-    (contactsByClient[c.clientId] ??= []).push({ id: c.id, name: label });
+    (contactsByClient[c.clientId] ??= []).push({
+      id: c.id,
+      name: label,
+      isPrimary: raw.isPrimary,
+    });
   }
 
   const agreementsByClient: TicketFormOptions["agreementsByClient"] = {};
@@ -202,9 +199,42 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
   for (const p of projects) {
     (projectsByClient[p.clientId] ??= []).push({
       id: p.id,
+      clientId: p.clientId,
       name: p.name,
+      agreementId: p.agreementId,
+      managerId: p.managerId,
       phases: p.phases,
     });
+  }
+
+  // Resolved once, here, rather than queried per client: the form re-derives
+  // its defaults in the browser when the client changes, and it can only do
+  // that if the answer travelled with the options. `pickDefaultAgreement` is the
+  // same function the server-side default uses, so the two cannot drift.
+  const agreementsForPick: Record<
+    string,
+    { id: string; type: string; startDate: Date | null; endDate: Date | null }[]
+  > = {};
+  for (const a of agreements) {
+    (agreementsForPick[a.clientId] ??= []).push({
+      id: a.id,
+      type: a.type,
+      startDate: a.startDate,
+      endDate: a.endDate,
+    });
+  }
+  const profileByClient = new Map(profiles.map((p) => [p.clientId, p]));
+  const clientDefaults: TicketFormOptions["clientDefaults"] = {};
+  for (const client of clients) {
+    const profile = profileByClient.get(client.id);
+    const pick = pickDefaultAgreement(agreementsForPick[client.id] ?? [], {
+      profileDefaultId: profile?.defaultAgreementId,
+    });
+    clientDefaults[client.id] = {
+      defaultBoardId: profile?.defaultBoardId ?? null,
+      defaultAgreementId: pick?.id ?? null,
+      accountManager: profile?.accountManager ?? null,
+    };
   }
 
   return {
@@ -218,6 +248,7 @@ export async function getTicketFormData(): Promise<TicketFormOptions> {
     contactsByClient,
     agreementsByClient,
     projectsByClient,
+    clientDefaults,
   };
 }
 

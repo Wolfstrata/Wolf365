@@ -10,6 +10,8 @@ import { timeEntryEditable } from "@/lib/silverfang/status";
 import { hoursBetweenMinutes, instantFor, timeToMinutes } from "@/lib/silverfang/calendar";
 import { parseDateKey } from "@/lib/silverfang/timesheet";
 import { roundHours } from "@/lib/silverfang/time";
+import { boardNameFor } from "@/lib/silverfang/boards";
+import { pickContact } from "@/lib/silverfang/ticket-defaults";
 import {
   nextTicketNumber,
   resolveTimeEntryRate,
@@ -101,11 +103,35 @@ export async function saveTimeBlockAction(
       if (!summary) {
         return { ok: false, message: "Give the new ticket a summary." };
       }
-      const board = await prisma.sfBoard.findFirst({
-        where: { active: true },
-        orderBy: { sortOrder: "asc" },
-        include: { statuses: { orderBy: { sortOrder: "asc" } } },
-      });
+      // Everything the block already knows, rather than a bare ticket on the
+      // first board: the client's agreement decides the queue, their primary
+      // contact is who it is for, and whoever is logging the time is working it.
+      const [boards, profile, agreement, contacts] = await Promise.all([
+        prisma.sfBoard.findMany({
+          where: { active: true },
+          orderBy: { sortOrder: "asc" },
+          include: { statuses: { orderBy: { sortOrder: "asc" } } },
+        }),
+        prisma.sfClientProfile.findUnique({
+          where: { clientId: input.newTicketClientId },
+          select: { defaultBoardId: true },
+        }),
+        input.agreementId
+          ? prisma.sfAgreement.findUnique({
+              where: { id: input.agreementId },
+              select: { type: true },
+            })
+          : null,
+        prisma.sfContact.findMany({
+          where: { clientId: input.newTicketClientId, active: true },
+          select: { id: true, isPrimary: true },
+        }),
+      ]);
+      const routedName = boardNameFor({ hasProject: false, agreementType: agreement?.type ?? null });
+      const board =
+        boards.find((b) => b.id === profile?.defaultBoardId) ??
+        boards.find((b) => b.name === routedName) ??
+        boards[0];
       const status = board?.statuses.find((s) => s.isDefault) ?? board?.statuses[0];
       if (!board || !status) {
         return {
@@ -113,6 +139,7 @@ export async function saveTimeBlockAction(
           message: "No active board with statuses exists — run SilverFang Setup first.",
         };
       }
+      const contactId = pickContact(contacts) ?? null;
       const openedAt = instantFor(workDate, startMinutes, input.offsetMinutes);
       const sla = await slaDueDatesFor(board.slaId, "P3", openedAt);
       const created = await prisma.$transaction(async (tx) => {
@@ -126,6 +153,9 @@ export async function saveTimeBlockAction(
             priority: "P3",
             source: "PHONE",
             summary,
+            contactId,
+            assigneeId: user.id,
+            assignees: { create: { userId: user.id } },
             agreementId: input.agreementId ?? null,
             slaId: board.slaId,
             responseDueAt: sla.responseDueAt,

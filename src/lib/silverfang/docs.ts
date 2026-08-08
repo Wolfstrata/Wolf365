@@ -80,6 +80,13 @@ export const DOC_SECTIONS: DocSection[] = [
           "By a project template, which stamps out its ticket list when a project is generated from it.",
         ],
       },
+      { h: "What fills itself in" },
+      {
+        p: "A new ticket works out everything its context already determines: the client (a link naming a project names its client too), the board, the client's primary contact, and the agreement its time bills against. On a project ticket the project's own agreement, its manager as owner, and — when the project has one phase — that phase, all come across. Change the client or attach a project and it all re-derives, so nothing from the previous choice is left behind.",
+      },
+      {
+        p: "What it will not do is guess. Several contacts and none marked primary, several phases, an account manager who matches two people: each is left blank for you to choose, because a wrong name on a ticket is worse than an empty field. Block time is never picked automatically either — spending someone's prepaid balance is always a deliberate act.",
+      },
       { h: "The order they appear in" },
       {
         p: "Every ticket list in the app uses the same order: priority first, then VIP requester, then oldest first, then ticket number. It is one comparator shared by every list, so two screens can never disagree about what is most urgent.",

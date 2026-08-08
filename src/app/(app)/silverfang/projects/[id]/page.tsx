@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ExternalLink, ShieldCheck, Ticket } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -222,6 +222,19 @@ export default async function ProjectDetailPage({
         description={`${project.client.name} · ${PROJECT_STATUS_LABELS[project.status]} · ${
           project.billingType === "FIXED_FEE" ? "Fixed fee" : "Time and materials"
         }`}
+        actions={
+          // The per-phase buttons only exist once there are phases, and the
+          // ticket is the unit of work — so there has to be a way to raise one
+          // straight off the project. Everything it needs is in the link.
+          canEdit ? (
+            <Link
+              href={`/silverfang/tickets/new?client=${project.clientId}&project=${project.id}&returnTo=${encodeURIComponent(`/silverfang/projects/${project.id}`)}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              <Ticket className="h-4 w-4" /> New ticket
+            </Link>
+          ) : null
+        }
       />
       <div className="space-y-6 p-4 sm:p-8">
         <div className="flex flex-wrap items-center gap-4">

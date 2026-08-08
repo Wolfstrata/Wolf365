@@ -6,6 +6,10 @@ import { useActionState, useState } from "react";
 import type { ReactNode } from "react";
 import { PRIORITY_LABELS, SOURCE_LABELS } from "@/lib/silverfang/constants";
 import { Combobox, MultiCombobox } from "@/components/ui/combobox";
+import {
+  deriveTicketContext,
+  type ClientTicketDefaults,
+} from "@/lib/silverfang/ticket-defaults";
 import type { SfActionResult } from "./actions";
 
 export interface TicketFormValues {
@@ -30,18 +34,25 @@ export interface TicketFormValues {
 
 export interface TicketFormProject {
   id: string;
+  clientId: string;
   name: string;
   phases: { id: string; name: string }[];
+  /** Carried so a project ticket can inherit how its project bills and who owns it. */
+  agreementId?: string | null;
+  managerId?: string | null;
 }
 
 export interface TicketFormOptions {
   boards: { id: string; name: string; statuses: { id: string; name: string }[] }[];
   clients: { id: string; name: string }[];
   users: { id: string; name: string | null; email: string }[];
-  contactsByClient: Record<string, { id: string; name: string }[]>;
+  /** `isPrimary` is what a new ticket defaults its contact to. */
+  contactsByClient: Record<string, { id: string; name: string; isPrimary?: boolean }[]>;
   /** `type` drives which board a new ticket lands on. */
   agreementsByClient: Record<string, { id: string; name: string; type: string }[]>;
   projectsByClient: Record<string, TicketFormProject[]>;
+  /** Per-client SilverFang defaults, so switching client can re-derive in place. */
+  clientDefaults: Record<string, ClientTicketDefaults>;
 }
 
 const inputCls =
@@ -105,12 +116,43 @@ export function TicketForm({
   // A project ticket belongs to a phase of that project, so the phase list
   // follows the chosen project rather than being a free-standing select.
   const [projectId, setProjectId] = useState(values.projectId);
+  const [agreementId, setAgreementId] = useState(values.agreementId);
+  const [projectPhaseId, setProjectPhaseId] = useState(values.projectPhaseId);
 
   const contacts = options.contactsByClient[clientId] ?? [];
   const agreements = options.agreementsByClient[clientId] ?? [];
   const projects = options.projectsByClient[clientId] ?? [];
   const phases = projects.find((p) => p.id === projectId)?.phases ?? [];
   const statuses = options.boards.find((b) => b.id === boardId)?.statuses ?? [];
+
+  /**
+   * Re-fill everything the new client (or project) determines.
+   *
+   * The server does exactly this when the form first renders; without it here,
+   * changing the client left the previous client's contact and agreement sitting
+   * in the form — either blanked on save, or worse, silently kept. It runs the
+   * same `deriveTicketContext`, so load-time and edit-time never disagree.
+   */
+  function applyContext(nextClientId: string, nextProjectId: string) {
+    const project = (options.projectsByClient[nextClientId] ?? []).find(
+      (p) => p.id === nextProjectId,
+    );
+    const derived = deriveTicketContext({
+      boards: options.boards,
+      agreements: options.agreementsByClient[nextClientId] ?? [],
+      contacts: options.contactsByClient[nextClientId] ?? [],
+      users: options.users,
+      clientDefaults: options.clientDefaults[nextClientId],
+      project,
+    });
+    setContactId(derived.contactId);
+    setAgreementId(derived.agreementId);
+    setBoardId(derived.boardId);
+    setProjectPhaseId(derived.projectPhaseId);
+    // Assignment is additive everywhere else in SilverFang, and someone who has
+    // already picked people should not have that undone by changing the client.
+    if (assigneeIds.length === 0) setAssigneeIds(derived.assigneeIds);
+  }
 
   return (
     <form action={action} className="space-y-6">
@@ -128,6 +170,7 @@ export function TicketForm({
               // The project list is per client, so a project chosen for the old
               // client must not survive the switch.
               setProjectId("");
+              applyContext(id, "");
             }}
             placeholder="Type to find a client…"
             emptyLabel={null}
@@ -226,7 +269,12 @@ export function TicketForm({
           label="Agreement"
           help="Determines which rates apply to time logged. A managed client's agreement is filled in for you; block time is never chosen automatically."
         >
-          <select name="agreementId" defaultValue={values.agreementId} className={inputCls}>
+          <select
+            name="agreementId"
+            value={agreementId}
+            onChange={(e) => setAgreementId(e.target.value)}
+            className={inputCls}
+          >
             <option value="">None</option>
             {agreements.map((a) => (
               <option key={a.id} value={a.id}>
@@ -247,7 +295,12 @@ export function TicketForm({
           <select
             name="projectId"
             value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              // A project carries its own agreement, manager and — when it has
+              // only one — its phase, so attaching one re-derives all of them.
+              applyContext(clientId, e.target.value);
+            }}
             className={inputCls}
           >
             <option value="">Not a project ticket</option>
@@ -267,12 +320,10 @@ export function TicketForm({
               : undefined
           }
         >
-          {/* Keyed on the project so switching project cannot leave a phase from
-              the previous one selected. */}
           <select
-            key={projectId}
             name="projectPhaseId"
-            defaultValue={values.projectPhaseId}
+            value={projectPhaseId}
+            onChange={(e) => setProjectPhaseId(e.target.value)}
             className={inputCls}
             disabled={phases.length === 0}
           >
