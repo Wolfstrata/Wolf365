@@ -9,6 +9,9 @@ import { formatCurrency } from "@/lib/utils";
 import { formatHours, weekStartOf } from "@/lib/silverfang/time";
 import { shiftWeeks } from "@/lib/silverfang/timesheet";
 import { PRIORITY_LABELS } from "@/lib/silverfang/constants";
+import { getTicketRows, getTicketFormOptions } from "@/lib/silverfang/queries";
+import { TICKET_ORDER_EXPLANATION } from "@/lib/silverfang/ticket-order";
+import { TicketsTable } from "../tickets/tickets-table";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +44,7 @@ export default async function SilverFangDashboardPage() {
     unbilledApproved,
     pendingSheets,
     topClients,
-    oldestOpen,
+    topOpen,
     activeBoards,
     byBoardBreached,
     byBoardAtRisk,
@@ -103,22 +106,12 @@ export default async function SilverFangDashboardPage() {
       orderBy: { _sum: { amount: "desc" } },
       take: 5,
     }),
-    prisma.sfTicket.findMany({
-      where: { status: { isClosed: false }, client: { archived: false } },
-      orderBy: { openedAt: "asc" },
-      take: 8,
-      select: {
-        id: true,
-        number: true,
-        summary: true,
-        openedAt: true,
-        priority: true,
-        slaResponseBreached: true,
-        slaResolutionBreached: true,
-        client: { select: { name: true } },
-        assignee: { select: { name: true, email: true } },
-      },
-    }),
+    // The same loader the queue uses, so this card is a window onto that list
+    // rather than a second, subtly different one. It brings the shared
+    // priority → VIP → age → number order with it; a dashboard that ranked
+    // tickets differently from the screen you act on would send people to the
+    // wrong ticket first.
+    getTicketRows({ view: "open" }, 10),
     // Every active board, not just the ones with tickets — a board with nothing on
     // it is worth seeing as empty rather than being absent, which reads as broken.
     prisma.sfBoard.findMany({
@@ -147,6 +140,32 @@ export default async function SilverFangDashboardPage() {
       },
       _count: { _all: true },
     }),
+  ]);
+
+  // Fetched only when the table can actually offer them: a read-only viewer gets
+  // no move bar and no row editor, so loading their options would be waste on
+  // every dashboard render.
+  const canWrite = can(user.role, "tickets:write");
+  const [ticketOptions, moveProjects] = await Promise.all([
+    canWrite && topOpen.length > 0 ? getTicketFormOptions() : Promise.resolve(null),
+    canWrite && topOpen.length > 0
+      ? // Live projects only: moving a ticket onto a finished project would put new
+        // work on something already closed out.
+        prisma.sfProject.findMany({
+          where: { status: { in: ["PLANNED", "ACTIVE", "ON_HOLD"] } },
+          orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            client: { select: { name: true } },
+            phases: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+              select: { id: true, name: true },
+            },
+          },
+          take: 500,
+        })
+      : Promise.resolve([]),
   ]);
 
   const openByBoard = new Map(byBoard.map((b) => [b.boardId, b._count._all]));
@@ -427,39 +446,60 @@ export default async function SilverFangDashboardPage() {
           </Card>
         )}
 
+        {/* The queue itself, not a summary of it. Same table, same order, same
+            selection and same row editing as the Tickets screen — a dashboard
+            list you cannot act on just makes you navigate somewhere else to do
+            the obvious thing. */}
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">Oldest open tickets</h2>
-          {oldestOpen.length === 0 ? (
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              Top of the queue
+              <PawTip topic="tickets" />
+            </h2>
+            <Link
+              href="/silverfang/tickets"
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              All tickets →
+            </Link>
+          </div>
+          {/* Said here as well as on the queue, from the one shared constant: an
+              unexplained order looks arbitrary wherever it appears. */}
+          <p className="mb-3 text-xs text-muted-foreground">{TICKET_ORDER_EXPLANATION}</p>
+          {topOpen.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing open.</p>
           ) : (
-            <ul className="space-y-1.5 text-sm">
-              {oldestOpen.map((t) => {
-                const days = Math.floor((now.getTime() - t.openedAt.getTime()) / 86_400_000);
-                return (
-                  <li key={t.id} className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/silverfang/tickets/${t.id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      #{t.number}
-                    </Link>
-                    <span className="flex-1 truncate">{t.summary}</span>
-                    <span className="text-xs text-muted-foreground">{t.client.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t.assignee?.name ?? t.assignee?.email ?? "unassigned"}
-                    </span>
-                    {(t.slaResponseBreached || t.slaResolutionBreached) && (
-                      <span className="rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger">
-                        SLA
-                      </span>
-                    )}
-                    <span className={`w-16 text-right text-xs tabular-nums ${days > 14 ? "text-warning" : "text-muted-foreground"}`}>
-                      {days}d
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            <TicketsTable
+              rows={topOpen}
+              // Back to the dashboard, not the global queue: acting on a row here
+              // should leave you where you were reading.
+              returnTo="/silverfang/dashboard"
+              {...(ticketOptions
+                ? {
+                    bulk: {
+                      boards: ticketOptions.boards.map((b) => ({ id: b.id, name: b.name })),
+                      projects: moveProjects.map((p) => ({
+                        id: p.id,
+                        name: p.name,
+                        clientName: p.client.name,
+                        phases: p.phases,
+                      })),
+                    },
+                    inline: {
+                      statusesByBoard: Object.fromEntries(
+                        ticketOptions.boards.map((b) => [
+                          b.id,
+                          b.statuses.map((st) => ({ id: st.id, name: st.name })),
+                        ]),
+                      ),
+                      users: ticketOptions.users.map((u) => ({
+                        id: u.id,
+                        name: u.name ?? u.email,
+                      })),
+                    },
+                  }
+                : {})}
+            />
           )}
         </Card>
       </div>
