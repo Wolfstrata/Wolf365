@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Ticket } from "lucide-react";
+import { Download, Ticket } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -110,14 +110,26 @@ export default async function TicketsPage({
           `${TICKET_ORDER_EXPLANATION} SLA state is measured in business hours.`
         }
         actions={
-          can(user.role, "tickets:write") && !noSetup ? (
-            <Link
-              href="/silverfang/tickets/new"
-              className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              New ticket
-            </Link>
-          ) : null
+          noSetup ? null : (
+            <div className="flex flex-wrap items-center gap-2">
+              {can(user.role, "silverfang:configure") && (
+                <Link
+                  href="/silverfang/tickets/import"
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-accent"
+                >
+                  <Download className="h-4 w-4" /> Import from SuperOps
+                </Link>
+              )}
+              {can(user.role, "tickets:write") && (
+                <Link
+                  href="/silverfang/tickets/new"
+                  className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                >
+                  New ticket
+                </Link>
+              )}
+            </div>
+          )
         }
       />
       <div className="space-y-4 p-4 sm:p-8">

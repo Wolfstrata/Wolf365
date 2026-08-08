@@ -1027,6 +1027,84 @@ export async function adoptAllSuggestedSendersAction(
   }
 }
 
+const ticketImportSchema = z.object({
+  /** The yes/no answer. Absent means no, which is the safe reading of a blank. */
+  overwrite: z.coerce.boolean(),
+  /**
+   * Echoed back from the preview the operator was looking at. Purely so an
+   * accidental double-submit of a *stale* page cannot silently overwrite a set
+   * that has since grown — it is compared, not trusted.
+   */
+  expectedExisting: z.coerce.number().int().min(0).optional(),
+});
+
+/**
+ * Import SuperOps tickets into SilverFang, optionally overwriting the ones
+ * already here.
+ *
+ * Overwrite is a real decision with consequences a re-run cannot undo, so it
+ * arrives as an explicit answer rather than a default. A ticket somebody has
+ * closed here is never overwritten, even when the answer is yes — reopening
+ * finished work is a change nobody asked for.
+ */
+export async function importSuperOpsTicketsAction(
+  _prev: SfActionResult | null,
+  formData: FormData,
+): Promise<SfActionResult> {
+  const user = await requirePermission("silverfang:configure");
+  try {
+    const input = ticketImportSchema.parse({
+      overwrite: formData.get("overwrite") === "yes",
+      expectedExisting: formValue(formData, "expectedExisting"),
+    });
+
+    const { importSuperOpsTickets, previewTicketImport } = await import(
+      "@/lib/silverfang/ticket-import-service"
+    );
+
+    if (input.overwrite && input.expectedExisting != null) {
+      const now = await previewTicketImport();
+      const existingNow = now.existingOpen;
+      if (existingNow > input.expectedExisting) {
+        return {
+          ok: false,
+          message:
+            `The number of already-imported tickets has grown from ${input.expectedExisting} ` +
+            `to ${existingNow} since this page loaded. Reload and check the preview before ` +
+            `overwriting, so you are answering about the set you can actually see.`,
+        };
+      }
+    }
+
+    const result = await importSuperOpsTickets(
+      { overwrite: input.overwrite },
+      { id: user.id, email: user.email },
+    );
+    await audit({
+      action: "SILVERFANG_CONFIG_CHANGED",
+      actorId: user.id,
+      actorEmail: user.email,
+      target: "silverfang:tickets-import",
+      metadata: {
+        overwrite: input.overwrite,
+        available: result.available,
+        created: result.created,
+        overwritten: result.overwritten,
+        skippedExisting: result.skippedExisting,
+        skippedClosed: result.skippedClosed,
+        skippedNoClient: result.skippedNoClient,
+        truncated: result.truncated,
+      },
+    });
+    revalidatePath("/silverfang/tickets");
+    revalidatePath("/silverfang/tickets/import");
+    revalidatePath("/silverfang/my-tickets");
+    return { ok: true, message: result.message };
+  } catch (err) {
+    return { ok: false, message: safeErrorMessage(err) };
+  }
+}
+
 /**
  * Create contacts for inbound addresses that the domain rules can place.
  *

@@ -1665,6 +1665,14 @@ model SfTicket {
   createdBy      User?   @relation("SfTicketCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdByEmail String?
 
+  /// Provenance for a ticket that came from another system. The unique pair is
+  /// what makes re-importing idempotent: the same source ticket is found rather
+  /// than duplicated, whether the run overwrites it or leaves it alone.
+  sourceSystem    String?
+  externalId      String?
+  /// When the source last changed, so an import can report what it refreshed.
+  sourceUpdatedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1679,6 +1687,7 @@ model SfTicket {
   @@index([clientId])
   @@index([boardId, statusId])
   @@index([assigneeId])
+  @@unique([sourceSystem, externalId])
   @@index([statusId, createdAt])
   @@index([priority, openedAt])
   @@index([agreementId])

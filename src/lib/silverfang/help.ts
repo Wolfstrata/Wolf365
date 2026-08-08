@@ -174,6 +174,11 @@ export const HELP_TOPICS: Record<string, HelpTopic> = {
     body: "The manual: how boards, ticket ordering, time, agreements, projects, templates and email actually behave — including the deliberate surprises, like email to clients being off by default and block time never being auto-selected.",
     todo: "Start at Getting set up if this is a fresh install; it lists the order to do things in. Every section links from the contents at the top.",
   },
+  ticketImport: {
+    title: "Import tickets from SuperOps",
+    body: "Turns synced SuperOps tickets into real SilverFang tickets. Matched by SuperOps ticket id, so re-running finds the same ticket rather than duplicating it. Imported tickets land on Service Desk with priority and status mapped across, and pick up a managed client's agreement so they are not unrated.",
+    todo: "Answer the overwrite question against the preview: No creates only what is missing, Yes also rewrites summary, priority and status on the ones already here. A ticket you have closed is never reopened. The body, worklogs and notes are not imported.",
+  },
   unknownSenders: {
     title: "Unrecognised senders",
     body: "People who emailed and got no ticket, because nobody holds their address and no other contact shares their domain. Grouped per person, not per message — someone who gets no reply emails again, and the fix is one decision per person.",
