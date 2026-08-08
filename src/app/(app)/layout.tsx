@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { signOut } from "@/auth";
 import { requireUser } from "@/lib/auth/session";
@@ -7,6 +7,8 @@ import { can, ROLE_LABELS } from "@/lib/rbac";
 import { canAccessRoute, homeRouteFor } from "@/lib/workspaces";
 import { NAV_ITEMS } from "@/components/shell/nav";
 import { AppShell } from "@/components/shell/app-shell";
+import { ThemeToggle } from "@/components/shell/theme-toggle";
+import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { ConnectorStatusBadge } from "@/components/shell/connector-status";
 import { AccountMenu } from "@/components/shell/account-menu";
 import { ViewAsControl, ViewAsBanner } from "@/components/shell/view-as";
@@ -44,6 +46,9 @@ export default async function AppLayout({
 
   // Set by the middleware from the real URL on every request.
   const pathname = (await headers()).get("x-pathname") ?? "/";
+  // The same cookie the root layout used to stamp <html>, so the button starts on
+  // the theme the page is already rendered in rather than disagreeing with it.
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
 
   // Send anyone standing outside their territory to the start of their own,
   // rather than showing a page that would leak another product's data. An
@@ -94,6 +99,11 @@ export default async function AppLayout({
           adminItems={adminItems}
           signOutAction={doSignOut}
         />
+      </div>
+      {/* Light / dark / system. Sits here rather than in the account popover so it
+          is one click from anywhere, not two behind a menu. */}
+      <div className="mt-2">
+        <ThemeToggle initial={theme} />
       </div>
       {/* Administrators can preview the app as any role. */}
       {user.realRole === "ADMINISTRATOR" && <ViewAsControl effectiveRole={user.role} />}

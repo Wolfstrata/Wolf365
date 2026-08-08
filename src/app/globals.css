@@ -21,8 +21,10 @@
   --danger: 0 72% 46%;
 }
 
+/* Dark by OS preference — unless an explicit light choice is on <html>, which is
+   what makes "force light on a dark laptop" possible. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  html:not([data-theme="light"]) {
     --background: 222 24% 10%;
     --foreground: 210 20% 92%;
     --muted: 217 19% 17%;
@@ -38,6 +40,59 @@
     --warning: 38 92% 55%;
     --danger: 0 72% 60%;
   }
+}
+
+/* Dark by explicit choice. The values are duplicated from the media query above
+   because CSS has no way to share one declaration block across a media boundary —
+   keep the two in step. `html[data-theme]` outranks the bare `:root` light block,
+   so order here is not what decides it.
+
+   No `data-theme` attribute at all means "follow the system", which is why the
+   toggle removes the attribute rather than setting a third value. */
+html[data-theme="dark"] {
+  --background: 222 24% 10%;
+  --foreground: 210 20% 92%;
+  --muted: 217 19% 17%;
+  --muted-foreground: 217 11% 65%;
+  --border: 217 19% 22%;
+  --card: 222 22% 13%;
+  --card-foreground: 210 20% 92%;
+  --primary: 213 70% 62%;
+  --primary-foreground: 222 47% 11%;
+  --accent: 217 19% 17%;
+  --accent-foreground: 210 20% 92%;
+  --success: 142 60% 45%;
+  --warning: 38 92% 55%;
+  --danger: 0 72% 60%;
+}
+
+/* Light by explicit choice. Restates the light palette rather than relying on
+   :root, so it wins on a machine set to dark. */
+html[data-theme="light"] {
+  --background: 0 0% 100%;
+  --foreground: 222 22% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  --border: 220 13% 91%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 22% 11%;
+  --primary: 222 47% 31%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 220 14% 96%;
+  --accent-foreground: 222 47% 31%;
+  --success: 142 71% 36%;
+  --warning: 38 92% 45%;
+  --danger: 0 72% 46%;
+}
+
+/* Tells the browser which way its own chrome should go — form controls, the
+   scrollbar, and the native date picker all read this. Without it, forcing light
+   on a dark OS leaves black dropdowns on a white page. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
